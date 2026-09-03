@@ -1515,6 +1515,61 @@ input[type=file]{ display:none; }
 #viewReport .report{
   border-left:3px solid var(--gold);
 }
+#viewBackup .report,
+#viewBackup .notice{
+  color:var(--text-on-paper);
+  background:var(--paper);
+  border:1px solid var(--paper-line-strong);
+  box-shadow:0 1px 0 rgba(42,36,24,0.04);
+}
+#viewBackup .notice{
+  border-left:3px solid var(--wine);
+}
+#viewBackup .report{
+  border-left:3px solid var(--gold);
+}
+@media (max-width:560px){
+  #viewBackup .care-list-table{
+    min-width:0;
+  }
+  #viewBackup .care-list-table thead{
+    display:none;
+  }
+  #viewBackup .care-list-table tbody tr{
+    display:grid;
+    grid-template-columns:1fr auto;
+    grid-template-areas:
+      "name name"
+      "posts date";
+    gap:2px 12px;
+    padding:10px 2px;
+    border-bottom:1px solid var(--paper-line);
+  }
+  #viewBackup .care-list-table tbody tr.empty-row{
+    display:block;
+  }
+  #viewBackup .care-list-table td.cl-name{
+    grid-area:name;
+    white-space:normal;
+    word-break:break-word;
+  }
+  #viewBackup .care-list-table td.cl-count{
+    grid-area:posts;
+    width:auto;
+    text-align:left;
+  }
+  #viewBackup .care-list-table td.cl-count::before{
+    content:"Poster ";
+    color:var(--text-on-paper-soft);
+    font-weight:400;
+  }
+  #viewBackup .care-list-table td.num{
+    grid-area:date;
+    text-align:right;
+    font-family:'JetBrains Mono', monospace;
+    font-size:12px;
+  }
+}
 
 /* --- 10. Navigering och sidfot -------------------------------------- */
 .nav-link{
@@ -2669,7 +2724,7 @@ td.num.dash .cell-content{
             <tr>
               <th>Fil</th>
               <th class="cl-count num">Poster</th>
-              <th class="num">Skapad/Ändrad</th>
+              <th class="num">Tid</th>
             </tr>
           </thead>
           <tbody id="backupBody"></tbody>
@@ -3306,7 +3361,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-03 v02';
+const APP_VERSION = '2026-09-03 v03';
 
 /* =====================================================================
    INNEHÅLL
@@ -9995,9 +10050,19 @@ const backupRestoreOkBtn = el('backupRestoreOkBtn');
 
 let backupListRows = [];
 let backupHighlightIdx = -1;
+let backupAwaitingAck = false;
+
+function setBackupAwaitingAck(on){
+  backupAwaitingAck = !!on;
+  if(backupCancelBtn) backupCancelBtn.hidden = backupAwaitingAck;
+  if(backupRunBtn){
+    backupRunBtn.textContent = backupAwaitingAck ? 'OK' : 'Säkerhetskopiera';
+  }
+}
 
 function closeBackupPage(){
   hideBackupRestoreConfirm();
+  setBackupAwaitingAck(false);
   showCareHubSection('bok');
 }
 
@@ -10079,6 +10144,12 @@ async function scanBookBackupFiles(dir, name){
   return found;
 }
 
+function backupListLabel(row){
+  if(row.kind === 'original') return 'Original';
+  if(row.kind === 'backup') return 'Kopia ' + row.generation;
+  return row.fileName || '—';
+}
+
 function renderBackupList(rows){
   backupListRows = rows || [];
   backupHighlightIdx = -1;
@@ -10095,13 +10166,13 @@ function renderBackupList(rows){
   for(let i = 0; i < backupListRows.length; i++){
     const row = backupListRows[i];
     const tip = row.kind === 'backup'
-      ? 'Klicka för att välja, dubbelklicka för att återställa'
-      : 'Originalfilen (kan inte återställas hit)';
+      ? escapeHtml(row.fileName) + ' — klicka för att välja, dubbelklicka för att återställa'
+      : escapeHtml(row.fileName) + ' — originalfilen (kan inte återställas hit)';
     const cls = row.kind === 'original' ? ' class="care-book-other"' : '';
     html += '<tr data-idx="' + i + '"' + cls + ' title="' + tip + '">'
-      + '<td class="cl-name">' + escapeHtml(row.fileName) + '</td>'
+      + '<td class="cl-name">' + escapeHtml(backupListLabel(row)) + '</td>'
       + '<td class="cl-count">' + (row.error ? '—' : formatCount(row.posts)) + '</td>'
-      + '<td class="num">' + escapeHtml(formatBackupMadeAt(row.madeAt)) + '</td>'
+      + '<td class="num">' + escapeHtml(formatBackupHintAt(row.madeAt)) + '</td>'
       + '</tr>';
   }
   backupBody.innerHTML = html;
@@ -10116,6 +10187,7 @@ async function refreshBackupList(dir, name){
 async function renderBackupPage(){
   clear(backupMessages);
   hideBackupRestoreConfirm();
+  setBackupAwaitingAck(false);
   const name = bookName(bookId);
   if(backupBookLabel) backupBookLabel.textContent = name;
   refreshViewHeadline('backup');
@@ -10306,11 +10378,20 @@ async function runBookBackupRotation(){
   addBox(backupMessages, 'report',
     'Säkerhetskopia skapad: "' + g1 + '".');
   rememberLastBackup(bookId, Date.now(), countTransactionsInBookData(book));
+  setBackupAwaitingAck(true);
+}
+
+function onBackupRunClick(){
+  if(backupAwaitingAck){
+    closeBackupPage();
+    return;
+  }
+  runBookBackupRotation();
 }
 
 if(backupBackBtn) backupBackBtn.addEventListener('click', closeBackupPage);
 if(backupCancelBtn) backupCancelBtn.addEventListener('click', closeBackupPage);
-if(backupRunBtn) backupRunBtn.addEventListener('click', runBookBackupRotation);
+if(backupRunBtn) backupRunBtn.addEventListener('click', onBackupRunClick);
 if(backupRestoreBtn) backupRestoreBtn.addEventListener('click', showBackupRestoreConfirm);
 if(backupRestoreCancelBtn) backupRestoreCancelBtn.addEventListener('click', hideBackupRestoreConfirm);
 if(backupRestoreOkBtn) backupRestoreOkBtn.addEventListener('click', confirmBackupRestore);
