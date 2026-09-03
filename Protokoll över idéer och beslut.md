@@ -401,7 +401,8 @@ Filer som fanns före sammanslagningen till `Hemekonomi.html`:
 
 | Version | Datum | Vad som släpptes |
 |---------|-------|------------------|
-| 2026-09-03 v01 | 2026-09-03 | Versionsnummer i sidfot. Mappfrågan vid start borttagen (behörighet vid Öppna / NY BOK). Test av PWA-uppdateringstid. |
+| 2026-09-03 v01 | 2026-09-03 | Versionsnummer i sidfot. Mappfrågan vid start borttagen (behörighet vid Öppna / NY BOK). Test av PWA-uppdateringstid. **Uppmätt:** dator i stort sett direkt; telefon under 2 min. |
+| 2026-09-03 v02 | 2026-09-03 | Rubrik `nopEKONOMI` utan CSS-versaler. Tydligare rullgardinspil. Backup-hint på Start. Registervård: Bok (backup). |
 
 **Riktning (standard):**
 1. En konstant `APP_VERSION` i `nopEKONOMI.html` — visas som `version: …` i sidfoten.

@@ -85,6 +85,8 @@ header{ margin-bottom:36px; }
 }
 .eyebrow.view-headline{
   color:var(--headline-accent);
+  text-transform:none;
+  letter-spacing:0.06em;
 }
 h1{
   font-family:'Fraunces', serif;
@@ -241,6 +243,18 @@ select, input[type=text]{
   border-radius:7px;
   padding:11px 13px;
 }
+select{
+  -webkit-appearance:none;
+  appearance:none;
+  padding-right:2.7em;
+  background-color:var(--paper-surface);
+  background-image:
+    linear-gradient(var(--paper-line-strong), var(--paper-line-strong)),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%231A3050' d='M1.2 1.2L6 6.1l4.8-4.9 1.2 1.2L6 8.4 0 2.4z'/></svg>");
+  background-repeat:no-repeat;
+  background-position:right 2.2em center, right 0.7em center;
+  background-size:1px 58%, 12px 8px;
+}
 select:focus, input[type=text]:focus{
   outline:none;
   border-color:var(--gold);
@@ -293,6 +307,16 @@ input[type=file]{ display:none; }
   flex-wrap:wrap;
 }
 .menu-row[hidden]{ display:none; }
+.start-backup-hint{
+  font-size:14px;
+  line-height:1.55;
+  color:var(--headline-accent);
+  margin-left:auto;
+  cursor:default;
+}
+.start-backup-hint.stale{
+  color:var(--wine);
+}
 .ledger-drill-bar[hidden]{ display:none; }
 .report-toolbar{
   display:grid;
@@ -336,7 +360,7 @@ input[type=file]{ display:none; }
   width:auto;
   min-width:0;
   max-width:100%;
-  padding:7px 24px 7px 8px;
+  padding:7px 2.5em 7px 8px;
   font-size:12px;
   justify-self:start;
 }
@@ -804,9 +828,15 @@ input[type=file]{ display:none; }
   width:auto;
   min-width:220px;
   font-size:15px;
-  padding:10px 12px;
+  padding:10px 2.7em 10px 12px;
   color:var(--text-on-dark);
-  background:rgba(216,226,238,0.08);
+  background-color:rgba(216,226,238,0.08);
+  background-image:
+    linear-gradient(rgba(181,206,232,0.55), rgba(181,206,232,0.55)),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23B5CEE8' d='M1.2 1.2L6 6.1l4.8-4.9 1.2 1.2L6 8.4 0 2.4z'/></svg>");
+  background-repeat:no-repeat;
+  background-position:right 2.2em center, right 0.7em center;
+  background-size:1px 58%, 12px 8px;
   border:1px solid rgba(143,164,190,0.45);
 }
 /* Rapport rullgardin — storlek under .report-toolbar */
@@ -851,7 +881,13 @@ input[type=file]{ display:none; }
 /* Rullgardin inuti papperspanelen (t.ex. Registervård-hubben). */
 .panel .menu-select{
   color:var(--text-on-paper);
-  background:var(--paper-surface);
+  background-color:var(--paper-surface);
+  background-image:
+    linear-gradient(var(--paper-line-strong), var(--paper-line-strong)),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%231A3050' d='M1.2 1.2L6 6.1l4.8-4.9 1.2 1.2L6 8.4 0 2.4z'/></svg>");
+  background-repeat:no-repeat;
+  background-position:right 2.2em center, right 0.7em center;
+  background-size:1px 58%, 12px 8px;
   border:1px solid var(--paper-line-strong);
   border-radius:7px;
 }
@@ -2376,6 +2412,7 @@ td.num.dash .cell-content{
         <option value="registervard">Registervård</option>
       </select>
       <button class="btn-ok" id="startMenuBtn" type="button">OK</button>
+      <span id="startBackupHint" class="start-backup-hint" title="Hantera säkerhetskopiering i REGISTERVÅRD"></span>
     </div>
 
     <main class="panel">
@@ -2535,7 +2572,7 @@ td.num.dash .cell-content{
         <option value="kategori">Kategori</option>
         <option value="underkategori">Underkategori</option>
         <option value="" disabled class="menu-sep" id="careHubBookSep">────────</option>
-        <option value="bok">Bok</option>
+        <option value="bok">Bok (backup)</option>
       </select>
     </div>
 
@@ -3104,7 +3141,7 @@ td.num.dash .cell-content{
     <p class="eyebrow view-headline" id="settingsViewHeadline">nopEKONOMI - — - Inställningar</p>
 
     <header>
-      <p class="eyebrow">nopEKONOMI · <span id="settingsBookName">—</span></p>
+      <p class="eyebrow view-headline">nopEKONOMI · <span id="settingsBookName">—</span></p>
       <h1>Inställningar</h1>
       <p class="lede">Det som sällan behövs — importer, underhåll och liknande. Huvudsidan förblir ren.</p>
     </header>
@@ -3269,7 +3306,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-03 v01';
+const APP_VERSION = '2026-09-03 v02';
 
 /* =====================================================================
    INNEHÅLL
@@ -3345,10 +3382,11 @@ function readRegistry(){
     const reg = JSON.parse(localStorage.getItem(BOOKS_KEY));
     if(reg && Array.isArray(reg.order) && reg.names){
       if(!Array.isArray(reg.fileIds)) reg.fileIds = [];
+      if(!reg.lastBackup || typeof reg.lastBackup !== 'object') reg.lastBackup = {};
       return reg;
     }
   } catch(e){ /* saknas eller skadat */ }
-  return { order: [], active: '', names: {}, fileIds: [] };
+  return { order: [], active: '', names: {}, fileIds: [], lastBackup: {} };
 }
 
 function writeRegistry(reg){
@@ -3885,6 +3923,36 @@ function countTransactionsInBookData(bookData){
     n += acc.rows.length;
   }
   return n;
+}
+
+function formatBackupHintAt(ms){
+  if(!ms) return '—';
+  try{
+    const d = new Date(ms);
+    const yy = String(d.getFullYear()).slice(-2);
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return yy + mo + da + ':' + hh + mi;
+  } catch(e){
+    return '—';
+  }
+}
+
+function rememberLastBackup(id, at, posts){
+  if(!id) return;
+  reg = readRegistry();
+  if(!reg.lastBackup || typeof reg.lastBackup !== 'object') reg.lastBackup = {};
+  reg.lastBackup[id] = { at: at || Date.now(), posts: posts || 0 };
+  writeRegistry(reg);
+}
+
+function lastBackupRecord(id){
+  reg = readRegistry();
+  const rec = reg.lastBackup && reg.lastBackup[id];
+  if(!rec || typeof rec !== 'object') return null;
+  return rec;
 }
 
 function formatBackupMadeAt(ms){
@@ -5566,9 +5634,38 @@ const startAccountsOverviewHead = el('startAccountsOverviewHead');
 const accountsEmptyBlock = el('accountsEmptyBlock');
 const accountsList = el('accountsList');
 const toImportBtn = el('toImportBtn');
+const startBackupHint = el('startBackupHint');
+
+function paintStartBackupHint(at, backupPosts){
+  if(!startBackupHint) return;
+  startBackupHint.title = 'Hantera säkerhetskopiering i REGISTERVÅRD';
+  startBackupHint.textContent = 'Senast backup:' + formatBackupHintAt(at);
+  const current = bookTransactionCount();
+  const stale = !at || (current - (backupPosts || 0) > 10);
+  startBackupHint.classList.toggle('stale', stale);
+}
+
+async function refreshStartBackupHintFromDisk(){
+  if(!bookId || !isFileBook(bookId)) return;
+  try{
+    const dir = await getBookDirHandle(bookId, false);
+    if(!dir) return;
+    const rows = await scanBookBackupFiles(dir, bookName(bookId));
+    const backups = rows.filter(r => r.kind === 'backup' && r.madeAt);
+    if(!backups.length) return;
+    backups.sort((a, b) => b.madeAt - a.madeAt);
+    const newest = backups[0];
+    rememberLastBackup(bookId, newest.madeAt, newest.posts || 0);
+    paintStartBackupHint(newest.madeAt, newest.posts || 0);
+  } catch(e){ /* start ska inte fastna på mapp */ }
+}
 
 function renderStart(){
   startMenu.selectedIndex = 0;
+
+  const rec = lastBackupRecord(bookId);
+  paintStartBackupHint(rec && rec.at, rec && rec.posts);
+  refreshStartBackupHintFromDisk();
 
   clear(startMessages);
   for(const msg of importReport) addBox(startMessages, 'report', msg);
@@ -8990,7 +9087,7 @@ const CARE_HUB_SECTIONS = {
   payee: { title: 'Payee', kind: 'list' },
   kategori: { title: 'Kategori', kind: 'list' },
   underkategori: { title: 'Underkategori', kind: 'list' },
-  bok: { title: 'Bok', kind: 'list' }
+  bok: { title: 'Bok (backup)', kind: 'list' }
 };
 
 function hideCareHubSection(){
@@ -9071,7 +9168,7 @@ const CARE_LIST_KINDS = {
     maxLen: 60
   },
   bok: {
-    title: 'Bok',
+    title: 'Bok (backup)',
     newLabel: '',
     nameLabel: 'Boknamn',
     deleteLabel: 'Ta bort…',
@@ -10208,6 +10305,7 @@ async function runBookBackupRotation(){
 
   addBox(backupMessages, 'report',
     'Säkerhetskopia skapad: "' + g1 + '".');
+  rememberLastBackup(bookId, Date.now(), countTransactionsInBookData(book));
 }
 
 if(backupBackBtn) backupBackBtn.addEventListener('click', closeBackupPage);
