@@ -405,6 +405,7 @@ Filer som fanns före sammanslagningen till `Hemekonomi.html`:
 | 2026-09-03 v02 | 2026-09-03 | Rubrik `nopEKONOMI` utan CSS-versaler. Tydligare rullgardinspil. Backup-hint på Start. Registervård: Bok (backup). |
 | 2026-09-03 v03 | 2026-09-03 | Efter backup: OK istället för Avbryt/Säkerhetskopiera. Läsbar success-ruta. Mobil: kompakt lista Original/Kopia. |
 | 2026-09-03 v04 | 2026-09-03 | Mobil backup-layout. Dölj Säkerhetskopiera vid vald kopia. Boklista ej valbar + senast backup. Android move→copy fallback. |
+| 2026-09-03 v05 | 2026-09-03 | Boklista: Backup högerställd. Mobil två rader. Original visar senast ändrad (filtid), inte skapad. |
 
 **Riktning (standard):**
 1. En konstant `APP_VERSION` i `nopEKONOMI.html` — visas som `version: …` i sidfoten.

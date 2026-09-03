@@ -1572,6 +1572,46 @@ input[type=file]{ display:none; }
     content:" · ";
   }
 }
+@media (max-width:560px){
+  #viewCareHub .care-list-table{
+    table-layout:auto;
+    width:100%;
+    min-width:0;
+  }
+  #viewCareHub .care-list-table thead{
+    display:none;
+  }
+  #viewCareHub .care-list-table tbody tr[data-idx]{
+    display:block;
+    padding:12px 8px;
+    border-bottom:1px solid var(--paper-line);
+  }
+  #viewCareHub .care-list-table tbody tr[data-idx] td{
+    display:block;
+    width:auto;
+    max-width:none;
+    min-width:0;
+    overflow:visible;
+    text-overflow:clip;
+    white-space:normal;
+    border-bottom:none;
+    padding:0;
+    line-height:1.35;
+    text-align:left;
+  }
+  #viewCareHub .care-list-table td.cl-name{
+    font-weight:600;
+    font-size:15px;
+    margin-bottom:4px;
+  }
+  #viewCareHub .care-list-table td.cl-backup{
+    color:var(--text-on-paper-soft);
+    font-size:13px;
+  }
+  #viewCareHub .care-list-table td.cl-backup::before{
+    content:"Backup ";
+  }
+}
 
 /* --- 10. Navigering och sidfot -------------------------------------- */
 .nav-link{
@@ -2128,11 +2168,21 @@ footer p{
   overflow:auto;
   -webkit-overflow-scrolling:touch;
 }
-.care-list-table{ width:100%; min-width:100%; }
+.care-list-table{ width:100%; min-width:0; }
 .care-list-table th.cl-count,
 .care-list-table td.cl-count{
   width:5.5rem;
   text-align:right;
+}
+.care-list-table th.cl-backup,
+.care-list-table td.cl-backup{
+  width:7.2rem;
+  min-width:7.2rem;
+  max-width:7.2rem;
+  text-align:right;
+  white-space:nowrap;
+  font-family:'JetBrains Mono', monospace;
+  font-size:13px;
 }
 .care-list-table th.cl-saldo,
 .care-list-table td.cl-saldo{
@@ -3364,7 +3414,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-03 v04';
+const APP_VERSION = '2026-09-03 v05';
 
 /* =====================================================================
    INNEHÅLL
@@ -4044,8 +4094,9 @@ async function readBackupMetaFromHandle(fileHandle, kind){
     posts = countTransactionsInBookData(sanitizeBook(data));
     if(kind === 'backup' && typeof raw.backupCreatedAt === 'number'){
       madeAt = raw.backupCreatedAt;
-    } else if(kind === 'original' && typeof raw.savedAt === 'number'){
-      madeAt = raw.savedAt;
+    } else if(kind === 'original'){
+      /* Senast ändrad på disk — inte när boken en gång skapades. */
+      madeAt = lastModified || (typeof raw.savedAt === 'number' ? raw.savedAt : 0);
     } else if(typeof raw.backupCreatedAt === 'number'){
       madeAt = raw.backupCreatedAt;
     } else if(typeof raw.savedAt === 'number'){
@@ -9512,7 +9563,7 @@ function careListRowHtml(item, idx){
     const when = item.lastBackupAt ? formatBackupHintAt(item.lastBackupAt) : '—';
     return '<tr data-idx="' + idx + '" class="' + other.trim() + '" title="' + tip + '">'
       + '<td class="cl-name">' + esc + '</td>'
-      + '<td class="cl-count">' + escapeHtml(when) + '</td>'
+      + '<td class="cl-backup">' + escapeHtml(when) + '</td>'
       + '</tr>';
   }
   if(careListKind === 'konto'){
@@ -9531,7 +9582,7 @@ function careListRowHtml(item, idx){
 
 function renderCareListHead(){
   if(careListKind === 'bok'){
-    careListHead.innerHTML = '<tr><th>Bok</th><th class="cl-count num">Senast backup</th></tr>';
+    careListHead.innerHTML = '<tr><th>Bok</th><th class="cl-backup num">Backup</th></tr>';
     return;
   }
   if(careListKind === 'konto'){
