@@ -1,9 +1,20 @@
-# Personlig bokföringsdata — ska INTE upp på GitHub
+# === Publiceras till GitHub (PWA) ===
+# nopEKONOMI.html, sw.js, manifest.json, icon-*.png
+
+# Personlig bokföringsdata
 MSMoney*.json
 Transaktioner_*.csv
+*säkerhetskopia*.json
+demo.json
 
 # Backupfiler
 *-backup-*.html
+
+# Utveckling / lokalt bara
+CsvTillQif.html
+Protokoll över idéer och beslut.md
+build_demo.py
+demo-budget-prompt.md
 
 # Python-cache
 __pycache__/
