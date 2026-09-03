@@ -2355,7 +2355,7 @@ td.num.dash .cell-content{
     </main>
 
     <footer>
-      <p>Körs helt lokalt i din webbläsare.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -2400,7 +2400,7 @@ td.num.dash .cell-content{
     </main>
 
     <footer>
-      <p>Körs helt lokalt i din webbläsare.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -2456,6 +2456,10 @@ td.num.dash .cell-content{
       </p>
     </main>
 
+    <footer>
+      <p class="app-version"></p>
+    </footer>
+
   </div>
 </div>
 
@@ -2510,7 +2514,7 @@ td.num.dash .cell-content{
     </main>
 
     <footer>
-      <p>Körs helt lokalt i din webbläsare.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -2598,7 +2602,7 @@ td.num.dash .cell-content{
     </div>
 
     <footer>
-      <p>Körs helt lokalt i din webbläsare.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -2651,7 +2655,7 @@ td.num.dash .cell-content{
     </main>
 
     <footer>
-      <p>Körs helt lokalt i din webbläsare.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -2707,7 +2711,7 @@ td.num.dash .cell-content{
     </main>
 
     <footer>
-      <p>Körs helt lokalt i din webbläsare.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -2763,7 +2767,7 @@ td.num.dash .cell-content{
     </main>
 
     <footer>
-      <p>Körs helt lokalt i din webbläsare.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -2789,6 +2793,10 @@ td.num.dash .cell-content{
     <div class="messages" id="ledgerMessages"></div>
 
     <div id="ledgerContainer"></div>
+
+    <footer>
+      <p class="app-version"></p>
+    </footer>
 
   </div>
 
@@ -3024,7 +3032,7 @@ td.num.dash .cell-content{
     </main>
 
     <footer>
-      <p>Körs helt lokalt i din webbläsare.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -3143,7 +3151,7 @@ td.num.dash .cell-content{
     </main>
 
     <footer>
-      <p>Körs helt lokalt i din webbläsare.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -3228,7 +3236,7 @@ td.num.dash .cell-content{
     </div>
 
     <footer>
-      <p>Körs helt lokalt — inget skickas någonstans.</p>
+      <p class="app-version"></p>
     </footer>
 
   </div>
@@ -3260,6 +3268,8 @@ td.num.dash .cell-content{
 <script>
 (function(){
 'use strict';
+
+const APP_VERSION = '2026-09-03 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -3323,6 +3333,12 @@ const BOOKS_KEY = 'msmoney_books__' + STORAGE_SCOPE;
 const BOOK_PREFIX = 'msmoney_book__' + STORAGE_SCOPE + '_';
 const COLWIDTH_KEY = 'msmoney_colwidths__' + STORAGE_SCOPE;
 const WORKSPACE_FLAG_KEY = 'msmoney_program_workspace__' + STORAGE_SCOPE;
+
+function applyAppVersionLabels(){
+  document.querySelectorAll('.app-version').forEach(p => {
+    p.textContent = 'version: ' + APP_VERSION;
+  });
+}
 
 function readRegistry(){
   try{
@@ -5336,22 +5352,12 @@ async function renderLogin(){
 
   try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
 
-  // Tyst synk om behörighet redan finns (ingen mappdialog).
-  try{
-    await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
-  } catch(e){ /* ignore */ }
-
-  const setupMode = await getWorkspaceSetupMode();
-  if(setupMode !== 'ready'){
-    setLoginWorkspaceSetupVisible(true, setupMode);
-    return;
-  }
-
+  // Test 2026-09-03 v01: ingen mappfråga vid start. Böcker i registret visas
+  // ändå. Behörighet begärs vid Öppna / NY BOK (användargest).
   setLoginWorkspaceSetupVisible(false);
 
-  let scan = { scanned: false, added: 0, removed: 0 };
   try{
-    scan = await withTimeout(reconcileBooksWithWorkspace(true), 30000, { scanned: false, added: 0, removed: 0 });
+    await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
   } catch(e){ /* login ska alltid visas */ }
 
   reg = readRegistry();
@@ -5362,18 +5368,6 @@ async function renderLogin(){
     opt.textContent = 'Inga böcker ännu';
     bookSelect.appendChild(opt);
     creating = false;
-    if(!scan.scanned){
-      loginNotice(
-        'Kunde inte läsa bokfiler i mappen (timeout eller saknad behörighet). '
-        + 'Klicka «Välj arbetsmapp…» igen och tillåt läsning. '
-        + 'Mappen måste innehålla nopEKONOMI.html och dina *.json-filer.'
-      );
-    } else {
-      loginNotice(
-        'Inga bokfiler (*.json) hittades i arbetsmappen. '
-        + 'Lägg demo.json i samma mapp som nopEKONOMI.html och ladda om sidan.'
-      );
-    }
   } else {
     loginNotice('');
     for(const id of reg.order){
@@ -15116,6 +15110,7 @@ document.addEventListener('keydown', e => {
 });
 
 async function initApp(){
+  applyAppVersionLabels();
   await openIdb();
   try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
   await clearInvalidWorkspaceDir();

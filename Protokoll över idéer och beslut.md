@@ -7,7 +7,7 @@ utan att du behöver minnas allt själv.
 **Rutin:** När vi tar ett beslut eller landar en idé värd att spara → en rad här.
 Assistenten uppdaterar filen när du ber om det, eller när vi avslutar ett tydligt steg.
 
-**Senast uppdaterad:** 2026-09-01
+**Senast uppdaterad:** 2026-09-03
 
 ---
 
@@ -48,6 +48,7 @@ Assistenten uppdaterar filen när du ber om det, eller när vi avslutar ett tydl
 
 | 2026-08-26 | **Beslut** | **En programmapp = ett lagringutrymme.** localStorage/IndexedDB nycklas utifrån mappen där `Hemekonomi.html` öppnats. DEMO-kopia blandar inte med privat data. |
 | 2026-08-26 | **Beslut** | **Första start i ny mapp:** inloggningen visar **Välj arbetsmapp…** (kräver klick — webbläsaren tillåter inte mappdialog utan gest). Efter tillstånd synkas boklistan mot JSON i mappen. Tom lista ⇒ **NY BOK** valfritt, inte tvingande. |
+| 2026-09-03 | **Beslut / riktning** | **Omforma start + backup.** Dagens mappgodkännande direkt vid inloggning skrämmer teknikallergiker (särskilt mobil/PWA). Mål: programmet ska kunna starta utan mappfråga (böcker i webbläsarminne). **Mapp-/filfrågan flyttas till backupflödet** — där den känns motiverad och oskuldsfull. Systemet ska **uppmuntra** till säkerhetskopia (export till fil/mapp), inte tvinga platsåtkomst innan bokföring eller demo. Ej byggt ännu. |
 
 ### Så fungerar lagringen (viktigt — återkom till detta)
 
@@ -88,6 +89,7 @@ Gamla säkerhetskopior som redan ligger på disk lämnas orörda (programmet ska
 | 2026-08-24 | **Beslut** | **Säkerhetskopia** via Registervård → Bok: lista original + generation 1–3. **Säkerhetskopiera** roterar 2→3, 1→2, original→1. **Återställ** (val/dubbelklick): varning; kopian → `Boknamn.json`; listan uppdateras. |
 | 2026-08-24 | **Beslut** | **Ta bort bok** raderar på disk (`Boknamn.json` + säkerhetskopior 1–3) via webbläsarens behörighet — inget tyst hopp över filer. **Inloggning/start** synkar registret mot arbetsmappen (hittar böcker på disk; tar bara bort ur registret efter lyckad mappgenomgång när filen saknas). |
 | 2026-08-24 | **Beslut** | **Säkerhetskopia-tider:** kolumn **Skapad/Ändrad**. Original = senast sparad/ändrad (`savedAt`); kopia = när kopian skapades (`backupCreatedAt`). Original skrivs inte om vid kopiering. |
+| 2026-09-03 | **Riktning** | **Backup först, mappfråga där.** Ändra hantering av säkerhetskopiering och mappgodkännande. Uppmuntra backup-kopiering; ställ mapp-/filfrågan i det flödet — inte som skrämselskärm före start. Motivering: teknikallergiker ska kunna öppna bok/demo utan platsdialog. Webbläsarminne = smidig start; exportad JSON = riktig kopia (cache-rensning raderar annars data). |
 
 ---
 
@@ -343,7 +345,7 @@ Syfte: använda den gångna ekonomin för att ge en framåtblick — mer besluts
 | Redigera / ta bort transaktion | **Klart** 2026-08-21 — dubbelklick öppnar ifylld vy; `formDirty`; Delete + varning. Undantag: öppningsbalans och skyddad payee. Split redigeras via samma fönster. |
 | Skapa / Redigera Konto | **Klart** 2026-08-20 — skapa, namnbyte, öppningsbalans, radera (överföringar → ÖVF Raderat konto). |
 | Kontovård (hub) | **Klart** 2026-08-21 — **Konto/Payee/Kategori** med knappar Konto, Payee, Kategori, Underkategori. Byt namn / radera med flytt av poster. |
-| Säkerhetskopiering (JSON) | **Klart 2026-08-24** — Registervård → Bok → Säkerhetskopia (rotation 1–3 + återställ där). |
+| Säkerhetskopiering (JSON) | **Klart 2026-08-24** — Registervård → Bok → Säkerhetskopia (rotation 1–3 + återställ där). **Omformning planerad 2026-09-03** — se *Lagring* / *Säkerhetskopiering*: start utan mappfråga, uppmuntra backup där filfrågan hör hemma. |
 | Export (CSV + PDF) | **Klart** 2026-09-03 — se *Export (CSV och PDF)*. |
 | Rapporter (alla från Python) | **Klart** 2026-08-24 i `Hemekonomi.html` / `nopEKONOMI.html`: **Kategori-Rapport**, **Payee-Rapport**, **Topplistor** (Payee/Kategori/Underkategori) och **Netto över tid**. Dubbelklick på datarad → månadsstapeldiagram. Period Från/Till. **Tidsväljaren** komplett 2026-08-22 (se eget avsnitt). |
 | Stapeldiagram (skala) | **Klart 2026-08-29** — gemensam motor: golv-zoom + outlier-brott. Se *Stapeldiagram (rapport)*. |
@@ -354,6 +356,7 @@ Syfte: använda den gångna ekonomin för att ge en framåtblick — mer besluts
 | Saldoräkning vid visning | **Klart** (2026-08-19) — räknas fram, sparas inte på rad. |
 | QIF-import | **Klart** 2026-08-22 — Start (tom bok), delimport + speglar, manuell komplettering. Se *QIF-import*. |
 | Prognos | **Idé** 2026-08-22 — manglas. Se avsnittet *Prognos*. Ej byggd. |
+| Versionsnummer | **Startat** 2026-09-03 — `2026-09-03 v01` i sidfot. Se *Versionsprotokoll*. |
 
 ---
 
@@ -379,8 +382,32 @@ Filer som fanns före sammanslagningen till `Hemekonomi.html`:
 | Datum | Ämne | Anteckning |
 |-------|------|------------|
 | 2026-08-22 | **Prognos** | Idéparkering — användaren manglar. Se *Prognos*. |
+| 2026-09-03 | **Start utan mappfråga + backup-uppmuntran** | Riktning spikad. Bygg senare: webbläsarminne för daglig användning; mapp-/filgodkännande vid säkerhetskopia. Se *Lagring* och *Säkerhetskopiering*. |
+| 2026-09-03 | **Versionsnummer (PWA/GitHub)** | **Startat** med format `2026-09-03 v01` (v01–v99 per dygn). Syns i sidfot. Se *Versionsprotokoll*. |
 
 *(Export CSV/PDF, manövrering/navigation, rapport-språk och mobil layout: avparkerade 2026-09-03 — se Status.)*
+
+---
+
+## Versionsnummer (riktning — ej byggt)
+
+**Varför:** PWA/GitHub kan visa gammal kod en stund efter push (service worker + cache). Utan versionsnummer går det inte att avgöra om man kör det man tror.
+
+## Versionsprotokoll
+
+**Format:** `ÅÅÅÅ-MM-DD vNN` där NN är 01–99. Samma kalenderdygn höjs v-numret. Nytt dygn startar om på v01. Stanna på v99 tills nästa dygn om det mot förmodan blir fler än 99 publiceringar samma dag.
+
+**Publicering:** samma sträng i `APP_VERSION` (`nopEKONOMI.html`) och i `sw.js` som `CACHE_NAME` (`nopEKONOMI-ÅÅÅÅ-MM-DD-vNN`).
+
+| Version | Datum | Vad som släpptes |
+|---------|-------|------------------|
+| 2026-09-03 v01 | 2026-09-03 | Versionsnummer i sidfot. Mappfrågan vid start borttagen (behörighet vid Öppna / NY BOK). Test av PWA-uppdateringstid. |
+
+**Riktning (standard):**
+1. En konstant `APP_VERSION` i `nopEKONOMI.html` — visas som `version: …` i sidfoten.
+2. Samma version i `sw.js` som `CACHE_NAME`. Höjning = ny cache; gammal rensas.
+3. Vid varje GitHub-publicering: höj versionen i **båda** filerna, commit, push.
+4. Valfritt senare: “Ny version tillgänglig — uppdatera”-knapp när service workern upptäcker ny SW.
 
 ---
 
