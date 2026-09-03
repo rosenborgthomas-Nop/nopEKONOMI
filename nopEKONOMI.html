@@ -3441,7 +3441,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-03 v06';
+const APP_VERSION = '2026-09-03 v07';
 
 /* =====================================================================
    INNEHÅLL
@@ -8668,6 +8668,12 @@ function renderPayeeReportTable(fromIso, toIso){
   syncReportCopyBtn();
 }
 
+function monthSeriesChartKickerHtml(stacked){
+  if(reportBucketMode === 'year' || reportBucketMode === 'yearPeriod') return '';
+  const text = stacked ? 'Månadsfördelning · staplad månadsvis' : 'Månadsfördelning';
+  return '<p class="payee-chart-kicker">' + text + '</p>';
+}
+
 function buildMonthSeriesChartRows(series){
   const months = series.months || [];
   const monthly = series.monthly || {};
@@ -8722,9 +8728,9 @@ function buildMonthSeriesChartRows(series){
   });
 
   return '<div class="payee-chart-panel is-' + tone + ' payee-chart-panel--stacked">'
-    + '<p class="payee-chart-kicker">Månadsfördelning · staplad månadsvis</p>'
+    + monthSeriesChartKickerHtml(true)
     + '<div class="payee-chart-scroll">'
-    + '<svg class="payee-chart-svg payee-chart-svg--stacked" viewBox="0 0 ' + L.width + ' ' + L.height + '" role="img" aria-label="Månadsfördelning">'
+    + '<svg class="payee-chart-svg payee-chart-svg--stacked" viewBox="0 0 ' + L.width + ' ' + L.height + '" role="img" aria-label="' + escapeHtml(series.title || 'Fördelning') + '">'
     + bars
     + '</svg>'
     + '</div>'
@@ -8740,7 +8746,7 @@ function buildMonthSeriesChart(series){
 
   if(!months.length){
     return '<div class="payee-chart-panel is-' + tone + '">'
-      + '<p class="payee-chart-kicker">Månadsfördelning</p>'
+      + monthSeriesChartKickerHtml(false)
       + '<p class="payee-chart-empty">Inga månader</p>'
       + '</div>';
   }
@@ -8824,7 +8830,7 @@ function buildMonthSeriesChart(series){
   });
 
   return '<div class="payee-chart-panel is-' + tone + '">'
-    + '<p class="payee-chart-kicker">Månadsfördelning</p>'
+    + monthSeriesChartKickerHtml(false)
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + escapeHtml(title) + '">'
     + bars
     + '</svg>'
