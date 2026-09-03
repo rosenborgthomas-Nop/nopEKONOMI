@@ -1530,44 +1530,46 @@ input[type=file]{ display:none; }
 }
 @media (max-width:560px){
   #viewBackup .care-list-table{
+    table-layout:auto;
     min-width:0;
+    width:100%;
   }
   #viewBackup .care-list-table thead{
     display:none;
   }
-  #viewBackup .care-list-table tbody tr{
-    display:grid;
-    grid-template-columns:1fr auto;
-    grid-template-areas:
-      "name name"
-      "posts date";
-    gap:2px 12px;
-    padding:10px 2px;
+  #viewBackup .care-list-table tbody tr[data-idx]{
+    display:block;
+    padding:12px 8px;
     border-bottom:1px solid var(--paper-line);
   }
-  #viewBackup .care-list-table tbody tr.empty-row{
+  #viewBackup .care-list-table tbody tr[data-idx] td{
     display:block;
+    width:auto;
+    max-width:none;
+    overflow:visible;
+    text-overflow:clip;
+    white-space:normal;
+    border-bottom:none;
+    padding:0;
+    line-height:1.35;
   }
   #viewBackup .care-list-table td.cl-name{
-    grid-area:name;
-    white-space:normal;
-    word-break:break-word;
+    font-weight:600;
+    font-size:15px;
+    margin-bottom:4px;
   }
-  #viewBackup .care-list-table td.cl-count{
-    grid-area:posts;
-    width:auto;
+  #viewBackup .care-list-table td.cl-count,
+  #viewBackup .care-list-table td.num{
+    display:inline;
+    font-size:13px;
+    color:var(--text-on-paper-soft);
     text-align:left;
   }
   #viewBackup .care-list-table td.cl-count::before{
     content:"Poster ";
-    color:var(--text-on-paper-soft);
-    font-weight:400;
   }
-  #viewBackup .care-list-table td.num{
-    grid-area:date;
-    text-align:right;
-    font-family:'JetBrains Mono', monospace;
-    font-size:12px;
+  #viewBackup .care-list-table td.cl-count::after{
+    content:" · ";
   }
 }
 
@@ -2150,8 +2152,9 @@ footer p{
 }
 .care-list-table td.cl-saldo.pos{ color:var(--teal); }
 .care-list-table td.cl-saldo.neg{ color:var(--wine); }
-.care-list-table tr.care-book-other{ opacity:0.55; }
+.care-list-table tr.care-book-other{ opacity:0.55; cursor:default; }
 .care-list-table tr.care-book-other td.cl-name{ font-style:italic; }
+.care-list-table tr.care-book-other:hover{ background:inherit; }
 .care-list-actions{
   display:flex;
   justify-content:space-between;
@@ -3361,7 +3364,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-03 v03';
+const APP_VERSION = '2026-09-03 v04';
 
 /* =====================================================================
    INNEHÅLL
@@ -3954,8 +3957,12 @@ async function renameFileInDir(dirHandle, fromName, toName){
   }
   const handle = await dirHandle.getFileHandle(fromName);
   if(typeof handle.move === 'function'){
-    await handle.move(toName);
-    return;
+    try{
+      await handle.move(toName);
+      return;
+    } catch(e){
+      /* Android/Chrome: move() finns ofta men kastar — kopiera + radera istället. */
+    }
   }
   await copyFileInDir(dirHandle, fromName, toName);
   await dirHandle.removeEntry(fromName);
@@ -9345,11 +9352,15 @@ function rewriteSubCategoryToCategoryInBook(draft, fromSubName, toCategoryName){
 function buildCareListItems(){
   if(careListKind === 'bok'){
     reg = readRegistry();
-    return (reg.order || []).map(id => ({
-      name: bookName(id),
-      id: id,
-      isCurrent: id === bookId
-    }));
+    return (reg.order || []).map(id => {
+      const rec = lastBackupRecord(id);
+      return {
+        name: bookName(id),
+        id: id,
+        isCurrent: id === bookId,
+        lastBackupAt: rec && rec.at ? rec.at : 0
+      };
+    });
   }
   if(careListKind === 'konto'){
     return bookAccountNames()
@@ -9474,6 +9485,13 @@ function updateCareListHighlight(){
 
 function moveCareListHighlight(delta){
   if(!careListItems.length) return;
+  if(careListKind === 'bok'){
+    const cur = careListItems.findIndex(it => it.isCurrent);
+    careListHighlightIdx = cur >= 0 ? cur : -1;
+    updateCareListHighlight();
+    if(careListScroll && cur >= 0) scrollHighlightedIntoView(careListScroll);
+    return;
+  }
   if(careListHighlightIdx === -1){
     careListHighlightIdx = delta > 0 ? 0 : careListItems.length - 1;
   } else {
@@ -9489,10 +9507,12 @@ function careListRowHtml(item, idx){
   if(careListKind === 'bok'){
     const other = item.isCurrent ? '' : ' care-book-other';
     const tip = item.isCurrent
-      ? 'Dubbelklicka för att ändra namn'
-      : 'Öppna boken först för att kunna ändra namnet';
+      ? 'Aktuell bok — dubbelklicka för att ändra namn'
+      : 'Andra böcker visas bara som information';
+    const when = item.lastBackupAt ? formatBackupHintAt(item.lastBackupAt) : '—';
     return '<tr data-idx="' + idx + '" class="' + other.trim() + '" title="' + tip + '">'
       + '<td class="cl-name">' + esc + '</td>'
+      + '<td class="cl-count">' + escapeHtml(when) + '</td>'
       + '</tr>';
   }
   if(careListKind === 'konto'){
@@ -9511,7 +9531,7 @@ function careListRowHtml(item, idx){
 
 function renderCareListHead(){
   if(careListKind === 'bok'){
-    careListHead.innerHTML = '<tr><th>Bok</th></tr>';
+    careListHead.innerHTML = '<tr><th>Bok</th><th class="cl-count num">Senast backup</th></tr>';
     return;
   }
   if(careListKind === 'konto'){
@@ -9543,7 +9563,7 @@ function renderCareList(){
   clear(careListBody);
 
   if(!careListItems.length){
-    const cols = careListKind === 'bok' ? 1 : (careListKind === 'konto' ? 3 : 2);
+    const cols = careListKind === 'bok' ? 2 : (careListKind === 'konto' ? 3 : 2);
     careListBody.innerHTML = '<tr class="empty-row"><td colspan="' + cols
       + '">Inga ' + meta.title.toLowerCase() + ' ännu.</td></tr>';
     careListHighlightIdx = -1;
@@ -10006,7 +10026,12 @@ async function confirmCareListDelete(){
 careListBody.addEventListener('click', e => {
   const tr = e.target.closest('tr[data-idx]');
   if(!tr || careListIsEditOpen()) return;
-  careListHighlightIdx = +tr.dataset.idx;
+  const idx = +tr.dataset.idx;
+  if(careListKind === 'bok'){
+    const item = careListItems[idx];
+    if(!item || !item.isCurrent) return;
+  }
+  careListHighlightIdx = idx;
   updateCareListHighlight();
   if(careListScroll) careListScroll.focus();
 });
@@ -10014,7 +10039,12 @@ careListBody.addEventListener('click', e => {
 careListBody.addEventListener('dblclick', e => {
   const tr = e.target.closest('tr[data-idx]');
   if(!tr || careListIsEditOpen()) return;
-  careListHighlightIdx = +tr.dataset.idx;
+  const idx = +tr.dataset.idx;
+  if(careListKind === 'bok'){
+    const item = careListItems[idx];
+    if(!item || !item.isCurrent) return;
+  }
+  careListHighlightIdx = idx;
   updateCareListHighlight();
   careListOpenHighlighted();
 });
@@ -10054,10 +10084,7 @@ let backupAwaitingAck = false;
 
 function setBackupAwaitingAck(on){
   backupAwaitingAck = !!on;
-  if(backupCancelBtn) backupCancelBtn.hidden = backupAwaitingAck;
-  if(backupRunBtn){
-    backupRunBtn.textContent = backupAwaitingAck ? 'OK' : 'Säkerhetskopiera';
-  }
+  syncBackupActionButtons();
 }
 
 function closeBackupPage(){
@@ -10070,16 +10097,29 @@ function hideBackupRestoreConfirm(){
   if(backupRestoreBox) backupRestoreBox.hidden = true;
 }
 
-function syncBackupRestoreBtn(){
-  const row = backupHighlightedRow();
-  if(backupRestoreBtn){
-    backupRestoreBtn.hidden = !(row && row.kind === 'backup');
-  }
-}
-
 function backupHighlightedRow(){
   if(backupHighlightIdx < 0 || backupHighlightIdx >= backupListRows.length) return null;
   return backupListRows[backupHighlightIdx];
+}
+
+function syncBackupActionButtons(){
+  const row = backupHighlightedRow();
+  const copySelected = !!(row && row.kind === 'backup');
+  if(backupCancelBtn) backupCancelBtn.hidden = backupAwaitingAck;
+  if(backupRestoreBtn) backupRestoreBtn.hidden = !copySelected || backupAwaitingAck;
+  if(backupRunBtn){
+    if(backupAwaitingAck){
+      backupRunBtn.hidden = false;
+      backupRunBtn.textContent = 'OK';
+    } else {
+      backupRunBtn.hidden = copySelected;
+      backupRunBtn.textContent = 'Säkerhetskopiera';
+    }
+  }
+}
+
+function syncBackupRestoreBtn(){
+  syncBackupActionButtons();
 }
 
 function updateBackupHighlight(){
