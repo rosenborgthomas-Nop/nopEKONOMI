@@ -1,0 +1,10 @@
+# Personlig bokföringsdata — ska INTE upp på GitHub
+MSMoney*.json
+Transaktioner_*.csv
+
+# Backupfiler
+*-backup-*.html
+
+# Python-cache
+__pycache__/
+*.pyc
