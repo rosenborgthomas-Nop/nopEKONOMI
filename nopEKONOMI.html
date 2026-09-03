@@ -311,12 +311,56 @@ input[type=file]{ display:none; }
   font-size:14px;
   line-height:1.55;
   color:var(--headline-accent);
-  margin-left:auto;
   cursor:default;
 }
 .start-backup-hint.stale{
   color:var(--wine);
 }
+.start-backup-wrap{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin-left:auto;
+  position:relative;
+}
+.help-tip-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:1.15rem;
+  height:1.15rem;
+  padding:0;
+  border:1.5px solid var(--headline-accent);
+  border-radius:50%;
+  background:transparent;
+  color:var(--headline-accent);
+  font-family:'JetBrains Mono', monospace;
+  font-size:11px;
+  font-weight:700;
+  line-height:1;
+  cursor:pointer;
+  flex:0 0 auto;
+}
+.help-tip-btn:hover,
+.help-tip-btn[aria-expanded="true"]{
+  background:rgba(181,206,232,0.18);
+}
+.help-tip-pop{
+  position:absolute;
+  top:calc(100% + 6px);
+  right:0;
+  z-index:20;
+  max-width:16rem;
+  padding:8px 10px;
+  border-radius:8px;
+  background:var(--paper);
+  color:var(--text-on-paper);
+  border:1px solid var(--paper-line-strong);
+  box-shadow:0 10px 24px -14px rgba(0,0,0,0.55);
+  font-size:13px;
+  line-height:1.4;
+}
+.help-tip-pop[hidden]{ display:none; }
 .ledger-drill-bar[hidden]{ display:none; }
 .report-toolbar{
   display:grid;
@@ -1530,46 +1574,25 @@ input[type=file]{ display:none; }
 }
 @media (max-width:560px){
   #viewBackup .care-list-table{
-    table-layout:auto;
-    min-width:0;
+    table-layout:fixed;
     width:100%;
+    min-width:0;
   }
-  #viewBackup .care-list-table thead{
-    display:none;
-  }
-  #viewBackup .care-list-table tbody tr[data-idx]{
-    display:block;
-    padding:12px 8px;
-    border-bottom:1px solid var(--paper-line);
-  }
-  #viewBackup .care-list-table tbody tr[data-idx] td{
-    display:block;
-    width:auto;
-    max-width:none;
-    overflow:visible;
-    text-overflow:clip;
-    white-space:normal;
-    border-bottom:none;
-    padding:0;
-    line-height:1.35;
-  }
+  #viewBackup .care-list-table th:nth-child(1),
   #viewBackup .care-list-table td.cl-name{
-    font-weight:600;
-    font-size:15px;
-    margin-bottom:4px;
+    width:auto;
   }
-  #viewBackup .care-list-table td.cl-count,
+  #viewBackup .care-list-table th:nth-child(2),
+  #viewBackup .care-list-table td.cl-count{
+    width:4.2rem;
+  }
+  #viewBackup .care-list-table th:nth-child(3),
   #viewBackup .care-list-table td.num{
-    display:inline;
-    font-size:13px;
-    color:var(--text-on-paper-soft);
-    text-align:left;
-  }
-  #viewBackup .care-list-table td.cl-count::before{
-    content:"Poster ";
-  }
-  #viewBackup .care-list-table td.cl-count::after{
-    content:" · ";
+    width:7rem;
+    text-align:right;
+    white-space:nowrap;
+    font-family:'JetBrains Mono', monospace;
+    font-size:12px;
   }
 }
 @media (max-width:560px){
@@ -2520,7 +2543,11 @@ td.num.dash .cell-content{
         <option value="registervard">Registervård</option>
       </select>
       <button class="btn-ok" id="startMenuBtn" type="button">OK</button>
-      <span id="startBackupHint" class="start-backup-hint" title="Hantera säkerhetskopiering i REGISTERVÅRD"></span>
+      <span class="start-backup-wrap">
+        <span id="startBackupHint" class="start-backup-hint"></span>
+        <button type="button" class="help-tip-btn" id="startBackupHelpBtn" aria-label="Hjälp om säkerhetskopiering" aria-expanded="false" aria-controls="startBackupHelpPop">?</button>
+        <span id="startBackupHelpPop" class="help-tip-pop" role="tooltip" hidden>Hantera säkerhetskopiering i REGISTERVÅRD</span>
+      </span>
     </div>
 
     <main class="panel">
@@ -3414,7 +3441,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-03 v05';
+const APP_VERSION = '2026-09-03 v06';
 
 /* =====================================================================
    INNEHÅLL
@@ -5748,10 +5775,25 @@ const accountsEmptyBlock = el('accountsEmptyBlock');
 const accountsList = el('accountsList');
 const toImportBtn = el('toImportBtn');
 const startBackupHint = el('startBackupHint');
+const startBackupHelpBtn = el('startBackupHelpBtn');
+const startBackupHelpPop = el('startBackupHelpPop');
+
+function setStartBackupHelpOpen(on){
+  if(!startBackupHelpBtn || !startBackupHelpPop) return;
+  startBackupHelpPop.hidden = !on;
+  startBackupHelpBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+}
+
+if(startBackupHelpBtn){
+  startBackupHelpBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    setStartBackupHelpOpen(startBackupHelpPop.hidden);
+  });
+  document.addEventListener('click', () => setStartBackupHelpOpen(false));
+}
 
 function paintStartBackupHint(at, backupPosts){
   if(!startBackupHint) return;
-  startBackupHint.title = 'Hantera säkerhetskopiering i REGISTERVÅRD';
   startBackupHint.textContent = 'Senast backup:' + formatBackupHintAt(at);
   const current = bookTransactionCount();
   const stale = !at || (current - (backupPosts || 0) > 10);
@@ -8631,8 +8673,10 @@ function buildMonthSeriesChartRows(series){
   const monthly = series.monthly || {};
   const absolute = !!series.absolute;
   const tone = series.tone || (absolute ? 'expense' : 'income');
-  const fill = tone === 'income' ? CHART_POSITIVE : '#A33B3B';
-  const fillSoft = tone === 'income' ? CHART_POSITIVE_SOFT : 'rgba(163,59,59,0.12)';
+  const fillPos = tone === 'income' ? CHART_POSITIVE : '#A33B3B';
+  const fillNeg = '#A33B3B';
+  const fillSoftPos = tone === 'income' ? CHART_POSITIVE_SOFT : 'rgba(163,59,59,0.12)';
+  const fillSoftNeg = 'rgba(163,59,59,0.12)';
 
   const ordered = months.slice().reverse();
   const displayVals = months.map(mk => {
@@ -8653,6 +8697,10 @@ function buildMonthSeriesChartRows(series){
     const barY = y + 4;
     const tipLabel = monthKeyYyMm(mk);
     const amt = rawDisp ? formatReportInt(Math.round(rawDisp)) : '--';
+    const isNeg = rawDisp < 0;
+    const fill = isNeg ? fillNeg : fillPos;
+    const fillSoft = isNeg ? fillSoftNeg : fillSoftPos;
+    const amtFill = isNeg ? fillNeg : '#1A3050';
 
     bars += '<g data-chart-label="' + escapeAttr(tipLabel) + '" data-chart-value="' + escapeAttr(amt) + '"'
       + ' data-chart-period="' + escapeAttr(mk) + '" data-chart-raw="' + escapeAttr(String(Math.round(rawDisp || 0))) + '">';
@@ -8667,7 +8715,7 @@ function buildMonthSeriesChartRows(series){
     }
     bars += '<text x="' + (L.labelW - 4) + '" y="' + (y + 16) + '" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="#5A6F88">'
       + escapeHtml(tipLabel) + '</text>';
-    bars += '<text x="' + L.amountX + '" y="' + (y + 16) + '" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="#1A3050">'
+    bars += '<text x="' + L.amountX + '" y="' + (y + 16) + '" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="' + amtFill + '">'
       + escapeHtml(amt) + '</text>';
     bars += '<rect class="chart-bar-hitarea" x="' + L.padL + '" y="' + y + '" width="' + (L.width - L.padL - L.padR) + '" height="' + L.rowH + '" fill="transparent"/>';
     bars += '</g>';
@@ -8761,7 +8809,7 @@ function buildMonthSeriesChart(series){
     }
     const amt = tipValue;
     const labelY = absV ? Math.max(12, y - 5) : baselineY - 5;
-    bars += '<text x="' + (x + bw / 2) + '" y="' + labelY + '" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#1A3050">'
+    bars += '<text x="' + (x + bw / 2) + '" y="' + labelY + '" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="' + (rawDisp < 0 ? fillNeg : '#1A3050') + '">'
       + escapeHtml(amt) + '</text>';
     const lab = tipLabel;
     if(rotateLabels){
@@ -8790,7 +8838,7 @@ function showReportRowChart(series){
   const from = activeReportRange.from || reportFrom.value || '';
   const to = activeReportRange.to || reportTo.value || '';
   const title = series.title || 'Rad';
-  body.innerHTML = reportTableHeadHtml(escapeHtml(title), from, to, series.months)
+  body.innerHTML = reportTableHeadHtml(escapeHtml(title) + reportTimeTitleSuffixHtml(), from, to, series.months)
     + buildMonthSeriesChart(series);
   const titleEl = body.querySelector('.report-table-title');
   if(titleEl) titleEl.id = 'reportRowChartTitle';
