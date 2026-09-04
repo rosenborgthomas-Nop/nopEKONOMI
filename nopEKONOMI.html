@@ -3441,7 +3441,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-04 v06';
+const APP_VERSION = '2026-09-04 v07';
 
 /* =====================================================================
    INNEHÅLL
@@ -13426,16 +13426,7 @@ el('settingsBackBtn').addEventListener('click', () => show('start'));
 
 el('toImportBtn').addEventListener('click', async () => {
   if(!bookIsImportEmpty()) return;
-  if(isFileBook(bookId)){
-    try{
-      await getBookFileHandle(bookId, true);
-    } catch(err){
-      clear(startMessages);
-      addBox(startMessages, 'notice', (err && err.message ? err.message : 'Kunde inte läsa bokfilen.')
-        + ' Tillåt åtkomst när webbläsaren frågar och försök igen.');
-      return;
-    }
-  }
+  // Import sparar via webbläsarspegel (samma modell som vardagstransaktioner).
   resetImportState();
   importSessionBookId = bookId;
   importSessionActive = true;
@@ -13954,20 +13945,6 @@ async function handleFiles(files){
   }
   if(!batch.length) return;
 
-  // Android: be om bokbehörighet direkt (innan filtolkning), medan användargesten gäller.
-  if(isFileBook(bookId)){
-    try{
-      await getBookFileHandle(bookId, true);
-    } catch(err){
-      const msg = (err && err.message ? err.message : 'Kunde inte läsa bokfilen.')
-        + ' Importen avbröts — inget har ändrats.';
-      importSessionErrors.push(msg);
-      addBox(importMessages, 'notice', msg);
-      setImportPickerVisible(true);
-      return;
-    }
-  }
-
   importing = true;
 
   working.hidden = false;
@@ -14148,14 +14125,12 @@ async function handleFiles(files){
   }
 
   try{
-    await writeBookAsync(bookId, draft, true);
+    await writeBookPreferGranted(bookId, draft);
   } catch(err){
     working.hidden = true;
     importing = false;
     fileInput.value = '';
-    const msg = isPermissionError(err)
-      ? 'Saknar behörighet att spara boken. Tillåt åtkomst när webbläsaren frågar. Inget har ändrats.'
-      : 'Kunde inte spara importen. Inget har ändrats.';
+    const msg = 'Kunde inte spara importen. Inget har ändrats.';
     importSessionErrors.push(msg);
     addBox(importMessages, 'notice', msg);
     setImportPickerVisible(true);
