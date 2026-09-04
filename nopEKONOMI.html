@@ -3441,7 +3441,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-04 v02';
+const APP_VERSION = '2026-09-04 v03';
 
 /* =====================================================================
    INNEHÅLL
@@ -3750,6 +3750,31 @@ async function writeBookAsync(id, bookData, interactive){
     return;
   }
   writeBook(id, bookData);
+}
+
+function looksLikeBookPermissionError(err){
+  if(isPermissionError(err)) return true;
+  const msg = err && err.message ? String(err.message) : '';
+  return /behörighet|Tillåt åtkomst/i.test(msg);
+}
+
+// Tyst först — fråga Chrome bara om behörighet saknas.
+async function readBookPreferGranted(id){
+  try{
+    return await readBookAsync(id, false);
+  } catch(err){
+    if(!looksLikeBookPermissionError(err)) throw err;
+    return await readBookAsync(id, true);
+  }
+}
+
+async function writeBookPreferGranted(id, bookData){
+  try{
+    await writeBookAsync(id, bookData, false);
+  } catch(err){
+    if(!looksLikeBookPermissionError(err)) throw err;
+    await writeBookAsync(id, bookData, true);
+  }
 }
 
 function bookWorkingCopy(){
@@ -12448,17 +12473,6 @@ async function saveNewTransaction(){
     return;
   }
 
-  // Mobil: väck filbehörighet medan OK-klicket fortfarande räknas som gest.
-  if(isFileBook(bookId)){
-    try{
-      await getBookFileHandle(bookId, true);
-    } catch(err){
-      addBox(newTxMessages, 'notice',
-        (err && err.message ? err.message : 'Saknar behörighet till bokfilen.') + ' Inget sparades.');
-      return;
-    }
-  }
-
   let payload = newTxBuildSavePayload();
   if(payload.kind === 'single' && isProtectedPayeeName(payload.row.payee)){
     addBox(newTxMessages, 'notice',
@@ -12479,7 +12493,7 @@ async function saveNewTransaction(){
 
   let draft;
   try{
-    draft = await readBookAsync(bookId, true);
+    draft = await readBookPreferGranted(bookId);
   } catch(err){
     addBox(newTxMessages, 'notice',
       (err && err.message ? err.message : 'Kunde inte läsa bokfilen.') + ' Inget sparades.');
@@ -12536,7 +12550,7 @@ async function saveNewTransaction(){
     }
 
     finalizeTouchedAccounts(draft, touched);
-    await writeBookAsync(bookId, draft, true);
+    await writeBookPreferGranted(bookId, draft);
   } catch(err){
     addBox(newTxMessages, 'notice',
       err && err.message ? err.message : 'Kunde inte spara transaktionen. Inget sparades.');
@@ -12574,7 +12588,7 @@ async function confirmNewTxDelete(){
 
   let draft;
   try{
-    draft = await readBookAsync(bookId, true);
+    draft = await readBookPreferGranted(bookId);
   } catch(err){
     hideNewTxDeleteConfirm();
     clear(newTxMessages);
@@ -12610,7 +12624,7 @@ async function confirmNewTxDelete(){
     }
 
     finalizeTouchedAccounts(draft, touched);
-    await writeBookAsync(bookId, draft, true);
+    await writeBookPreferGranted(bookId, draft);
   } catch(err){
     hideNewTxDeleteConfirm();
     clear(newTxMessages);
