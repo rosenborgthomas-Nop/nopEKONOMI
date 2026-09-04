@@ -3441,7 +3441,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-04 v03';
+const APP_VERSION = '2026-09-04 v04';
 
 /* =====================================================================
    INNEHÅLL
@@ -3755,25 +3755,36 @@ async function writeBookAsync(id, bookData, interactive){
 function looksLikeBookPermissionError(err){
   if(isPermissionError(err)) return true;
   const msg = err && err.message ? String(err.message) : '';
-  return /behörighet|Tillåt åtkomst/i.test(msg);
+  return /behörighet|Tillåt åtkomst|NotAllowedError|SecurityError/i.test(msg);
 }
 
-// Tyst först — fråga Chrome bara om behörighet saknas.
-async function readBookPreferGranted(id){
-  try{
-    return await readBookAsync(id, false);
-  } catch(err){
-    if(!looksLikeBookPermissionError(err)) throw err;
-    return await readBookAsync(id, true);
-  }
-}
-
+// Skriv direkt till handtaget. Fråga Chrome BARA om skrivningen faktiskt nekas.
+// (queryPermission på Android säger ofta "prompt" i onödan → konstant dialog.)
 async function writeBookPreferGranted(id, bookData){
+  if(!isFileBook(id)){
+    writeBook(id, bookData);
+    return;
+  }
+  let handle = await idbGet(id);
+  if(!handle){
+    await writeBookAsync(id, bookData, true);
+    return;
+  }
   try{
-    await writeBookAsync(id, bookData, false);
+    await writeBookFile(handle, bookData, bookName(id));
+    return;
   } catch(err){
     if(!looksLikeBookPermissionError(err)) throw err;
+  }
+  const ok = await ensureHandlePermission(handle, true, 'readwrite');
+  if(ok){
+    await writeBookFile(handle, bookData, bookName(id));
+    return;
+  }
+  try{
     await writeBookAsync(id, bookData, true);
+  } catch(err){
+    throw new Error('Saknar behörighet att spara bokfilen. Tillåt åtkomst när webbläsaren frågar.');
   }
 }
 
@@ -12493,10 +12504,11 @@ async function saveNewTransaction(){
 
   let draft;
   try{
-    draft = await readBookPreferGranted(bookId);
+    // Använd boken i minnet — undvik läsbehörighet vid varje OK (mobil).
+    draft = bookWorkingCopy();
   } catch(err){
     addBox(newTxMessages, 'notice',
-      (err && err.message ? err.message : 'Kunde inte läsa bokfilen.') + ' Inget sparades.');
+      (err && err.message ? err.message : 'Kunde inte förbereda boken.') + ' Inget sparades.');
     return;
   }
 
@@ -12588,12 +12600,12 @@ async function confirmNewTxDelete(){
 
   let draft;
   try{
-    draft = await readBookPreferGranted(bookId);
+    draft = bookWorkingCopy();
   } catch(err){
     hideNewTxDeleteConfirm();
     clear(newTxMessages);
     addBox(newTxMessages, 'notice',
-      (err && err.message ? err.message : 'Kunde inte läsa bokfilen.') + ' Inget togs bort.');
+      (err && err.message ? err.message : 'Kunde inte förbereda boken.') + ' Inget togs bort.');
     return;
   }
 
