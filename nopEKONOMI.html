@@ -3441,7 +3441,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-04 v01';
+const APP_VERSION = '2026-09-04 v02';
 
 /* =====================================================================
    INNEHÅLL
@@ -12448,6 +12448,17 @@ async function saveNewTransaction(){
     return;
   }
 
+  // Mobil: väck filbehörighet medan OK-klicket fortfarande räknas som gest.
+  if(isFileBook(bookId)){
+    try{
+      await getBookFileHandle(bookId, true);
+    } catch(err){
+      addBox(newTxMessages, 'notice',
+        (err && err.message ? err.message : 'Saknar behörighet till bokfilen.') + ' Inget sparades.');
+      return;
+    }
+  }
+
   let payload = newTxBuildSavePayload();
   if(payload.kind === 'single' && isProtectedPayeeName(payload.row.payee)){
     addBox(newTxMessages, 'notice',
@@ -12468,7 +12479,7 @@ async function saveNewTransaction(){
 
   let draft;
   try{
-    draft = await readBookAsync(bookId);
+    draft = await readBookAsync(bookId, true);
   } catch(err){
     addBox(newTxMessages, 'notice',
       (err && err.message ? err.message : 'Kunde inte läsa bokfilen.') + ' Inget sparades.');
@@ -12525,7 +12536,7 @@ async function saveNewTransaction(){
     }
 
     finalizeTouchedAccounts(draft, touched);
-    await writeBookAsync(bookId, draft);
+    await writeBookAsync(bookId, draft, true);
   } catch(err){
     addBox(newTxMessages, 'notice',
       err && err.message ? err.message : 'Kunde inte spara transaktionen. Inget sparades.');
@@ -12537,6 +12548,8 @@ async function saveNewTransaction(){
   markBookDirty();
 
   applyLedgerHighlightAfterSave(payload);
+  // Alltid tillbaka till kontoutdraget efter sparad post (mobil + dator).
+  newTxReturnView = 'ledger';
   closeNewTransaction();
 }
 
@@ -12561,7 +12574,7 @@ async function confirmNewTxDelete(){
 
   let draft;
   try{
-    draft = await readBookAsync(bookId);
+    draft = await readBookAsync(bookId, true);
   } catch(err){
     hideNewTxDeleteConfirm();
     clear(newTxMessages);
@@ -12597,7 +12610,7 @@ async function confirmNewTxDelete(){
     }
 
     finalizeTouchedAccounts(draft, touched);
-    await writeBookAsync(bookId, draft);
+    await writeBookAsync(bookId, draft, true);
   } catch(err){
     hideNewTxDeleteConfirm();
     clear(newTxMessages);
