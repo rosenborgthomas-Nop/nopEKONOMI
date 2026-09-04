@@ -3441,7 +3441,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-04 v05';
+const APP_VERSION = '2026-09-04 v06';
 
 /* =====================================================================
    INNEHÅLL
@@ -3737,7 +3737,7 @@ async function writeBackupSnapshotFile(handle, sourceRaw, name){
 
 async function readBookAsync(id, interactive){
   if(isFileBook(id)){
-    const handle = await getBookFileHandle(id, !!interactive);
+    const handle = await getBookFileHandle(id, !!interactive, 'read');
     return readBookFromHandle(handle);
   }
   return readBook(id);
@@ -3745,9 +3745,9 @@ async function readBookAsync(id, interactive){
 
 async function writeBookAsync(id, bookData, interactive){
   if(isFileBook(id)){
-    const handle = await getBookFileHandle(id, !!interactive);
+    const handle = await getBookFileHandle(id, !!interactive, 'readwrite');
     await writeBookFile(handle, bookData, bookName(id));
-    return;
+    clearBookFileSyncPending(id);
   }
   writeBook(id, bookData);
 }
@@ -3774,16 +3774,34 @@ function hasBookFileSyncPending(id){
   try{ return localStorage.getItem(bookFileSyncKey(id)) === 'pending'; } catch(e){ return false; }
 }
 
-// Vardagssparning: ALDRIG permission-dialog.
-// 1) Spegla alltid till webbläsaren
-// 2) Försök JSON-fil tyst
-// 3) Om filen nekas — fortsätt ändå (pending tills backup/öppning med lov)
+function hasBookLocalMirror(id){
+  try{
+    const raw = localStorage.getItem(BOOK_PREFIX + id);
+    if(!raw) return false;
+    const parsed = JSON.parse(raw);
+    return !!(parsed && Array.isArray(parsed.order) && parsed.accounts);
+  } catch(e){
+    return false;
+  }
+}
+
+async function handlePermissionIsGranted(handle, mode){
+  if(!handle || typeof handle.queryPermission !== 'function') return false;
+  try{
+    return await handle.queryPermission({ mode: mode || 'readwrite' }) === 'granted';
+  } catch(e){
+    return false;
+  }
+}
+
+// Vardagssparning: ALDRIG permission-dialog och ALDRIG createWritable utan granted.
+// (createWritable på Android visar "Vill du spara ändringarna?" innan det ens misslyckas.)
 async function writeBookPreferGranted(id, bookData){
   writeBook(id, bookData);
   if(!isFileBook(id)) return;
 
   const handle = await idbGet(id);
-  if(!handle){
+  if(!handle || !(await handlePermissionIsGranted(handle, 'readwrite'))){
     markBookFileSyncPending(id);
     return;
   }
@@ -3821,13 +3839,14 @@ async function ensureDirPermission(handle, interactive){
 
 // Filreferensen i IndexedDB överlever omladdning, men behörigheten gör det
 // inte. Utan requestPermission kastar getFile i Chrome.
-async function getBookFileHandle(id, interactive){
+async function getBookFileHandle(id, interactive, mode){
+  mode = mode || 'readwrite';
   let handle = await idbGet(id);
-  if(handle && await ensureHandlePermission(handle, interactive, 'readwrite')){
+  if(handle && await ensureHandlePermission(handle, interactive, mode)){
     return handle;
   }
 
-  const dir = await getBookDirHandle(id, interactive);
+  const dir = await getBookDirHandle(id, interactive, mode);
   if(dir){
     const fileName = (handle && handle.name) || bookMainFileName(bookName(id));
     try{
@@ -3966,9 +3985,10 @@ async function getWorkspaceDirHandle(interactive){
   return null;
 }
 
-async function getBookDirHandle(bookId, interactive){
+async function getBookDirHandle(bookId, interactive, mode){
+  mode = mode || 'readwrite';
   let dir = await idbGet(bookId + BOOK_DIR_SUFFIX);
-  if(dir && await ensureDirPermission(dir, interactive)){
+  if(dir && await ensureHandlePermission(dir, interactive, mode)){
     await rememberWorkspaceDir(dir);
     return dir;
   }
@@ -3976,7 +3996,7 @@ async function getBookDirHandle(bookId, interactive){
   if(isFileBook(bookId)){
     const file = await idbGet(bookId);
     dir = await cacheBookDirFromFile(bookId, file);
-    if(dir && await ensureDirPermission(dir, interactive)){
+    if(dir && await ensureHandlePermission(dir, interactive, mode)){
       await rememberWorkspaceDir(dir);
       return dir;
     }
@@ -5426,18 +5446,28 @@ async function openBook(id){
   book = { order: [], accounts: {} };
   bookLookup = emptyBookLookup();
   try{
-    book = await readBookAsync(id, true);
-    migrateMixedSplitRows(book);
-    if(isFileBook(id)){
+    if(isFileBook(id) && hasBookLocalMirror(id)){
+      // Vardagsöppning: webbläsarspegel — ingen "redigera filer"-dialog.
+      book = readBook(id);
+      migrateMixedSplitRows(book);
+      if(!hasBookFileSyncPending(id)){
+        try{
+          const fromFile = await readBookAsync(id, false);
+          book = fromFile;
+          migrateMixedSplitRows(book);
+          writeBook(id, book);
+        } catch(e){ /* behåll spegeln */ }
+      }
       const file = await idbGet(id);
       await cacheBookDirFromFile(id, file);
-      // Osynkade poster från mobil (när filskrivning nekades) vinner över äldre fil.
-      if(hasBookFileSyncPending(id)){
-        const local = readBook(id);
-        if(local && Array.isArray(local.order) && local.accounts){
-          book = local;
-          migrateMixedSplitRows(book);
-        }
+    } else {
+      book = await readBookAsync(id, true);
+      migrateMixedSplitRows(book);
+      if(isFileBook(id)){
+        writeBook(id, book);
+        clearBookFileSyncPending(id);
+        const file = await idbGet(id);
+        await cacheBookDirFromFile(id, file);
       }
     }
     rebuildBookLookup();
