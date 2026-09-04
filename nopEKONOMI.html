@@ -307,6 +307,21 @@ input[type=file]{ display:none; }
   flex-wrap:wrap;
 }
 .menu-row[hidden]{ display:none; }
+.care-section-title{
+  margin:0 0 8px;
+  font-family:'JetBrains Mono', monospace;
+  font-size:12px;
+  letter-spacing:0.04em;
+  font-weight:600;
+  color:var(--headline-accent);
+}
+.care-list-edit-lede{
+  margin:0 0 14px;
+  font-size:14px;
+  line-height:1.45;
+  color:var(--text-on-paper-soft);
+}
+.care-list-edit-lede[hidden]{ display:none; }
 .start-backup-hint{
   font-size:14px;
   line-height:1.55;
@@ -1583,10 +1598,6 @@ input[type=file]{ display:none; }
     width:auto;
   }
   #viewBackup .care-list-table th:nth-child(2),
-  #viewBackup .care-list-table td.cl-count{
-    width:4.2rem;
-  }
-  #viewBackup .care-list-table th:nth-child(3),
   #viewBackup .care-list-table td.num{
     width:7rem;
     text-align:right;
@@ -1605,8 +1616,10 @@ input[type=file]{ display:none; }
     display:none;
   }
   #viewCareHub .care-list-table tbody tr[data-idx]{
-    display:block;
-    padding:12px 8px;
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    padding:10px 8px;
     border-bottom:1px solid var(--paper-line);
   }
   #viewCareHub .care-list-table tbody tr[data-idx] td{
@@ -1614,20 +1627,25 @@ input[type=file]{ display:none; }
     width:auto;
     max-width:none;
     min-width:0;
-    overflow:visible;
-    text-overflow:clip;
-    white-space:normal;
     border-bottom:none;
     padding:0;
     line-height:1.35;
     text-align:left;
   }
   #viewCareHub .care-list-table td.cl-name{
+    flex:1 1 auto;
+    min-width:0;
     font-weight:600;
     font-size:15px;
-    margin-bottom:4px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
   }
-  #viewCareHub .care-list-table td.cl-backup{
+  #viewCareHub .care-list-table td.cl-count,
+  #viewCareHub .care-list-table td.cl-backup,
+  #viewCareHub .care-list-table td.cl-saldo{
+    flex:0 0 auto;
+    white-space:nowrap;
     color:var(--text-on-paper-soft);
     font-size:13px;
   }
@@ -2643,7 +2661,8 @@ td.num.dash .cell-content{
     <p class="eyebrow view-headline" id="acctEditViewHeadline">nopEKONOMI - — - Konto</p>
 
     <header>
-      <h1>Skapa / Redigera Konto</h1>
+      <p class="care-section-title">Registervård</p>
+      <h1>Konto</h1>
       <p class="lede">
         Välj <strong>Nytt Konto</strong> för att lägga till ett konto, eller välj ett
         befintligt konto i listan för att ändra namn och öppningsbalans.
@@ -2699,6 +2718,7 @@ td.num.dash .cell-content{
     <button class="nav-link nav-back" id="careHubBackBtn" type="button">← Start</button>
     <p class="eyebrow view-headline" id="careHubViewHeadline">nopEKONOMI - — - Registervård</p>
 
+    <p class="care-section-title">Registervård</p>
     <div class="menu-row">
       <select id="careHubMenu" class="menu-select" aria-label="Registervård">
         <option value="">Välj...</option>
@@ -2740,6 +2760,8 @@ td.num.dash .cell-content{
       <div id="careHubListEditStage" hidden>
         <main class="panel">
           <div class="care-list-edit-panel" id="careListStageEdit">
+            <p class="care-section-title" id="careListEditTitle">Registervård</p>
+            <p class="care-list-edit-lede" id="careListEditLede" hidden></p>
             <div class="field">
               <label for="careListEditName" id="careListEditNameLabel">Namn</label>
               <input type="text" id="careListEditName" maxlength="80" autocomplete="off" spellcheck="false">
@@ -2787,6 +2809,7 @@ td.num.dash .cell-content{
     <button class="nav-link nav-back" id="backupBackBtn" type="button">← Registervård</button>
     <p class="eyebrow view-headline" id="backupViewHeadline">nopEKONOMI - — - Säkerhetskopia</p>
 
+    <p class="care-section-title">Registervård</p>
     <header>
       <h1>Säkerhetskopia</h1>
       <p class="lede">
@@ -2803,7 +2826,6 @@ td.num.dash .cell-content{
           <thead>
             <tr>
               <th>Fil</th>
-              <th class="cl-count num">Poster</th>
               <th class="num">Tid</th>
             </tr>
           </thead>
@@ -2841,7 +2863,8 @@ td.num.dash .cell-content{
     <p class="eyebrow view-headline" id="catEditViewHeadline">nopEKONOMI - — - Kategori</p>
 
     <header>
-      <h1>Skapa / Redigera Kategori</h1>
+      <p class="care-section-title">Registervård</p>
+      <h1>Kategori</h1>
       <p class="lede">
         Välj <strong>Ny kategori</strong> för att lägga till, eller välj en
         befintlig kategori för att byta namn.
@@ -2897,7 +2920,8 @@ td.num.dash .cell-content{
     <p class="eyebrow view-headline" id="subEditViewHeadline">nopEKONOMI - — - Underkategori</p>
 
     <header>
-      <h1>Skapa / Redigera Underkategori</h1>
+      <p class="care-section-title">Registervård</p>
+      <h1>Underkategori</h1>
       <p class="lede">
         Välj <strong>Ny underkategori</strong> för att lägga till, eller välj en
         befintlig underkategori för att byta namn.
@@ -3441,7 +3465,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-04 v07';
+const APP_VERSION = '2026-09-04 v08';
 
 /* =====================================================================
    INNEHÅLL
@@ -9353,6 +9377,13 @@ function showCareHubSection(key){
   const cfg = CARE_HUB_SECTIONS[key];
   if(!cfg) return;
 
+  if(key === 'bok'){
+    if(careHubMenu.value !== key) careHubMenu.value = key;
+    if(careHubListArea) careHubListArea.hidden = true;
+    openBackupPage();
+    return;
+  }
+
   if(cfg.kind === 'accountEdit'){
     if(careHubMenu.value !== key) careHubMenu.value = key;
     if(careHubListArea) careHubListArea.hidden = true;
@@ -9370,7 +9401,7 @@ function showCareHubSection(key){
   if(careHubListEditStage) careHubListEditStage.hidden = true;
   if(careHubListStage) careHubListStage.hidden = false;
   renderCareList();
-  refreshViewHeadline('careHub', cfg.title);
+  refreshViewHeadline('careHub', 'Registervård');
 }
 
 function runCareHubMenu(){
@@ -9437,6 +9468,8 @@ const careListOkBtn = el('careListOkBtn');
 const careListCancelBtn = el('careListCancelBtn');
 const careListEditName = el('careListEditName');
 const careListEditNameLabel = el('careListEditNameLabel');
+const careListEditTitle = el('careListEditTitle');
+const careListEditLede = el('careListEditLede');
 const careListEditBalanceWrap = el('careListEditBalanceWrap');
 const careListEditBalance = el('careListEditBalance');
 const careListEditOkBtn = el('careListEditOkBtn');
@@ -9538,16 +9571,14 @@ function rewriteSubCategoryToCategoryInBook(draft, fromSubName, toCategoryName){
 
 function buildCareListItems(){
   if(careListKind === 'bok'){
-    reg = readRegistry();
-    return (reg.order || []).map(id => {
-      const rec = lastBackupRecord(id);
-      return {
-        name: bookName(id),
-        id: id,
-        isCurrent: id === bookId,
-        lastBackupAt: rec && rec.at ? rec.at : 0
-      };
-    });
+    if(!bookId) return [];
+    const rec = lastBackupRecord(bookId);
+    return [{
+      name: bookName(bookId),
+      id: bookId,
+      isCurrent: true,
+      lastBackupAt: rec && rec.at ? rec.at : 0
+    }];
   }
   if(careListKind === 'konto'){
     return bookAccountNames()
@@ -9606,6 +9637,32 @@ function closeCareListEdit(fromSave){
   careListEditOriginal = '';
 }
 
+function careListKindLabel(){
+  if(careListKind === 'kategori') return 'Kategori';
+  if(careListKind === 'underkategori') return 'Underkategori';
+  if(careListKind === 'payee') return 'Payee';
+  if(careListKind === 'konto') return 'Konto';
+  if(careListKind === 'bok') return 'Bok';
+  return '';
+}
+
+function syncCareListEditHeading(name){
+  if(careListEditTitle) careListEditTitle.textContent = 'Registervård';
+  if(!careListEditLede) return;
+  const kindLabel = careListKindLabel();
+  const isTaxonomy = careListKind === 'payee'
+    || careListKind === 'kategori'
+    || careListKind === 'underkategori';
+  if(isTaxonomy && name && careListUsageCount(name) > 0){
+    careListEditLede.hidden = false;
+    careListEditLede.textContent =
+      'Du kan inte radera när det finns data i ' + kindLabel + '.';
+  } else {
+    careListEditLede.hidden = true;
+    careListEditLede.textContent = '';
+  }
+}
+
 function openCareListEdit(name){
   const meta = careListMeta();
   if(careListKind === 'bok'){
@@ -9640,6 +9697,7 @@ function openCareListEdit(name){
     careListDeleteBtn.textContent = meta.deleteLabel;
     const blockReason = careListDeleteBlockReason(name);
     setActionDeleteEnabled(careListDeleteBtn, !blockReason, blockReason);
+    syncCareListEditHeading(name);
   } else {
     careListEditMode = 'new';
     careListEditOriginal = '';
@@ -9654,6 +9712,7 @@ function openCareListEdit(name){
     }
     careListDeleteRow.hidden = true;
     setActionDeleteEnabled(careListDeleteBtn, false, '');
+    syncCareListEditHeading('');
   }
   careListEditName.focus();
 }
@@ -10277,7 +10336,9 @@ function setBackupAwaitingAck(on){
 function closeBackupPage(){
   hideBackupRestoreConfirm();
   setBackupAwaitingAck(false);
-  showCareHubSection('bok');
+  if(careHubMenu) careHubMenu.value = '';
+  hideCareHubSection();
+  show('careHub');
 }
 
 function hideBackupRestoreConfirm(){
@@ -10384,7 +10445,7 @@ function renderBackupList(rows){
   syncBackupRestoreBtn();
 
   if(!backupListRows.length){
-    backupBody.innerHTML = '<tr class="empty-row"><td colspan="3">'
+    backupBody.innerHTML = '<tr class="empty-row"><td colspan="2">'
       + 'Ingen originalfil eller säkerhetskopia hittades.</td></tr>';
     return;
   }
@@ -10398,7 +10459,6 @@ function renderBackupList(rows){
     const cls = row.kind === 'original' ? ' class="care-book-other"' : '';
     html += '<tr data-idx="' + i + '"' + cls + ' title="' + tip + '">'
       + '<td class="cl-name">' + escapeHtml(backupListLabel(row)) + '</td>'
-      + '<td class="cl-count">' + (row.error ? '—' : formatCount(row.posts)) + '</td>'
       + '<td class="num">' + escapeHtml(formatBackupHintAt(row.madeAt)) + '</td>'
       + '</tr>';
   }
