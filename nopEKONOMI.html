@@ -3441,7 +3441,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-04 v04';
+const APP_VERSION = '2026-09-04 v05';
 
 /* =====================================================================
    INNEHÅLL
@@ -3758,33 +3758,41 @@ function looksLikeBookPermissionError(err){
   return /behörighet|Tillåt åtkomst|NotAllowedError|SecurityError/i.test(msg);
 }
 
-// Skriv direkt till handtaget. Fråga Chrome BARA om skrivningen faktiskt nekas.
-// (queryPermission på Android säger ofta "prompt" i onödan → konstant dialog.)
+function bookFileSyncKey(id){
+  return BOOK_PREFIX + id + '__filesync';
+}
+
+function markBookFileSyncPending(id){
+  try{ localStorage.setItem(bookFileSyncKey(id), 'pending'); } catch(e){ /* ignore */ }
+}
+
+function clearBookFileSyncPending(id){
+  try{ localStorage.removeItem(bookFileSyncKey(id)); } catch(e){ /* ignore */ }
+}
+
+function hasBookFileSyncPending(id){
+  try{ return localStorage.getItem(bookFileSyncKey(id)) === 'pending'; } catch(e){ return false; }
+}
+
+// Vardagssparning: ALDRIG permission-dialog.
+// 1) Spegla alltid till webbläsaren
+// 2) Försök JSON-fil tyst
+// 3) Om filen nekas — fortsätt ändå (pending tills backup/öppning med lov)
 async function writeBookPreferGranted(id, bookData){
-  if(!isFileBook(id)){
-    writeBook(id, bookData);
-    return;
-  }
-  let handle = await idbGet(id);
+  writeBook(id, bookData);
+  if(!isFileBook(id)) return;
+
+  const handle = await idbGet(id);
   if(!handle){
-    await writeBookAsync(id, bookData, true);
+    markBookFileSyncPending(id);
     return;
   }
   try{
     await writeBookFile(handle, bookData, bookName(id));
-    return;
+    clearBookFileSyncPending(id);
   } catch(err){
     if(!looksLikeBookPermissionError(err)) throw err;
-  }
-  const ok = await ensureHandlePermission(handle, true, 'readwrite');
-  if(ok){
-    await writeBookFile(handle, bookData, bookName(id));
-    return;
-  }
-  try{
-    await writeBookAsync(id, bookData, true);
-  } catch(err){
-    throw new Error('Saknar behörighet att spara bokfilen. Tillåt åtkomst när webbläsaren frågar.');
+    markBookFileSyncPending(id);
   }
 }
 
@@ -5423,6 +5431,14 @@ async function openBook(id){
     if(isFileBook(id)){
       const file = await idbGet(id);
       await cacheBookDirFromFile(id, file);
+      // Osynkade poster från mobil (när filskrivning nekades) vinner över äldre fil.
+      if(hasBookFileSyncPending(id)){
+        const local = readBook(id);
+        if(local && Array.isArray(local.order) && local.accounts){
+          book = local;
+          migrateMixedSplitRows(book);
+        }
+      }
     }
     rebuildBookLookup();
     show('start');
@@ -10466,6 +10482,8 @@ async function confirmBackupRestore(){
     book = await readBookFromHandle(fresh);
     migrateMixedSplitRows(book);
     rebuildBookLookup();
+    writeBook(bookId, book);
+    clearBookFileSyncPending(bookId);
     markBookDirty();
   } catch(err){
     addBox(backupMessages, 'notice',
@@ -10515,9 +10533,25 @@ async function runBookBackupRotation(){
     return;
   }
 
+  let mainHandle;
+  try{
+    mainHandle = await dir.getFileHandle(mainName);
+    // Om vardagssparning bara nått webbläsaren — skriv ut till fil innan kopia.
+    if(hasBookFileSyncPending(bookId) && book && Array.isArray(book.order)){
+      await writeBookFile(mainHandle, bookWorkingCopy(), name);
+      writeBook(bookId, book);
+      clearBookFileSyncPending(bookId);
+      await idbPut(bookId, mainHandle);
+    }
+  } catch(err){
+    addBox(backupMessages, 'notice',
+      (err && err.message ? err.message : 'Kunde inte synka boken till fil.') +
+      ' Säkerhetskopia avbröts.');
+    return;
+  }
+
   let sourceRaw;
   try{
-    const mainHandle = await dir.getFileHandle(mainName);
     const parsed = await readBookFileRaw(mainHandle);
     sourceRaw = parsed.raw;
     if(!sourceRaw.savedAt && parsed.lastModified){
