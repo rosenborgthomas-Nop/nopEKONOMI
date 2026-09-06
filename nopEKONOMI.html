@@ -2319,6 +2319,7 @@ th.num{ text-align:right; }
   width:9px;
   cursor:col-resize;
   z-index:2;
+  touch-action:none;
 }
 .col-resizer::after{
   content:"";
@@ -2332,6 +2333,26 @@ th.num{ text-align:right; }
 .col-resizer:hover::after, .col-resizer.resizing::after{
   background:var(--gold-bright);
   width:2px;
+}
+body.col-resizing{
+  cursor:col-resize;
+  user-select:none;
+  -webkit-user-select:none;
+}
+body.col-resizing .table-scroll{
+  overflow:hidden;
+}
+@media (hover:none), (pointer:coarse){
+  .col-resizer{
+    width:28px;
+    right:-8px;
+  }
+  .col-resizer::after{
+    left:calc(50% + 4px);
+  }
+  .col-resizer.resizing{
+    background:rgba(201,162,39,0.35);
+  }
 }
 
 tbody td{
@@ -3465,7 +3486,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-06 v01';
+const APP_VERSION = '2026-09-07 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -14494,6 +14515,26 @@ function openLedger(name){
 
 function widthKey(name){ return bookId + '\u0001' + name; }
 
+function resolvedLedgerColWidth(widths, colKey, defaults){
+  if(widths[colKey] != null) return widths[colKey];
+  let w = defaults[colKey];
+  if(colKey === 'payee' && isReportMobileLayout()){
+    const vw = Math.min(window.innerWidth || 360, screen.width || 360) - 36;
+    const reserved = (defaults.date || 100)
+      + (defaults.inout || defaults.in || 120)
+      + (defaults.saldo || 110)
+      + 20;
+    w = Math.max(72, Math.min(w, vw - reserved));
+  }
+  return w;
+}
+
+function bindColumnResizer(resizer, th, colKey){
+  resizer.addEventListener('mousedown', e => startColumnResize(e, th, colKey));
+  resizer.addEventListener('touchstart', e => startColumnResize(e, th, colKey), { passive: false });
+  resizer.addEventListener('click', e => e.stopPropagation());
+}
+
 function colWidthsFor(name){
   const w = readColWidths()[widthKey(name)] || {};
   if(w.inout == null && (w.in != null || w.ut != null)){
@@ -14774,7 +14815,7 @@ function renderReportDrillLedger(){
     const isActive = sort.sortKey === col.key;
     if(isActive) th.classList.add('active-sort');
     const arrow = isActive ? (sort.sortDir === 'asc' ? '▲' : '▼') : '';
-    const width = widths[col.key] || DEFAULT_DRILL_COL_WIDTH[col.key];
+    const width = resolvedLedgerColWidth(widths, col.key, DEFAULT_DRILL_COL_WIDTH);
     th.style.width = width + 'px';
     totalWidth += width;
 
@@ -14795,8 +14836,7 @@ function renderReportDrillLedger(){
     if(index < columns.length - 1){
       const resizer = document.createElement('span');
       resizer.className = 'col-resizer';
-      resizer.addEventListener('mousedown', e => startColumnResize(e, th, col.key));
-      resizer.addEventListener('click', e => e.stopPropagation());
+      bindColumnResizer(resizer, th, col.key);
       th.appendChild(resizer);
     }
 
@@ -14899,7 +14939,7 @@ function renderAccountLedger(){
     if(isActive) th.classList.add('active-sort');
     const arrow = isActive ? (sort.sortDir === 'asc' ? '▲' : '▼') : '';
 
-    const width = widths[col.key] || DEFAULT_COL_WIDTH[col.key];
+    const width = resolvedLedgerColWidth(widths, col.key, DEFAULT_COL_WIDTH);
     th.style.width = width + 'px';
     totalWidth += width;
 
@@ -14920,8 +14960,7 @@ function renderAccountLedger(){
     if(index < COLUMNS.length - 1){
       const resizer = document.createElement('span');
       resizer.className = 'col-resizer';
-      resizer.addEventListener('mousedown', e => startColumnResize(e, th, col.key));
-      resizer.addEventListener('click', e => e.stopPropagation());
+      bindColumnResizer(resizer, th, col.key);
       th.appendChild(resizer);
     }
 
@@ -15169,20 +15208,28 @@ function ledgerRowHtml(r, balance, idx){
     + '</tr>';
 }
 
+function clientXFromPointerEvent(ev){
+  if(ev.touches && ev.touches.length) return ev.touches[0].clientX;
+  if(ev.changedTouches && ev.changedTouches.length) return ev.changedTouches[0].clientX;
+  return ev.clientX;
+}
+
 function startColumnResize(e, th, colKey){
+  if(e.type === 'touchstart' && e.touches && e.touches.length > 1) return;
   e.preventDefault();
   e.stopPropagation();
 
   const account = ledgerContextKey();
-  const startX = e.clientX;
+  const startX = clientXFromPointerEvent(e);
   const startWidth = th.getBoundingClientRect().width;
-  const resizerEl = e.target;
+  const resizerEl = e.currentTarget || e.target;
   const table = th.closest('table');
   const startTableWidth = table
     ? (parseFloat(table.style.width) || table.getBoundingClientRect().width) : 0;
-  const widths = colWidthsFor(account);
+  const widths = Object.assign({}, colWidthsFor(account));
 
   resizerEl.classList.add('resizing');
+  document.body.classList.add('col-resizing');
   hideTooltip();
 
   let frame = 0;
@@ -15197,7 +15244,8 @@ function startColumnResize(e, th, colKey){
   }
 
   function onMove(ev){
-    widths[colKey] = Math.max(50, Math.round(startWidth + (ev.clientX - startX)));
+    if(ev.cancelable) ev.preventDefault();
+    widths[colKey] = Math.max(50, Math.round(startWidth + (clientXFromPointerEvent(ev) - startX)));
     // Bredden skrivs till sidan högst en gång per bildruta. Varje skrivning
     // tvingar en ny layoutberäkning av hela tabellen, och den kostar i
     // konton med tusentals rader.
@@ -15208,15 +15256,22 @@ function startColumnResize(e, th, colKey){
     if(frame){ cancelAnimationFrame(frame); frame = 0; }
     applyWidth();
     resizerEl.classList.remove('resizing');
+    document.body.classList.remove('col-resizing');
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
-    // Sparas när musen släpps, inte vid varje pixel. Ingen omritning behövs
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+    document.removeEventListener('touchcancel', onUp);
+    // Sparas när pekaren släpps, inte vid varje pixel. Ingen omritning behövs
     // — bredderna sitter redan där de ska.
     saveColWidthsFor(account, widths);
   }
 
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('touchend', onUp);
+  document.addEventListener('touchcancel', onUp);
 }
 
 function tooltipHtml(r){
