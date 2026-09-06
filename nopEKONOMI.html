@@ -2352,10 +2352,10 @@ tbody tr.row-selected{
 }
 tbody tr.row-selected:hover{ background:rgba(201,162,39,0.30); }
 
-/* In/Ut/Saldo. Cellen får inte bli display:flex — det bryter tabellens
-   layout så kolumnerna kollapsar. Flex-tricket ligger i en span inuti
-   cellen, så att innehållet klipps i höger ände och aldrig där siffrorna
-   börjar. */
+/* In/Ut (sammanslagen) / Saldo. Cellen får inte bli display:flex — det bryter
+   tabellens layout så kolumnerna kollapsar. Flex-tricket ligger i en span
+   inuti cellen, så att innehållet klipps i höger ände och aldrig där
+   siffrorna börjar. */
 td.num{ text-align:right; }
 td.num .num-wrap{
   display:flex;
@@ -2371,7 +2371,7 @@ td.num .cell-content{
   min-width:0;
   font-family:'JetBrains Mono', monospace;
 }
-td.num.in .cell-content{ color:var(--teal); }
+td.num.in .cell-content{ color:var(--chart-positive); }
 td.num.ut .cell-content{ color:var(--wine); }
 td.num.saldo.neg .cell-content{ color:var(--wine); }
 td.num.dash .cell-content{
@@ -3465,7 +3465,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-04 v08';
+const APP_VERSION = '2026-09-06 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -14291,15 +14291,14 @@ const txTooltip = el('txTooltip');
 const COLUMNS = [
   { key: 'date',  label: 'Datum' },
   { key: 'payee', label: 'Payee' },
-  { key: 'in',    label: 'In',    num: true },
-  { key: 'ut',    label: 'Ut',    num: true },
+  { key: 'inout', label: 'In/Ut', num: true },
   { key: 'saldo', label: 'Saldo', num: true }
 ];
 
-// Alla fem kolumner har en fast startbredd. Ingen av dem är "gummi" —
+// Alla kolumner har en fast startbredd. Ingen av dem är "gummi" —
 // annars knuffas de andra runt så fort man drar i en enda.
-const DEFAULT_COL_WIDTH = { date: 100, payee: 400, in: 100, ut: 100, saldo: 110 };
-const DEFAULT_DRILL_COL_WIDTH = { date: 100, payee: 280, cat: 220, sub: 220, sum: 110, mid: 280, in: 100, ut: 100 };
+const DEFAULT_COL_WIDTH = { date: 100, payee: 400, inout: 120, saldo: 110 };
+const DEFAULT_DRILL_COL_WIDTH = { date: 100, payee: 280, cat: 220, sub: 220, sum: 110, mid: 280, inout: 120 };
 const DRILL_SORT_KEY = '__reportDrill__';
 
 const ledgerMenuRow = el('ledgerMenuRow');
@@ -14395,8 +14394,7 @@ function drillColumnsFor(meta){
         { key: 'mid', label: 'Payee' },
         { key: 'sub', label: 'Kategori' }
       ];
-  cols.push({ key: 'in', label: 'In', num: true });
-  cols.push({ key: 'ut', label: 'Ut', num: true });
+  cols.push({ key: 'inout', label: 'In/Ut', num: true });
   return cols;
 }
 
@@ -14428,8 +14426,10 @@ function sortedDrillItems(items, sort, meta){
     switch(sort.sortKey){
       case 'mid': return drillMidCellText(row, meta).toLowerCase();
       case 'sub': return drillSubCellText(row, meta).toLowerCase();
-      case 'in': return row.total >= 0 ? row.total : -Infinity;
-      case 'ut': return row.total < 0 ? Math.abs(row.total) : -Infinity;
+      case 'inout':
+      case 'in':
+      case 'ut':
+        return row.total;
       default: return row.date || '';
     }
   };
@@ -14495,7 +14495,13 @@ function openLedger(name){
 function widthKey(name){ return bookId + '\u0001' + name; }
 
 function colWidthsFor(name){
-  return readColWidths()[widthKey(name)] || {};
+  const w = readColWidths()[widthKey(name)] || {};
+  if(w.inout == null && (w.in != null || w.ut != null)){
+    const merged = Object.assign({}, w);
+    merged.inout = Math.max(Number(w.in) || 0, Number(w.ut) || 0) || undefined;
+    return merged;
+  }
+  return w;
 }
 
 function saveColWidthsFor(name, widths){
@@ -14511,6 +14517,9 @@ function sortFor(name){
       ? { sortKey: 'sum', sortDir: 'desc' }
       : { sortKey: 'date', sortDir: 'desc' };
   }
+  if(ledgerSort[key].sortKey === 'in' || ledgerSort[key].sortKey === 'ut'){
+    ledgerSort[key].sortKey = 'inout';
+  }
   return ledgerSort[key];
 }
 
@@ -14525,8 +14534,10 @@ function sortedLedgerItems(items, sort){
   const valueFor = item => {
     switch(sort.sortKey){
       case 'payee': return (r(item).payee || '').toLowerCase();
-      case 'in': return r(item).total >= 0 ? r(item).total : -Infinity;
-      case 'ut': return r(item).total < 0 ? Math.abs(r(item).total) : -Infinity;
+      case 'inout':
+      case 'in':
+      case 'ut':
+        return r(item).total;
       case 'saldo': return item.balance;
       default: return r(item).date;
     }
@@ -14924,7 +14935,7 @@ function renderAccountLedger(){
   const tbody = document.createElement('tbody');
 
   if(!view.length){
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="5">'
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">'
       + 'Inga transaktioner i det här kontot ännu.</td></tr>';
   } else {
     const parts = new Array(view.length);
@@ -15010,20 +15021,13 @@ function drillRowHtml(item, meta, idx){
     midCell += ' <span class="badge split">' + r.splitCount + ' delar</span>';
   }
 
-  const inCell = r.total >= 0
-    ? '<td class="num in">' + numCell(formatAmount(r.total)) + '</td>'
-    : '<td class="num dash">' + numCell('–') + '</td>';
-  const utCell = r.total < 0
-    ? '<td class="num ut">' + numCell(formatAmount(Math.abs(r.total))) + '</td>'
-    : '<td class="num dash">' + numCell('–') + '</td>';
-
   return '<tr data-idx="' + idx + '" data-account="' + escapeAttr(item.account) + '"'
     + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>'
     + '<td>' + escapeHtml(r.date)
     + (r.dateOk ? '' : ' <span class="badge mismatch">⚠</span>') + '</td>'
     + '<td>' + midCell + '</td>'
     + '<td>' + escapeHtml(drillSubCellText(r, meta)) + '</td>'
-    + inCell + utCell
+    + ledgerInOutCellHtml(r.total)
     + '</tr>';
 }
 
@@ -15132,6 +15136,13 @@ function bindLedgerBodyEvents(tbody){
   });
 }
 
+function ledgerInOutCellHtml(total){
+  const n = typeof total === 'number' ? total : 0;
+  const numCell = text => '<span class="num-wrap"><span class="cell-content">' + text + '</span></span>';
+  const cls = n < 0 ? 'ut' : 'in';
+  return '<td class="num ' + cls + '">' + numCell(formatAmount(n)) + '</td>';
+}
+
 function ledgerRowHtml(r, balance, idx){
   const cls = [];
   if(!r.dateOk) cls.push('row-bad-date');
@@ -15145,12 +15156,6 @@ function ledgerRowHtml(r, balance, idx){
   // kolumnerna. Flexen ligger i en span inuti, så att text klipps i höger
   // ände och aldrig där siffrorna börjar.
   const numCell = text => '<span class="num-wrap"><span class="cell-content">' + text + '</span></span>';
-  const inCell = r.total >= 0
-    ? '<td class="num in">' + numCell(formatAmount(r.total)) + '</td>'
-    : '<td class="num dash">' + numCell('–') + '</td>';
-  const utCell = r.total < 0
-    ? '<td class="num ut">' + numCell(formatAmount(Math.abs(r.total))) + '</td>'
-    : '<td class="num dash">' + numCell('–') + '</td>';
   const saldoCell = '<td class="num saldo' + (balance < 0 ? ' neg' : '') + '">'
     + numCell(formatAmount(balance)) + '</td>';
 
@@ -15158,7 +15163,9 @@ function ledgerRowHtml(r, balance, idx){
     + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>'
     + '<td>' + escapeHtml(r.date)
     + (r.dateOk ? '' : ' <span class="badge mismatch">⚠</span>') + '</td>'
-    + '<td>' + payeeCell + '</td>' + inCell + utCell + saldoCell
+    + '<td>' + payeeCell + '</td>'
+    + ledgerInOutCellHtml(r.total)
+    + saldoCell
     + '</tr>';
 }
 
