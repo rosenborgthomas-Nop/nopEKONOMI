@@ -2334,13 +2334,22 @@ th.num{ text-align:right; }
   background:var(--gold-bright);
   width:2px;
 }
+.col-resize-guide{
+  position:fixed;
+  top:0;
+  width:2px;
+  margin-left:-1px;
+  background:var(--gold-bright);
+  pointer-events:none;
+  z-index:1000;
+  display:none;
+  box-shadow:0 0 0 1px rgba(201,162,39,0.35);
+}
+.col-resize-guide.active{ display:block; }
 body.col-resizing{
   cursor:col-resize;
   user-select:none;
   -webkit-user-select:none;
-}
-body.col-resizing .table-scroll{
-  overflow:hidden;
 }
 @media (hover:none), (pointer:coarse){
   .col-resizer{
@@ -3486,7 +3495,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-07 v01';
+const APP_VERSION = '2026-09-07 v02';
 
 /* =====================================================================
    INNEHÅLL
@@ -15214,6 +15223,17 @@ function clientXFromPointerEvent(ev){
   return ev.clientX;
 }
 
+function ensureColResizeGuide(){
+  let guide = document.getElementById('colResizeGuide');
+  if(!guide){
+    guide = document.createElement('div');
+    guide.id = 'colResizeGuide';
+    guide.className = 'col-resize-guide';
+    document.body.appendChild(guide);
+  }
+  return guide;
+}
+
 function startColumnResize(e, th, colKey){
   if(e.type === 'touchstart' && e.touches && e.touches.length > 1) return;
   e.preventDefault();
@@ -15222,39 +15242,41 @@ function startColumnResize(e, th, colKey){
   const account = ledgerContextKey();
   const startX = clientXFromPointerEvent(e);
   const startWidth = th.getBoundingClientRect().width;
+  const thLeft = th.getBoundingClientRect().left;
   const resizerEl = e.currentTarget || e.target;
   const table = th.closest('table');
+  const scrollWrap = th.closest('.table-scroll');
   const startTableWidth = table
     ? (parseFloat(table.style.width) || table.getBoundingClientRect().width) : 0;
   const widths = Object.assign({}, colWidthsFor(account));
+  let currentWidth = startWidth;
+
+  const guide = ensureColResizeGuide();
+  const scrollRect = scrollWrap
+    ? scrollWrap.getBoundingClientRect()
+    : { top: 0, bottom: window.innerHeight };
+  guide.style.top = scrollRect.top + 'px';
+  guide.style.height = Math.max(0, scrollRect.bottom - scrollRect.top) + 'px';
+  guide.style.left = (thLeft + startWidth) + 'px';
+  guide.classList.add('active');
 
   resizerEl.classList.add('resizing');
   document.body.classList.add('col-resizing');
   hideTooltip();
 
-  let frame = 0;
-
-  function applyWidth(){
-    frame = 0;
-    const w = widths[colKey];
-    th.style.width = w + 'px';
-    // Tabellens totalbredd följer med i samma rörelse, annars släpar den
-    // efter till nästa omritning.
-    if(table) table.style.width = (startTableWidth + (w - startWidth)) + 'px';
-  }
-
+  // Under drag: rör bara hjälplinjen (ingen tabell-omlayout per pixel).
   function onMove(ev){
     if(ev.cancelable) ev.preventDefault();
-    widths[colKey] = Math.max(50, Math.round(startWidth + (clientXFromPointerEvent(ev) - startX)));
-    // Bredden skrivs till sidan högst en gång per bildruta. Varje skrivning
-    // tvingar en ny layoutberäkning av hela tabellen, och den kostar i
-    // konton med tusentals rader.
-    if(!frame) frame = requestAnimationFrame(applyWidth);
+    currentWidth = Math.max(50, Math.round(startWidth + (clientXFromPointerEvent(ev) - startX)));
+    guide.style.left = (thLeft + currentWidth) + 'px';
   }
 
   function onUp(){
-    if(frame){ cancelAnimationFrame(frame); frame = 0; }
-    applyWidth();
+    widths[colKey] = currentWidth;
+    th.style.width = currentWidth + 'px';
+    if(table) table.style.width = (startTableWidth + (currentWidth - startWidth)) + 'px';
+
+    guide.classList.remove('active');
     resizerEl.classList.remove('resizing');
     document.body.classList.remove('col-resizing');
     document.removeEventListener('mousemove', onMove);
@@ -15262,8 +15284,6 @@ function startColumnResize(e, th, colKey){
     document.removeEventListener('touchmove', onMove);
     document.removeEventListener('touchend', onUp);
     document.removeEventListener('touchcancel', onUp);
-    // Sparas när pekaren släpps, inte vid varje pixel. Ingen omritning behövs
-    // — bredderna sitter redan där de ska.
     saveColWidthsFor(account, widths);
   }
 
