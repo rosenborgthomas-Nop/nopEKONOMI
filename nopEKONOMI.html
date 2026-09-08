@@ -3534,7 +3534,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-08 v04';
+const APP_VERSION = '2026-09-08 v05';
 
 /* =====================================================================
    INNEHÅLL
@@ -8603,24 +8603,21 @@ function fillToplistPlainCol(ol, entries){
   ol.innerHTML = entries.map(toplistRowHtmlFromEntry).join('');
 }
 
-function applyToplistSortToDom(){
+function applyToplistSortToDom(side){
   if(!toplistSession || !reportBody) return;
   const block = reportBody.querySelector('.toplist-block');
   if(!block) return;
-  const { sortKey, sortDir, positive, negative, nameLabel } = toplistSession;
-  const posSorted = sortToplistEntries(positive, sortKey, sortDir);
-  const negSorted = sortToplistEntries(negative, sortKey, sortDir);
-  const headHtml = toplistSortHeadHtml(sortKey, sortDir, nameLabel || 'Namn');
-  const cols = block.querySelectorAll('.toplist-plain-col');
-  if(cols[0]){
-    const head = cols[0].querySelector('.toplist-sort-head');
-    if(head) head.outerHTML = headHtml;
-    fillToplistPlainCol(cols[0].querySelector('ol'), posSorted);
-  }
-  if(cols[1]){
-    const head = cols[1].querySelector('.toplist-sort-head');
-    if(head) head.outerHTML = headHtml;
-    fillToplistPlainCol(cols[1].querySelector('ol'), negSorted);
+  const nameLabel = toplistSession.nameLabel || 'Namn';
+  const sides = side ? [side] : ['in', 'out'];
+  for(const s of sides){
+    const col = block.querySelector('.toplist-plain-col[data-side="' + s + '"]');
+    if(!col) continue;
+    const state = toplistSession[s] || { sortKey: 'value', sortDir: 'desc' };
+    const items = s === 'in' ? toplistSession.positive : toplistSession.negative;
+    const sorted = sortToplistEntries(items, state.sortKey, state.sortDir);
+    const head = col.querySelector('.toplist-sort-head');
+    if(head) head.outerHTML = toplistSortHeadHtml(state.sortKey, state.sortDir, nameLabel);
+    fillToplistPlainCol(col.querySelector('ol'), sorted);
   }
 }
 
@@ -8631,17 +8628,24 @@ function bindToplistSortUi(){
     const hit = e.target && (e.target.nodeType === 1 ? e.target : e.target.parentElement);
     const btn = hit && hit.closest && hit.closest('.toplist-sort');
     if(!btn || !toplistSession) return;
+    const col = btn.closest('.toplist-plain-col[data-side]');
+    const side = col && col.getAttribute('data-side');
+    if(side !== 'in' && side !== 'out') return;
     const key = btn.getAttribute('data-sort');
     if(key !== 'name' && key !== 'value') return;
     e.preventDefault();
     e.stopPropagation();
-    if(toplistSession.sortKey === key){
-      toplistSession.sortDir = toplistSession.sortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      toplistSession.sortKey = key;
-      toplistSession.sortDir = key === 'name' ? 'asc' : 'desc';
+    if(!toplistSession[side]){
+      toplistSession[side] = { sortKey: 'value', sortDir: 'desc' };
     }
-    applyToplistSortToDom();
+    const state = toplistSession[side];
+    if(state.sortKey === key){
+      state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.sortKey = key;
+      state.sortDir = key === 'name' ? 'asc' : 'desc';
+    }
+    applyToplistSortToDom(side);
   }, true);
 }
 
@@ -8790,11 +8794,11 @@ function renderTopListReport(kind, fromIso, toIso){
   const negative = negativeRaw.map(e => withChart(e, true, 'expense'));
   const nameLabel = toplistNameSortLabel(kind);
   toplistSession = {
-    sortKey: 'value',
-    sortDir: 'desc',
     nameLabel: nameLabel,
     positive: positive,
-    negative: negative
+    negative: negative,
+    in: { sortKey: 'value', sortDir: 'desc' },
+    out: { sortKey: 'value', sortDir: 'desc' }
   };
 
   const positiveChart = positiveChartItems.length
@@ -8813,7 +8817,8 @@ function renderTopListReport(kind, fromIso, toIso){
       })), { tone: 'expense', kicker: 'TOPP UT', maxBars: TOPLIST_RANK_MAX, hideCount: true, compact: true })
     : '<div class="payee-chart-panel is-expense"><p class="payee-chart-kicker">TOPP UT</p><p class="payee-chart-empty">Inget att visa</p></div>';
 
-  const sortHead = toplistSortHeadHtml('value', 'desc', nameLabel);
+  const sortHeadIn = toplistSortHeadHtml('value', 'desc', nameLabel);
+  const sortHeadOut = toplistSortHeadHtml('value', 'desc', nameLabel);
   const posSorted = sortToplistEntries(positive, 'value', 'desc');
   const negSorted = sortToplistEntries(negative, 'value', 'desc');
 
@@ -8827,12 +8832,12 @@ function renderTopListReport(kind, fromIso, toIso){
     html += '<div class="report-divider"></div>';
     html += '<div class="payee-chart-board">' + positiveChart + negativeChart + '</div>';
     html += '<div class="toplist-plain">';
-    html += '<div class="toplist-plain-col" data-side="in"><h3>TOPP IN</h3>' + sortHead + '<ol>';
+    html += '<div class="toplist-plain-col" data-side="in"><h3>TOPP IN</h3>' + sortHeadIn + '<ol>';
     html += posSorted.length
       ? posSorted.map(toplistRowHtmlFromEntry).join('')
       : '<li>Inget att visa</li>';
     html += '</ol></div>';
-    html += '<div class="toplist-plain-col" data-side="out"><h3>TOPP UT</h3>' + sortHead + '<ol>';
+    html += '<div class="toplist-plain-col" data-side="out"><h3>TOPP UT</h3>' + sortHeadOut + '<ol>';
     html += negSorted.length
       ? negSorted.map(toplistRowHtmlFromEntry).join('')
       : '<li>Inget att visa</li>';
