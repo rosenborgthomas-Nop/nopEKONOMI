@@ -1929,31 +1929,39 @@ input[type=file]{ display:none; }
 .toplist-sort-head{
   display:flex;
   justify-content:space-between;
+  align-items:center;
   gap:10px;
   margin:0 0 8px;
-  padding:0 0 6px 0;
-  border-bottom:1px solid var(--paper-line);
+  padding:4px 4px 8px;
+  border-bottom:1px solid var(--paper-line-strong);
 }
 .toplist-sort{
   font-family:'JetBrains Mono', monospace;
-  font-size:10px;
-  letter-spacing:0.06em;
+  font-size:11px;
+  letter-spacing:0.05em;
   text-transform:uppercase;
-  color:var(--text-on-paper-soft);
+  font-weight:600;
+  color:var(--text-on-paper);
   background:none;
   border:none;
-  padding:0;
+  padding:4px 2px;
   cursor:pointer;
   user-select:none;
+  min-width:0;
 }
-.toplist-sort:hover{ color:var(--text-on-paper); }
+.toplist-sort:hover{ color:var(--ink); }
 .toplist-sort.active-sort{ color:var(--gold); }
 .toplist-sort .arrow{
   display:inline-block;
-  width:10px;
-  opacity:0.7;
+  min-width:10px;
+  opacity:0.75;
+}
+.toplist-sort[data-sort="name"]{
+  flex:1 1 auto;
+  text-align:left;
 }
 .toplist-sort[data-sort="value"]{
+  flex:0 0 auto;
   text-align:right;
 }
 .toplist-plain-col ol{
@@ -3526,7 +3534,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-08 v03';
+const APP_VERSION = '2026-09-08 v04';
 
 /* =====================================================================
    INNEHÅLL
@@ -8559,18 +8567,24 @@ function sortToplistEntries(items, sortKey, sortDir){
   });
 }
 
-function toplistSortHeadHtml(sortKey, sortDir){
+function toplistSortHeadHtml(sortKey, sortDir, nameLabel){
+  nameLabel = nameLabel || 'Namn';
   function btn(key, label){
     const active = sortKey === key;
-    const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '';
+    const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '◇';
     return '<button type="button" class="toplist-sort' + (active ? ' active-sort' : '')
-      + '" data-sort="' + key + '">' + escapeHtml(label)
-      + ' <span class="arrow">' + arrow + '</span></button>';
+      + '" data-sort="' + key + '" title="Sortera efter ' + escapeAttr(label) + '">'
+      + escapeHtml(label)
+      + ' <span class="arrow" aria-hidden="true">' + arrow + '</span></button>';
   }
-  return '<div class="toplist-sort-head">'
-    + btn('name', 'Namn')
+  return '<div class="toplist-sort-head" role="group" aria-label="Sortering">'
+    + btn('name', nameLabel)
     + btn('value', 'Belopp')
     + '</div>';
+}
+
+function toplistNameSortLabel(kind){
+  return (topListSpecForKind(kind).titleLabel || 'Namn');
 }
 
 function toplistRowHtmlFromEntry(item){
@@ -8593,18 +8607,19 @@ function applyToplistSortToDom(){
   if(!toplistSession || !reportBody) return;
   const block = reportBody.querySelector('.toplist-block');
   if(!block) return;
-  const { sortKey, sortDir, positive, negative } = toplistSession;
+  const { sortKey, sortDir, positive, negative, nameLabel } = toplistSession;
   const posSorted = sortToplistEntries(positive, sortKey, sortDir);
   const negSorted = sortToplistEntries(negative, sortKey, sortDir);
+  const headHtml = toplistSortHeadHtml(sortKey, sortDir, nameLabel || 'Namn');
   const cols = block.querySelectorAll('.toplist-plain-col');
   if(cols[0]){
     const head = cols[0].querySelector('.toplist-sort-head');
-    if(head) head.outerHTML = toplistSortHeadHtml(sortKey, sortDir);
+    if(head) head.outerHTML = headHtml;
     fillToplistPlainCol(cols[0].querySelector('ol'), posSorted);
   }
   if(cols[1]){
     const head = cols[1].querySelector('.toplist-sort-head');
-    if(head) head.outerHTML = toplistSortHeadHtml(sortKey, sortDir);
+    if(head) head.outerHTML = headHtml;
     fillToplistPlainCol(cols[1].querySelector('ol'), negSorted);
   }
 }
@@ -8613,12 +8628,13 @@ function bindToplistSortUi(){
   if(!reportBody || reportBody.dataset.toplistSortBound === '1') return;
   reportBody.dataset.toplistSortBound = '1';
   reportBody.addEventListener('click', e => {
-    const btn = e.target.closest && e.target.closest('.toplist-sort[data-sort]');
+    const hit = e.target && (e.target.nodeType === 1 ? e.target : e.target.parentElement);
+    const btn = hit && hit.closest && hit.closest('.toplist-sort');
     if(!btn || !toplistSession) return;
-    e.preventDefault();
-    e.stopPropagation();
     const key = btn.getAttribute('data-sort');
     if(key !== 'name' && key !== 'value') return;
+    e.preventDefault();
+    e.stopPropagation();
     if(toplistSession.sortKey === key){
       toplistSession.sortDir = toplistSession.sortDir === 'asc' ? 'desc' : 'asc';
     } else {
@@ -8626,7 +8642,7 @@ function bindToplistSortUi(){
       toplistSession.sortDir = key === 'name' ? 'asc' : 'desc';
     }
     applyToplistSortToDom();
-  });
+  }, true);
 }
 
 function normalizeTopListKind(kind){
@@ -8772,9 +8788,11 @@ function renderTopListReport(kind, fromIso, toIso){
 
   const positive = positiveRaw.map(e => withChart(e, false, 'income'));
   const negative = negativeRaw.map(e => withChart(e, true, 'expense'));
+  const nameLabel = toplistNameSortLabel(kind);
   toplistSession = {
     sortKey: 'value',
     sortDir: 'desc',
+    nameLabel: nameLabel,
     positive: positive,
     negative: negative
   };
@@ -8795,7 +8813,7 @@ function renderTopListReport(kind, fromIso, toIso){
       })), { tone: 'expense', kicker: 'TOPP UT', maxBars: TOPLIST_RANK_MAX, hideCount: true, compact: true })
     : '<div class="payee-chart-panel is-expense"><p class="payee-chart-kicker">TOPP UT</p><p class="payee-chart-empty">Inget att visa</p></div>';
 
-  const sortHead = toplistSortHeadHtml('value', 'desc');
+  const sortHead = toplistSortHeadHtml('value', 'desc', nameLabel);
   const posSorted = sortToplistEntries(positive, 'value', 'desc');
   const negSorted = sortToplistEntries(negative, 'value', 'desc');
 
