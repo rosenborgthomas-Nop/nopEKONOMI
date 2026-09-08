@@ -1926,6 +1926,36 @@ input[type=file]{ display:none; }
   text-transform:uppercase;
   color:var(--text-on-paper-soft);
 }
+.toplist-sort-head{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  margin:0 0 8px;
+  padding:0 0 6px 0;
+  border-bottom:1px solid var(--paper-line);
+}
+.toplist-sort{
+  font-family:'JetBrains Mono', monospace;
+  font-size:10px;
+  letter-spacing:0.06em;
+  text-transform:uppercase;
+  color:var(--text-on-paper-soft);
+  background:none;
+  border:none;
+  padding:0;
+  cursor:pointer;
+  user-select:none;
+}
+.toplist-sort:hover{ color:var(--text-on-paper); }
+.toplist-sort.active-sort{ color:var(--gold); }
+.toplist-sort .arrow{
+  display:inline-block;
+  width:10px;
+  opacity:0.7;
+}
+.toplist-sort[data-sort="value"]{
+  text-align:right;
+}
 .toplist-plain-col ol{
   margin:0;
   padding-left:18px;
@@ -3496,7 +3526,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-08 v02';
+const APP_VERSION = '2026-09-08 v03';
 
 /* =====================================================================
    INNEHÅLL
@@ -6779,6 +6809,7 @@ function clearReportCanvas(){
     reportPlaceholder.hidden = false;
   }
   reportChartSeries = Object.create(null);
+  toplistSession = null;
   hideReportRowChart();
   syncReportCopyBtn();
 }
@@ -7323,6 +7354,7 @@ function printHtmlDocument(title, bodyHtml, opts){
     + '.payee-chart-svg{display:block;width:100%;height:auto;}'
     + '.toplist-plain{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px;}'
     + '.toplist-plain-col h3{margin:0 0 8px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;}'
+    + '.toplist-sort-head{display:none;}'
     + '.toplist-plain-col ol{margin:0;padding:0;list-style:none;}'
     + '.toplist-plain-col li{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px solid #eee;font-size:12px;}'
     + '.toplist-plain-col li span:first-child{min-width:0;}'
@@ -8510,6 +8542,93 @@ const TOP_LIST_SPECS = {
 
 const TOPLIST_RANK_MAX = 3;
 
+let toplistSession = null;
+
+function sortToplistEntries(items, sortKey, sortDir){
+  const mul = sortDir === 'asc' ? 1 : -1;
+  return (items || []).slice().sort((a, b) => {
+    if(sortKey === 'name'){
+      const cmp = String(a.name || '').localeCompare(String(b.name || ''), 'sv', { sensitivity: 'base' });
+      if(cmp) return mul * cmp;
+      return Math.abs(b.total || 0) - Math.abs(a.total || 0);
+    }
+    const da = Math.abs(a.total || 0);
+    const db = Math.abs(b.total || 0);
+    if(da !== db) return mul * (da - db);
+    return String(a.name || '').localeCompare(String(b.name || ''), 'sv', { sensitivity: 'base' });
+  });
+}
+
+function toplistSortHeadHtml(sortKey, sortDir){
+  function btn(key, label){
+    const active = sortKey === key;
+    const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '';
+    return '<button type="button" class="toplist-sort' + (active ? ' active-sort' : '')
+      + '" data-sort="' + key + '">' + escapeHtml(label)
+      + ' <span class="arrow">' + arrow + '</span></button>';
+  }
+  return '<div class="toplist-sort-head">'
+    + btn('name', 'Namn')
+    + btn('value', 'Belopp')
+    + '</div>';
+}
+
+function toplistRowHtmlFromEntry(item){
+  return '<li class="toplist-row" data-chart-id="' + escapeAttr(item.chartId)
+    + '" title="Dubbelklicka för diagram: ' + escapeAttr(item.name) + '"><span>'
+    + escapeHtml(item.name) + '</span><span>'
+    + escapeHtml(formatAmount(item.total)) + '</span></li>';
+}
+
+function fillToplistPlainCol(ol, entries){
+  if(!ol) return;
+  if(!entries.length){
+    ol.innerHTML = '<li>Inget att visa</li>';
+    return;
+  }
+  ol.innerHTML = entries.map(toplistRowHtmlFromEntry).join('');
+}
+
+function applyToplistSortToDom(){
+  if(!toplistSession || !reportBody) return;
+  const block = reportBody.querySelector('.toplist-block');
+  if(!block) return;
+  const { sortKey, sortDir, positive, negative } = toplistSession;
+  const posSorted = sortToplistEntries(positive, sortKey, sortDir);
+  const negSorted = sortToplistEntries(negative, sortKey, sortDir);
+  const cols = block.querySelectorAll('.toplist-plain-col');
+  if(cols[0]){
+    const head = cols[0].querySelector('.toplist-sort-head');
+    if(head) head.outerHTML = toplistSortHeadHtml(sortKey, sortDir);
+    fillToplistPlainCol(cols[0].querySelector('ol'), posSorted);
+  }
+  if(cols[1]){
+    const head = cols[1].querySelector('.toplist-sort-head');
+    if(head) head.outerHTML = toplistSortHeadHtml(sortKey, sortDir);
+    fillToplistPlainCol(cols[1].querySelector('ol'), negSorted);
+  }
+}
+
+function bindToplistSortUi(){
+  if(!reportBody || reportBody.dataset.toplistSortBound === '1') return;
+  reportBody.dataset.toplistSortBound = '1';
+  reportBody.addEventListener('click', e => {
+    const btn = e.target.closest && e.target.closest('.toplist-sort[data-sort]');
+    if(!btn || !toplistSession) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const key = btn.getAttribute('data-sort');
+    if(key !== 'name' && key !== 'value') return;
+    if(toplistSession.sortKey === key){
+      toplistSession.sortDir = toplistSession.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      toplistSession.sortKey = key;
+      toplistSession.sortDir = key === 'name' ? 'asc' : 'desc';
+    }
+    applyToplistSortToDom();
+  });
+}
+
 function normalizeTopListKind(kind){
   return kind === 'topplistor' ? 'topPayee' : kind;
 }
@@ -8630,25 +8749,35 @@ function renderTopListReport(kind, fromIso, toIso){
   clearReportCanvas();
   if(reportPlaceholder) reportPlaceholder.hidden = true;
   reportBody.classList.add('has-report');
+  bindToplistSortUi();
 
-  const positive = items.filter(e => e.total > 0);
-  const negative = items.filter(e => e.total < 0).sort((a, b) => a.total - b.total);
-  const positiveChartItems = positive.slice(0, TOPLIST_RANK_MAX);
-  const negativeChartItems = negative.slice(0, TOPLIST_RANK_MAX);
+  const positiveRaw = items.filter(e => e.total > 0);
+  const negativeRaw = items.filter(e => e.total < 0);
+  const positiveChartItems = sortToplistEntries(positiveRaw, 'value', 'desc').slice(0, TOPLIST_RANK_MAX);
+  const negativeChartItems = sortToplistEntries(negativeRaw, 'value', 'desc').slice(0, TOPLIST_RANK_MAX);
 
-  function toplistRowHtml(item, absolute, tone){
-    const chartId = registerReportChartSeries({
-      title: item.name,
-      months: months,
-      monthly: monthlyByName[item.name] || {},
-      absolute: !!absolute,
-      tone: tone
-    });
-    return '<li class="toplist-row" data-chart-id="' + escapeAttr(chartId)
-      + '" title="Dubbelklicka för diagram: ' + escapeAttr(item.name) + '"><span>'
-      + escapeHtml(item.name) + '</span><span>'
-      + escapeHtml(formatAmount(item.total)) + '</span></li>';
+  function withChart(item, absolute, tone){
+    return {
+      name: item.name,
+      total: item.total,
+      chartId: registerReportChartSeries({
+        title: item.name,
+        months: months,
+        monthly: monthlyByName[item.name] || {},
+        absolute: !!absolute,
+        tone: tone
+      })
+    };
   }
+
+  const positive = positiveRaw.map(e => withChart(e, false, 'income'));
+  const negative = negativeRaw.map(e => withChart(e, true, 'expense'));
+  toplistSession = {
+    sortKey: 'value',
+    sortDir: 'desc',
+    positive: positive,
+    negative: negative
+  };
 
   const positiveChart = positiveChartItems.length
     ? buildPayeeRankChart(positiveChartItems.map(e => ({
@@ -8666,6 +8795,10 @@ function renderTopListReport(kind, fromIso, toIso){
       })), { tone: 'expense', kicker: 'TOPP UT', maxBars: TOPLIST_RANK_MAX, hideCount: true, compact: true })
     : '<div class="payee-chart-panel is-expense"><p class="payee-chart-kicker">TOPP UT</p><p class="payee-chart-empty">Inget att visa</p></div>';
 
+  const sortHead = toplistSortHeadHtml('value', 'desc');
+  const posSorted = sortToplistEntries(positive, 'value', 'desc');
+  const negSorted = sortToplistEntries(negative, 'value', 'desc');
+
   let html = reportTableHeadHtml(topListReportTitleHtml(kind), fromIso, toIso, null, { titleClass: 'toplist-title' });
 
   html += '<section class="toplist-block" data-top-kind="' + escapeAttr(kind) + '">';
@@ -8676,17 +8809,15 @@ function renderTopListReport(kind, fromIso, toIso){
     html += '<div class="report-divider"></div>';
     html += '<div class="payee-chart-board">' + positiveChart + negativeChart + '</div>';
     html += '<div class="toplist-plain">';
-    html += '<div class="toplist-plain-col"><h3>TOPP IN</h3><ol>';
-    for(const item of positive){
-      html += toplistRowHtml(item, false, 'income');
-    }
-    if(!positive.length) html += '<li>Inget att visa</li>';
+    html += '<div class="toplist-plain-col" data-side="in"><h3>TOPP IN</h3>' + sortHead + '<ol>';
+    html += posSorted.length
+      ? posSorted.map(toplistRowHtmlFromEntry).join('')
+      : '<li>Inget att visa</li>';
     html += '</ol></div>';
-    html += '<div class="toplist-plain-col"><h3>TOPP UT</h3><ol>';
-    for(const item of negative){
-      html += toplistRowHtml(item, true, 'expense');
-    }
-    if(!negative.length) html += '<li>Inget att visa</li>';
+    html += '<div class="toplist-plain-col" data-side="out"><h3>TOPP UT</h3>' + sortHead + '<ol>';
+    html += negSorted.length
+      ? negSorted.map(toplistRowHtmlFromEntry).join('')
+      : '<li>Inget att visa</li>';
     html += '</ol></div></div>';
   }
   html += '</section>';
