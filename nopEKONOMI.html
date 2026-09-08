@@ -3496,7 +3496,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-08 v01';
+const APP_VERSION = '2026-09-08 v02';
 
 /* =====================================================================
    INNEHÅLL
@@ -8521,6 +8521,13 @@ function topListSpecForKind(kind){
 function collectTopListReport(fromIso, toIso, kind){
   const spec = topListSpecForKind(kind);
   const totals = Object.create(null);
+  const monthlyByName = Object.create(null);
+
+  function addAmount(key, amount, mk){
+    totals[key] = (totals[key] || 0) + amount;
+    if(!monthlyByName[key]) monthlyByName[key] = Object.create(null);
+    monthlyByName[key][mk] = (monthlyByName[key][mk] || 0) + amount;
+  }
 
   for(const name of book.order){
     const acc = book.accounts[name];
@@ -8532,12 +8539,13 @@ function collectTopListReport(fromIso, toIso, kind){
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
       if(d < fromIso || d > toIso) continue;
       if(!rowMatchesYearPeriodFilter(d)) continue;
+      const mk = reportPeriodKeyFromIso(d);
       if(spec.sourceField === 'payee'){
         const payee = (r.payee || '').trim();
         if(!payee) continue;
         const amount = reportPayeeAmountFromRow(r);
         if(!amount) continue;
-        totals[payee] = (totals[payee] || 0) + amount;
+        addAmount(payee, amount, mk);
         continue;
       }
 
@@ -8549,15 +8557,19 @@ function collectTopListReport(fromIso, toIso, kind){
         if(!key) continue;
         const amount = typeof piece.amount === 'number' ? piece.amount : Number(piece.amount);
         if(!Number.isFinite(amount) || !amount) continue;
-        totals[key] = (totals[key] || 0) + amount;
+        addAmount(key, amount, mk);
       }
     }
   }
 
-  return topListSortRows(Object.keys(totals).map(name => ({
-    name: name,
-    total: totals[name]
-  })));
+  return {
+    months: reportPeriodKeysInRange(fromIso, toIso),
+    monthlyByName: monthlyByName,
+    items: topListSortRows(Object.keys(totals).map(name => ({
+      name: name,
+      total: totals[name]
+    })))
+  };
 }
 
 function topListReportTitleHtml(kind){
@@ -8611,24 +8623,32 @@ function topListClipboardTextFromDom(){
 function renderTopListReport(kind, fromIso, toIso){
   kind = normalizeTopListKind(kind);
   setActiveReportRange(fromIso, toIso);
-  const items = collectTopListReport(fromIso, toIso, kind);
+  const data = collectTopListReport(fromIso, toIso, kind);
+  const items = data.items || [];
+  const months = data.months || [];
+  const monthlyByName = data.monthlyByName || Object.create(null);
   clearReportCanvas();
   if(reportPlaceholder) reportPlaceholder.hidden = true;
   reportBody.classList.add('has-report');
 
-  const drillType = kind === 'topPayee' ? 'payee' : (kind === 'topKategori' ? 'cat' : 'sub');
-  const drillPayloadFor = name => JSON.stringify({
-    t: drillType,
-    view: 'toplist',
-    payee: drillType === 'payee' ? name : '',
-    category: drillType === 'cat' ? name : '',
-    sub: drillType === 'sub' ? name : '',
-    periodKey: '__total__'
-  });
   const positive = items.filter(e => e.total > 0);
   const negative = items.filter(e => e.total < 0).sort((a, b) => a.total - b.total);
   const positiveChartItems = positive.slice(0, TOPLIST_RANK_MAX);
   const negativeChartItems = negative.slice(0, TOPLIST_RANK_MAX);
+
+  function toplistRowHtml(item, absolute, tone){
+    const chartId = registerReportChartSeries({
+      title: item.name,
+      months: months,
+      monthly: monthlyByName[item.name] || {},
+      absolute: !!absolute,
+      tone: tone
+    });
+    return '<li class="toplist-row" data-chart-id="' + escapeAttr(chartId)
+      + '" title="Dubbelklicka för diagram: ' + escapeAttr(item.name) + '"><span>'
+      + escapeHtml(item.name) + '</span><span>'
+      + escapeHtml(formatAmount(item.total)) + '</span></li>';
+  }
 
   const positiveChart = positiveChartItems.length
     ? buildPayeeRankChart(positiveChartItems.map(e => ({
@@ -8658,17 +8678,13 @@ function renderTopListReport(kind, fromIso, toIso){
     html += '<div class="toplist-plain">';
     html += '<div class="toplist-plain-col"><h3>TOPP IN</h3><ol>';
     for(const item of positive){
-      html += '<li class="toplist-row" data-drill="' + escapeAttr(drillPayloadFor(item.name))
-        + '" title="Dubbelklicka för lista"><span>' + escapeHtml(item.name) + '</span><span>'
-        + escapeHtml(formatAmount(item.total)) + '</span></li>';
+      html += toplistRowHtml(item, false, 'income');
     }
     if(!positive.length) html += '<li>Inget att visa</li>';
     html += '</ol></div>';
     html += '<div class="toplist-plain-col"><h3>TOPP UT</h3><ol>';
     for(const item of negative){
-      html += '<li class="toplist-row" data-drill="' + escapeAttr(drillPayloadFor(item.name))
-        + '" title="Dubbelklicka för lista"><span>' + escapeHtml(item.name) + '</span><span>'
-        + escapeHtml(formatAmount(item.total)) + '</span></li>';
+      html += toplistRowHtml(item, true, 'expense');
     }
     if(!negative.length) html += '<li>Inget att visa</li>';
     html += '</ol></div></div>';
@@ -9069,17 +9085,12 @@ function bindReportRowChartUi(){
   }
   if(reportBody){
     reportBody.addEventListener('dblclick', e => {
-      const topLi = e.target.closest && e.target.closest('li.toplist-row[data-drill]');
+      const topLi = e.target.closest && e.target.closest('li.toplist-row[data-chart-id]');
       if(topLi){
-        let drill;
-        try{
-          drill = JSON.parse(topLi.getAttribute('data-drill'));
-        } catch(err){
-          return;
-        }
-        if(!drill || !drill.t) return;
+        const id = topLi.getAttribute('data-chart-id');
+        if(!id || !reportChartSeries[id]) return;
         e.preventDefault();
-        openReportDrill(drill);
+        showReportRowChart(reportChartSeries[id]);
         return;
       }
       const numTd = e.target.closest && e.target.closest('td.num[data-drill]');
