@@ -2589,6 +2589,7 @@ td.num.dash .cell-content{
         <option value="report">Rapport</option>
         <option value="" disabled class="menu-sep">────────</option>
         <option value="registervard">Registervård</option>
+        <option value="settings">Inställningar</option>
       </select>
       <button class="btn-ok" id="startMenuBtn" type="button">OK</button>
       <span class="start-backup-wrap">
@@ -3495,7 +3496,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-07 v02';
+const APP_VERSION = '2026-09-08 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -6027,6 +6028,9 @@ function runStartMenu(){
       break;
     case 'registervard':
       show('careHub');
+      break;
+    case 'settings':
+      show('settings');
       break;
     case 'report':
       if(bookTransactionCount() < REPORT_MIN_TRANSACTIONS){
