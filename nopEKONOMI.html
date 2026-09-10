@@ -1786,7 +1786,7 @@ input[type=file]{ display:none; }
 }
 .payee-chart-mean{
   margin:0 0 8px;
-  padding:0 8px 0 52px;
+  padding:0 8px;
   font-family:'JetBrains Mono', monospace;
   font-size:24px;
   color:var(--text-on-paper-soft);
@@ -3554,7 +3554,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-10 v06';
+const APP_VERSION = '2026-09-10 v07';
 
 /* =====================================================================
    INNEHÅLL
@@ -6595,6 +6595,18 @@ function chartStackedMeanMarkup(mean, L){
     + '</g>';
 }
 
+/** Totalt medel överst (HTML — skärm + utskrift). */
+function chartTotalMeanHeaderHtml(mean){
+  if(mean == null || !Number.isFinite(mean)) return '';
+  const rounded = Math.round(mean);
+  const amt = formatReportInt(rounded);
+  const negClass = rounded < 0 ? ' is-neg' : '';
+  return '<p class="payee-chart-mean' + negClass + '">'
+    + '<span class="payee-chart-mean-lab">Medel</span> '
+    + '<span class="payee-chart-mean-amt">' + escapeHtml(amt) + '</span>'
+    + '</p>';
+}
+
 function reportAmountCell(raw, absolute, opts){
   opts = opts || {};
   const drill = opts.drill || null;
@@ -7435,6 +7447,10 @@ function printHtmlDocument(title, bodyHtml, opts){
     + '.payee-chart-board{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 16px;}'
     + '.payee-chart-panel{padding:10px 10px 8px;border:1px solid #ddd;border-radius:8px;overflow:visible;}'
     + '.payee-chart-kicker{margin:0 0 6px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#666;}'
+    + '.payee-chart-mean{margin:0 0 10px;font-family:"JetBrains Mono",monospace;font-size:24px;color:#5A6F88;}'
+    + '.payee-chart-mean-lab{letter-spacing:.08em;text-transform:uppercase;font-size:20px;}'
+    + '.payee-chart-mean-amt{font-weight:700;font-size:26px;color:#067647;}'
+    + '.payee-chart-mean.is-neg .payee-chart-mean-amt{color:#B42318;}'
     + '.payee-chart-svg{display:block;width:100%;height:auto;}'
     + '.toplist-plain{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px;}'
     + '.toplist-plain-col h3{margin:0 0 8px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;}'
@@ -8129,11 +8145,15 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
   const forPrint = !!opts.forPrint;
   const animate = opts.animate !== false && !forPrint;
   const mobileFit = forPrint ? false : isReportMobileLayout();
-  const displayVals = pointsSlice.map(p => p.value);
+  const newestFirst = !!opts.newestFirst;
+  const showMean = opts.showMean !== false;
+  const n = pointsSlice.length;
+  const order = [];
+  for(let i = 0; i < n; i++) order.push(newestFirst ? (n - 1 - i) : i);
+  const displayVals = order.map(j => pointsSlice[j].value);
   const absVals = displayVals.map(v => Math.abs(v));
   const scale = computeChartBarScale(absVals);
 
-  const n = pointsSlice.length;
   const rotateAmounts = n >= 7 && n <= 12;
   const valueHead = rotateAmounts ? 54 : 18;
   const plotH = forPrint ? 170 : 200;
@@ -8141,7 +8161,7 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
   const breakVisualH = Math.round(barMaxH * CHART_BREAK_VISUAL_RATIO);
   const rotateLabels = n > (mobileFit ? 5 : 8);
   const labelH = rotateLabels ? 52 : 32;
-  const mean = chartSeriesMean(displayVals);
+  const mean = showMean ? chartSeriesMean(displayVals) : null;
   const meanColW = mean != null ? 88 : 0;
   const padL = forPrint ? 24 : (mobileFit ? 16 : 28);
   const padR = (forPrint ? 14 : (mobileFit ? 10 : 16)) + meanColW;
@@ -8163,9 +8183,10 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
   bars += '<line x1="' + padL + '" y1="' + baselineY + '" x2="' + (width - padR) + '" y2="' + baselineY
     + '" stroke="rgba(168,189,212,0.8)" stroke-width="1"/>';
 
-  pointsSlice.forEach((p, i) => {
+  order.forEach((j, i) => {
+    const p = pointsSlice[j];
     const rawDisp = displayVals[i];
-    const globalIdx = startIdx + i;
+    const globalIdx = startIdx + j;
     const x = barOrigin + i * barSlot + gap / 2;
     const bw = barSlot - gap;
     const h = Math.min(chartBarPixelSize(i, scale, barMaxH, 3), barMaxH);
@@ -8240,8 +8261,13 @@ function nettoPrintChunkYearLabel(chunk){
 }
 
 function buildNetOverTimePrintHtml(points, opening){
-  let html = '';
-  for(let start = 0; start < points.length; start += NETTO_PRINT_CHUNK){
+  const totalMean = chartSeriesMean(points.map(p => p.value));
+  let html = chartTotalMeanHeaderHtml(totalMean);
+  const starts = [];
+  for(let start = 0; start < points.length; start += NETTO_PRINT_CHUNK) starts.push(start);
+  starts.reverse();
+  for(let s = 0; s < starts.length; s++){
+    const start = starts[s];
     const chunk = points.slice(start, start + NETTO_PRINT_CHUNK);
     const yearLabel = nettoPrintChunkYearLabel(chunk);
     html += '<div class="netto-print-section">';
@@ -8250,7 +8276,9 @@ function buildNetOverTimePrintHtml(points, opening){
     }
     html += buildNetOverTimeVerticalChartBlock(chunk, points, opening, start, {
       forPrint: true,
-      wrapPanel: false
+      wrapPanel: false,
+      newestFirst: true,
+      showMean: false
     });
     html += '</div>';
   }
@@ -8274,11 +8302,10 @@ function buildNetOverTimeChartRows(points, opening){
   const displayVals = points.map(p => p.value);
   const absVals = displayVals.map(v => Math.abs(v));
   const scale = computeChartBarScale(absVals, stackedRowScaleOpts());
-  const mean = chartSeriesMean(displayVals);
-  const L = stackedRowChartLayout(ordered.length, { meanBand: mean != null ? 36 : 0 });
+  const L = stackedRowChartLayout(ordered.length);
   const fillSoft = CHART_POSITIVE_SOFT;
 
-  let bars = chartStackedMeanMarkup(mean, L);
+  let bars = '';
   ordered.forEach((p, i) => {
     const origIdx = points.length - 1 - i;
     const rawDisp = p.value;
@@ -8333,7 +8360,9 @@ function buildNetOverTimeChart(points, opening){
 
   return buildNetOverTimeVerticalChartBlock(points, points, opening, 0, {
     wrapPanel: true,
-    animate: true
+    animate: true,
+    newestFirst: true,
+    showMean: false
   });
 }
 
@@ -8357,7 +8386,10 @@ function renderNetOverTimeReport(fromIso, toIso){
     return;
   }
 
-  wrap.innerHTML = head + '<div class="report-table-scroll">' + buildNetOverTimeChart(points, opening) + '</div>';
+  const totalMean = chartSeriesMean(points.map(p => p.value));
+  wrap.innerHTML = head
+    + chartTotalMeanHeaderHtml(totalMean)
+    + '<div class="report-table-scroll">' + buildNetOverTimeChart(points, opening) + '</div>';
   reportBody.appendChild(wrap);
   syncReportCopyBtn();
 }
