@@ -3554,7 +3554,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-10 v05';
+const APP_VERSION = '2026-09-10 v06';
 
 /* =====================================================================
    INNEHÅLL
@@ -6579,16 +6579,20 @@ function chartVerticalMeanMarkup(mean, xCenter, plotMidY){
     + '</g>';
 }
 
-/** Medel ovanför staplade (>12) horisontella raddiagram. */
-function chartStackedMeanHeaderHtml(mean){
-  if(mean == null || !Number.isFinite(mean)) return '';
+/** Medel ovanför staplarna i staplat (>12) SVG (följer med vid utskrift). */
+function chartStackedMeanMarkup(mean, L){
+  if(mean == null || !Number.isFinite(mean) || !L) return '';
   const rounded = Math.round(mean);
   const amt = formatReportInt(rounded);
-  const negClass = rounded < 0 ? ' is-neg' : '';
-  return '<p class="payee-chart-mean' + negClass + '">'
-    + '<span class="payee-chart-mean-lab">Medel</span> '
-    + '<span class="payee-chart-mean-amt">' + escapeHtml(amt) + '</span>'
-    + '</p>';
+  const fill = rounded < 0 ? '#B42318' : '#067647';
+  const y = Math.max(22, (L.meanBand || 36) - 8);
+  const labX = L.barX;
+  const amtX = L.barX + 78;
+  return '<g class="chart-mean" aria-label="Medel">'
+    + '<text x="' + labX + '" y="' + y + '" font-family="JetBrains Mono, monospace" font-size="20" fill="#5A6F88">Medel</text>'
+    + '<text x="' + amtX + '" y="' + y + '" font-family="JetBrains Mono, monospace" font-size="26" font-weight="700" fill="' + fill + '">'
+    + escapeHtml(amt) + '</text>'
+    + '</g>';
 }
 
 function reportAmountCell(raw, absolute, opts){
@@ -8096,13 +8100,15 @@ function stackedRowScaleOpts(extra){
   }, extra || {});
 }
 
-function stackedRowChartLayout(rowCount){
+function stackedRowChartLayout(rowCount, opts){
+  opts = opts || {};
+  const meanBand = opts.meanBand || 0;
   const rowH = 26;
   const labelW = 48;
   const amountW = 76;
   const padL = 4;
   const padR = 8;
-  const padTop = 4;
+  const padTop = 4 + meanBand;
   const padBot = 8;
   const barGap = 6;
   const barH = 16;
@@ -8114,7 +8120,7 @@ function stackedRowChartLayout(rowCount){
   const height = padTop + rowCount * rowH + padBot;
   return {
     rowH, labelW, amountW, padL, padR, padTop, padBot, barGap, barH,
-    width, barX, barMax, breakVisualW, amountX, height
+    width, barX, barMax, breakVisualW, amountX, height, meanBand
   };
 }
 
@@ -8268,11 +8274,11 @@ function buildNetOverTimeChartRows(points, opening){
   const displayVals = points.map(p => p.value);
   const absVals = displayVals.map(v => Math.abs(v));
   const scale = computeChartBarScale(absVals, stackedRowScaleOpts());
-  const L = stackedRowChartLayout(ordered.length);
   const mean = chartSeriesMean(displayVals);
+  const L = stackedRowChartLayout(ordered.length, { meanBand: mean != null ? 36 : 0 });
   const fillSoft = CHART_POSITIVE_SOFT;
 
-  let bars = '';
+  let bars = chartStackedMeanMarkup(mean, L);
   ordered.forEach((p, i) => {
     const origIdx = points.length - 1 - i;
     const rawDisp = p.value;
@@ -8306,7 +8312,6 @@ function buildNetOverTimeChartRows(points, opening){
   });
 
   return '<div class="payee-chart-panel is-income payee-chart-panel--stacked">'
-    + chartStackedMeanHeaderHtml(mean)
     + '<div class="payee-chart-scroll">'
     + '<svg class="payee-chart-svg payee-chart-svg--stacked" viewBox="0 0 ' + L.width + ' ' + L.height + '" role="img" aria-label="Netto över tid">'
     + bars
@@ -9082,10 +9087,10 @@ function buildMonthSeriesChartRows(series){
   });
   const absVals = displayVals.map(v => Math.abs(v));
   const scale = computeChartBarScale(absVals, stackedRowScaleOpts(series.scale));
-  const L = stackedRowChartLayout(ordered.length);
   const mean = chartSeriesMean(displayVals);
+  const L = stackedRowChartLayout(ordered.length, { meanBand: mean != null ? 36 : 0 });
 
-  let bars = '';
+  let bars = chartStackedMeanMarkup(mean, L);
   ordered.forEach((mk, i) => {
     const origIdx = months.length - 1 - i;
     const rawDisp = displayVals[origIdx];
@@ -9120,7 +9125,6 @@ function buildMonthSeriesChartRows(series){
 
   return '<div class="payee-chart-panel is-' + tone + ' payee-chart-panel--stacked">'
     + monthSeriesChartKickerHtml(true)
-    + chartStackedMeanHeaderHtml(mean)
     + '<div class="payee-chart-scroll">'
     + '<svg class="payee-chart-svg payee-chart-svg--stacked" viewBox="0 0 ' + L.width + ' ' + L.height + '" role="img" aria-label="' + escapeHtml(series.title || 'Fördelning') + '">'
     + bars
