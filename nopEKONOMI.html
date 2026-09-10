@@ -3554,7 +3554,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-10 v07';
+const APP_VERSION = '2026-09-10 v08';
 
 /* =====================================================================
    INNEHÅLL
@@ -6557,17 +6557,19 @@ function chartSeriesMean(vals){
 }
 
 /** Text "Medel" + belopp till höger om upprätta staplar (nerifrån och upp, −90°). */
-function chartVerticalMeanMarkup(mean, xCenter, plotMidY){
+function chartVerticalMeanMarkup(mean, xCenter, plotMidY, opts){
   if(mean == null || !Number.isFinite(mean)) return '';
+  opts = opts || {};
+  const fontScale = opts.fontScale > 0 ? opts.fontScale : 1;
   const rounded = Math.round(mean);
   const amt = formatReportInt(rounded);
   const fill = rounded < 0 ? '#B42318' : '#067647';
-  const labelFs = 18;
-  const amtFs = 22;
+  const labelFs = Math.round(18 * fontScale);
+  const amtFs = Math.round(22 * fontScale);
   // Uppskattad monospace-bredd så "Medel" och belopp inte överlappar (även 6+ siffror).
   const labelW = 5 * (labelFs * 0.62);
   const amtW = amt.length * (amtFs * 0.62);
-  const gap = 14;
+  const gap = Math.round(14 * fontScale);
   const total = labelW + gap + amtW;
   const labelEnd = -total / 2 + labelW;
   const amtStart = labelEnd + gap;
@@ -7447,9 +7449,9 @@ function printHtmlDocument(title, bodyHtml, opts){
     + '.payee-chart-board{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 16px;}'
     + '.payee-chart-panel{padding:10px 10px 8px;border:1px solid #ddd;border-radius:8px;overflow:visible;}'
     + '.payee-chart-kicker{margin:0 0 6px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#666;}'
-    + '.payee-chart-mean{margin:0 0 10px;font-family:"JetBrains Mono",monospace;font-size:24px;color:#5A6F88;}'
-    + '.payee-chart-mean-lab{letter-spacing:.08em;text-transform:uppercase;font-size:20px;}'
-    + '.payee-chart-mean-amt{font-weight:700;font-size:26px;color:#067647;}'
+    + '.payee-chart-mean{margin:0 0 6px;font-family:"JetBrains Mono",monospace;font-size:16px;color:#5A6F88;}'
+    + '.payee-chart-mean-lab{letter-spacing:.08em;text-transform:uppercase;font-size:13px;}'
+    + '.payee-chart-mean-amt{font-weight:700;font-size:16px;color:#067647;}'
     + '.payee-chart-mean.is-neg .payee-chart-mean-amt{color:#B42318;}'
     + '.payee-chart-svg{display:block;width:100%;height:auto;}'
     + '.toplist-plain{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px;}'
@@ -7460,10 +7462,10 @@ function printHtmlDocument(title, bodyHtml, opts){
     + '.toplist-plain-col li span:first-child{min-width:0;}'
     + '.toplist-plain-col li span:last-child{font-weight:600;white-space:nowrap;}'
     + '.report-divider{border-top:1px solid #ddd;margin:8px 0 12px;}'
-    + '.netto-print-section{page-break-inside:avoid;margin:0 0 12px;}'
-    + '.netto-print-section + .netto-print-section{margin-top:16px;padding-top:12px;border-top:1px solid #ddd;}'
-    + '.netto-print-year-label{margin:0 0 10px;font-family:"JetBrains Mono",monospace;font-size:16px;font-weight:700;letter-spacing:.04em;color:#1A3050;}'
-    + '.netto-print-section .payee-chart-svg{display:block;width:100%;max-width:180mm;height:auto;margin:0 auto;}'
+    + '.netto-print-section{page-break-inside:avoid;margin:0 0 2px;}'
+    + '.netto-print-section + .netto-print-section{margin-top:4px;padding-top:4px;border-top:1px solid #ddd;}'
+    + '.netto-print-year-label{margin:0 0 2px;font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700;letter-spacing:.04em;color:#1A3050;}'
+    + '.netto-print-section .payee-chart-svg{display:block;width:100%;max-width:185mm;max-height:78mm;height:auto;margin:0 auto;}'
     + tableCss
     + '</style></head><body><div class="report-print-sheet">'
     + bodyHtml
@@ -8155,21 +8157,21 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
   const scale = computeChartBarScale(absVals);
 
   const rotateAmounts = n >= 7 && n <= 12;
-  const valueHead = rotateAmounts ? 54 : 18;
-  const plotH = forPrint ? 170 : 200;
+  const valueHead = rotateAmounts ? (forPrint ? 38 : 54) : (forPrint ? 14 : 18);
+  const plotH = forPrint ? 118 : 200;
   const barMaxH = plotH - valueHead;
   const breakVisualH = Math.round(barMaxH * CHART_BREAK_VISUAL_RATIO);
   const rotateLabels = n > (mobileFit ? 5 : 8);
-  const labelH = rotateLabels ? 52 : 32;
+  const labelH = rotateLabels ? (forPrint ? 36 : 52) : (forPrint ? 22 : 32);
   const mean = showMean ? chartSeriesMean(displayVals) : null;
-  const meanColW = mean != null ? 88 : 0;
-  const padL = forPrint ? 24 : (mobileFit ? 16 : 28);
-  const padR = (forPrint ? 14 : (mobileFit ? 10 : 16)) + meanColW;
-  const padT = 4;
-  const padB = 8;
-  const gap = forPrint ? 6 : (mobileFit ? 4 : 8);
+  const meanColW = mean != null ? (forPrint ? 72 : 88) : 0;
+  const padL = forPrint ? 18 : (mobileFit ? 16 : 28);
+  const padR = (forPrint ? 10 : (mobileFit ? 10 : 16)) + meanColW;
+  const padT = forPrint ? 2 : 4;
+  const padB = forPrint ? 4 : 8;
+  const gap = forPrint ? 5 : (mobileFit ? 4 : 8);
   const targetPlotW = forPrint ? 520 : netOverTimeChartPlotWidth();
-  const barSlot = Math.max(forPrint ? 24 : (mobileFit ? 20 : 28), Math.min(52, Math.floor(targetPlotW / n)));
+  const barSlot = Math.max(forPrint ? 22 : (mobileFit ? 20 : 28), Math.min(52, Math.floor(targetPlotW / n)));
   const barsWidth = n * barSlot;
   const plotInner = Math.max(targetPlotW, barsWidth);
   const width = padL + padR + plotInner;
@@ -8239,7 +8241,9 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
     bars += '</g>';
   });
   if(mean != null){
-    bars += chartVerticalMeanMarkup(mean, width - meanColW / 2, trackTop + barMaxH / 2);
+    bars += chartVerticalMeanMarkup(mean, width - meanColW / 2, trackTop + barMaxH / 2, {
+      fontScale: forPrint ? 0.72 : 1
+    });
   }
 
   const svg = '<svg class="payee-chart-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="Netto över tid">'
@@ -8278,7 +8282,7 @@ function buildNetOverTimePrintHtml(points, opening){
       forPrint: true,
       wrapPanel: false,
       newestFirst: true,
-      showMean: false
+      showMean: true
     });
     html += '</div>';
   }
