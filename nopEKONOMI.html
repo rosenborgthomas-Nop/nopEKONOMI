@@ -1763,9 +1763,6 @@ input[type=file]{ display:none; }
   display:flex;
   flex-direction:column;
   gap:4px;
-  overflow:auto;
-  max-height:min(70vh, 720px);
-  -webkit-overflow-scrolling:touch;
 }
 .chart-chunk-section{
   flex:0 0 auto;
@@ -3578,7 +3575,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-10 v09';
+const APP_VERSION = '2026-09-10 v10';
 
 /* =====================================================================
    INNEHÅLL
@@ -8401,7 +8398,7 @@ function buildNetOverTimeChart(points, opening){
 
   if(points.length > CHART_STACKED_ROW_THRESHOLD){
     return '<div class="payee-chart-panel is-income chart-chunked-panel">'
-      + buildNetOverTimeChunkedHtml(points, opening, { forPrint: false, includeTotalMean: false })
+      + buildNetOverTimeChunkedHtml(points, opening, { forPrint: false, includeTotalMean: true })
       + '</div>';
   }
 
@@ -8409,7 +8406,7 @@ function buildNetOverTimeChart(points, opening){
     wrapPanel: true,
     animate: true,
     newestFirst: true,
-    showMean: false
+    showMean: true
   });
 }
 
@@ -8433,10 +8430,7 @@ function renderNetOverTimeReport(fromIso, toIso){
     return;
   }
 
-  const totalMean = chartSeriesMean(points.map(p => p.value));
-  wrap.innerHTML = head
-    + chartTotalMeanHeaderHtml(totalMean)
-    + '<div class="report-table-scroll">' + buildNetOverTimeChart(points, opening) + '</div>';
+  wrap.innerHTML = head + '<div class="report-table-scroll">' + buildNetOverTimeChart(points, opening) + '</div>';
   reportBody.appendChild(wrap);
   syncReportCopyBtn();
 }
