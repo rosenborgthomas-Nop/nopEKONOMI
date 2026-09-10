@@ -1759,6 +1759,30 @@ input[type=file]{ display:none; }
   min-height:0;
   overflow:visible;
 }
+.chart-chunked-panel{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  overflow:auto;
+  max-height:min(70vh, 720px);
+  -webkit-overflow-scrolling:touch;
+}
+.chart-chunk-section{
+  flex:0 0 auto;
+}
+.chart-chunk-section + .chart-chunk-section{
+  margin-top:10px;
+  padding-top:10px;
+  border-top:1px solid rgba(168,189,212,0.55);
+}
+.chart-chunked-panel .netto-print-year-label{
+  margin:0 0 6px;
+  font-family:'JetBrains Mono', monospace;
+  font-size:14px;
+  font-weight:700;
+  letter-spacing:0.04em;
+  color:var(--text-on-paper);
+}
 .payee-chart-scroll{
   max-height:min(62vh, 560px);
   overflow:auto;
@@ -3554,7 +3578,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-10 v08';
+const APP_VERSION = '2026-09-10 v09';
 
 /* =====================================================================
    INNEHÅLL
@@ -7462,10 +7486,10 @@ function printHtmlDocument(title, bodyHtml, opts){
     + '.toplist-plain-col li span:first-child{min-width:0;}'
     + '.toplist-plain-col li span:last-child{font-weight:600;white-space:nowrap;}'
     + '.report-divider{border-top:1px solid #ddd;margin:8px 0 12px;}'
-    + '.netto-print-section{page-break-inside:avoid;margin:0 0 2px;}'
-    + '.netto-print-section + .netto-print-section{margin-top:4px;padding-top:4px;border-top:1px solid #ddd;}'
+    + '.netto-print-section,.chart-chunk-section{page-break-inside:avoid;margin:0 0 2px;}'
+    + '.netto-print-section + .netto-print-section,.chart-chunk-section + .chart-chunk-section{margin-top:4px;padding-top:4px;border-top:1px solid #ddd;}'
     + '.netto-print-year-label{margin:0 0 2px;font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700;letter-spacing:.04em;color:#1A3050;}'
-    + '.netto-print-section .payee-chart-svg{display:block;width:100%;max-width:185mm;max-height:78mm;height:auto;margin:0 auto;}'
+    + '.netto-print-section .payee-chart-svg,.chart-chunk-section .payee-chart-svg{display:block;width:100%;max-width:185mm;max-height:78mm;height:auto;margin:0 auto;}'
     + tableCss
     + '</style></head><body><div class="report-print-sheet">'
     + bodyHtml
@@ -7553,6 +7577,14 @@ async function printReportChartRoot(root){
         return printHtmlDocument(title, bodyHtml);
       }
     }
+  }
+  if(root && lastReportRowChartSeries && (lastReportRowChartSeries.months || []).length > CHART_STACKED_ROW_THRESHOLD){
+    const headEl = root.querySelector('.report-table-head');
+    const title = reportPlainText(headEl && headEl.querySelector('.report-table-title'))
+      || lastReportRowChartSeries.title
+      || 'Rapport';
+    const bodyHtml = (headEl ? headEl.outerHTML : '') + buildMonthSeriesPrintHtml(lastReportRowChartSeries);
+    return printHtmlDocument(title, bodyHtml);
   }
   const canvas = await renderReportRootToA4Canvas(root, { background: '#FFFFFF' });
   if(!canvas) return false;
@@ -8264,9 +8296,12 @@ function nettoPrintChunkYearLabel(chunk){
   return first;
 }
 
-function buildNetOverTimePrintHtml(points, opening){
+function buildNetOverTimeChunkedHtml(points, opening, opts){
+  opts = opts || {};
+  const forPrint = !!opts.forPrint;
+  const includeTotalMean = opts.includeTotalMean !== false;
   const totalMean = chartSeriesMean(points.map(p => p.value));
-  let html = chartTotalMeanHeaderHtml(totalMean);
+  let html = includeTotalMean ? chartTotalMeanHeaderHtml(totalMean) : '';
   const starts = [];
   for(let start = 0; start < points.length; start += NETTO_PRINT_CHUNK) starts.push(start);
   starts.reverse();
@@ -8274,12 +8309,12 @@ function buildNetOverTimePrintHtml(points, opening){
     const start = starts[s];
     const chunk = points.slice(start, start + NETTO_PRINT_CHUNK);
     const yearLabel = nettoPrintChunkYearLabel(chunk);
-    html += '<div class="netto-print-section">';
+    html += '<div class="chart-chunk-section' + (forPrint ? ' netto-print-section' : '') + '">';
     if(yearLabel){
       html += '<p class="netto-print-year-label">' + escapeHtml(yearLabel) + '</p>';
     }
     html += buildNetOverTimeVerticalChartBlock(chunk, points, opening, start, {
-      forPrint: true,
+      forPrint: forPrint,
       wrapPanel: false,
       newestFirst: true,
       showMean: true
@@ -8287,6 +8322,10 @@ function buildNetOverTimePrintHtml(points, opening){
     html += '</div>';
   }
   return html;
+}
+
+function buildNetOverTimePrintHtml(points, opening){
+  return buildNetOverTimeChunkedHtml(points, opening, { forPrint: true, includeTotalMean: true });
 }
 
 function netOverTimeChartPlotWidth(){
@@ -8360,7 +8399,11 @@ function buildNetOverTimeChart(points, opening){
       + '</div>';
   }
 
-  if(points.length > CHART_STACKED_ROW_THRESHOLD) return buildNetOverTimeChartRows(points, opening);
+  if(points.length > CHART_STACKED_ROW_THRESHOLD){
+    return '<div class="payee-chart-panel is-income chart-chunked-panel">'
+      + buildNetOverTimeChunkedHtml(points, opening, { forPrint: false, includeTotalMean: false })
+      + '</div>';
+  }
 
   return buildNetOverTimeVerticalChartBlock(points, points, opening, 0, {
     wrapPanel: true,
@@ -9099,117 +9142,54 @@ function renderPayeeReportTable(fromIso, toIso){
   syncReportCopyBtn();
 }
 
-function monthSeriesChartKickerHtml(stacked){
+function monthSeriesChartKickerHtml(chunked){
   if(reportBucketMode === 'year' || reportBucketMode === 'yearPeriod') return '';
-  const text = stacked ? 'Månadsfördelning · staplad månadsvis' : 'Månadsfördelning';
+  const text = chunked ? 'Månadsfördelning' : 'Månadsfördelning';
   return '<p class="payee-chart-kicker">' + text + '</p>';
 }
 
-function buildMonthSeriesChartRows(series){
+function monthSeriesToPoints(series){
   const months = series.months || [];
   const monthly = series.monthly || {};
   const absolute = !!series.absolute;
-  const tone = series.tone || (absolute ? 'expense' : 'income');
-  const fillPos = tone === 'income' ? CHART_POSITIVE : '#A33B3B';
-  const fillNeg = '#A33B3B';
-  const fillSoftPos = tone === 'income' ? CHART_POSITIVE_SOFT : 'rgba(163,59,59,0.12)';
-  const fillSoftNeg = 'rgba(163,59,59,0.12)';
-
-  const ordered = months.slice().reverse();
-  const displayVals = months.map(mk => {
+  return months.map(mk => {
     const v = monthly[mk] || 0;
-    if(!v) return 0;
-    return absolute ? -v : v;
+    return { month: mk, value: !v ? 0 : (absolute ? -v : v) };
   });
-  const absVals = displayVals.map(v => Math.abs(v));
-  const scale = computeChartBarScale(absVals, stackedRowScaleOpts(series.scale));
-  const mean = chartSeriesMean(displayVals);
-  const L = stackedRowChartLayout(ordered.length, { meanBand: mean != null ? 36 : 0 });
-
-  let bars = chartStackedMeanMarkup(mean, L);
-  ordered.forEach((mk, i) => {
-    const origIdx = months.length - 1 - i;
-    const rawDisp = displayVals[origIdx];
-    const y = L.padTop + i * L.rowH;
-    const w = chartBarPixelSize(origIdx, scale, L.barMax, 2, STACKED_ROW_BREAK_VISUAL_RATIO);
-    const barY = y + 4;
-    const tipLabel = monthKeyYyMm(mk);
-    const amt = rawDisp ? formatReportInt(Math.round(rawDisp)) : '--';
-    const isNeg = rawDisp < 0;
-    const fill = isNeg ? fillNeg : fillPos;
-    const fillSoft = isNeg ? fillSoftNeg : fillSoftPos;
-    const amtFill = isNeg ? fillNeg : '#1A3050';
-
-    bars += '<g data-chart-label="' + escapeAttr(tipLabel) + '" data-chart-value="' + escapeAttr(amt) + '"'
-      + ' data-chart-period="' + escapeAttr(mk) + '" data-chart-raw="' + escapeAttr(String(Math.round(rawDisp || 0))) + '">';
-    bars += '<rect x="' + L.barX + '" y="' + barY + '" width="' + L.barMax + '" height="' + L.barH + '" rx="4" fill="' + fillSoft + '"/>';
-    if(w){
-      bars += '<rect x="' + L.barX + '" y="' + barY + '" width="' + w + '" height="' + L.barH + '" rx="4" fill="' + fill + '">'
-        + '<animate attributeName="width" from="0" to="' + w + '" dur="0.45s" begin="' + (0.02 * i) + 's" fill="freeze"/>'
-        + '</rect>';
-      if(scale.isBroken[origIdx]){
-        bars += chartSvgBreakMarkHorizontal(L.barX + L.breakVisualW, barY, L.barH);
-      }
-    }
-    bars += '<text x="' + (L.labelW - 4) + '" y="' + (y + 16) + '" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="#5A6F88">'
-      + escapeHtml(tipLabel) + '</text>';
-    bars += '<text x="' + L.amountX + '" y="' + (y + 16) + '" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="' + amtFill + '">'
-      + escapeHtml(amt) + '</text>';
-    bars += '<rect class="chart-bar-hitarea" x="' + L.padL + '" y="' + y + '" width="' + (L.width - L.padL - L.padR) + '" height="' + L.rowH + '" fill="transparent"/>';
-    bars += '</g>';
-  });
-
-  return '<div class="payee-chart-panel is-' + tone + ' payee-chart-panel--stacked">'
-    + monthSeriesChartKickerHtml(true)
-    + '<div class="payee-chart-scroll">'
-    + '<svg class="payee-chart-svg payee-chart-svg--stacked" viewBox="0 0 ' + L.width + ' ' + L.height + '" role="img" aria-label="' + escapeHtml(series.title || 'Fördelning') + '">'
-    + bars
-    + '</svg>'
-    + '</div>'
-    + '</div>';
 }
 
-function buildMonthSeriesChart(series){
-  const months = series.months || [];
-  const monthly = series.monthly || {};
-  const absolute = !!series.absolute;
-  const tone = series.tone || (absolute ? 'expense' : 'income');
-  const title = series.title || 'Rad';
-
-  if(!months.length){
-    return '<div class="payee-chart-panel is-' + tone + '">'
-      + monthSeriesChartKickerHtml(false)
-      + '<p class="payee-chart-empty">Inga månader</p>'
-      + '</div>';
-  }
-
-  if(months.length > CHART_STACKED_ROW_THRESHOLD) return buildMonthSeriesChartRows(series);
-
-  const mobileFit = isReportMobileLayout();
-  const rawVals = months.map(mk => monthly[mk] || 0);
-  const displayVals = rawVals.map(v => {
-    if(!v) return 0;
-    return absolute ? -v : v;
-  });
+function buildMonthSeriesVerticalChartBlock(pointsSlice, allPoints, startIdx, opts){
+  opts = opts || {};
+  const forPrint = !!opts.forPrint;
+  const animate = opts.animate !== false && !forPrint;
+  const mobileFit = forPrint ? false : isReportMobileLayout();
+  const newestFirst = opts.newestFirst !== false;
+  const showMean = opts.showMean !== false;
+  const tone = opts.tone || 'income';
+  const title = opts.title || 'Fördelning';
+  const n = pointsSlice.length;
+  const order = [];
+  for(let i = 0; i < n; i++) order.push(newestFirst ? (n - 1 - i) : i);
+  const displayVals = order.map(j => pointsSlice[j].value);
   const absVals = displayVals.map(v => Math.abs(v));
-  const scale = computeChartBarScale(absVals, series.scale);
+  const scale = computeChartBarScale(absVals, opts.scale);
 
-  const valueHead = 18;
-  const plotH = mobileFit ? 180 : 200;
+  const rotateAmounts = n >= 7 && n <= 12;
+  const valueHead = rotateAmounts ? (forPrint ? 38 : 54) : (forPrint ? 14 : 18);
+  const plotH = forPrint ? 118 : (mobileFit ? 180 : 200);
   const barMaxH = plotH - valueHead;
   const breakVisualH = Math.round(barMaxH * CHART_BREAK_VISUAL_RATIO);
-  const rotateLabels = months.length > (mobileFit ? 5 : 8);
-  const labelH = rotateLabels ? 52 : 32;
-  const mean = chartSeriesMean(displayVals);
-  const meanColW = mean != null ? 88 : 0;
-  const padL = mobileFit ? 16 : 28;
-  const padR = (mobileFit ? 10 : 16) + meanColW;
-  const padT = 4;
-  const padB = 8;
-  const gap = mobileFit ? 4 : 8;
-  const n = months.length;
-  const targetPlotW = netOverTimeChartPlotWidth();
-  const barSlot = Math.max(mobileFit ? 20 : 28, Math.min(52, Math.floor(targetPlotW / n)));
+  const rotateLabels = n > (mobileFit ? 5 : 8);
+  const labelH = rotateLabels ? (forPrint ? 36 : 52) : (forPrint ? 22 : 32);
+  const mean = showMean ? chartSeriesMean(displayVals) : null;
+  const meanColW = mean != null ? (forPrint ? 72 : 88) : 0;
+  const padL = forPrint ? 18 : (mobileFit ? 16 : 28);
+  const padR = (forPrint ? 10 : (mobileFit ? 10 : 16)) + meanColW;
+  const padT = forPrint ? 2 : 4;
+  const padB = forPrint ? 4 : 8;
+  const gap = forPrint ? 5 : (mobileFit ? 4 : 8);
+  const targetPlotW = forPrint ? 520 : netOverTimeChartPlotWidth();
+  const barSlot = Math.max(forPrint ? 22 : (mobileFit ? 20 : 28), Math.min(52, Math.floor(targetPlotW / Math.max(n, 1))));
   const barsWidth = n * barSlot;
   const plotInner = Math.max(targetPlotW, barsWidth);
   const width = padL + padR + plotInner;
@@ -9225,7 +9205,8 @@ function buildMonthSeriesChart(series){
   bars += '<line x1="' + padL + '" y1="' + baselineY + '" x2="' + (width - padR) + '" y2="' + baselineY
     + '" stroke="rgba(168,189,212,0.8)" stroke-width="1"/>';
 
-  months.forEach((mk, i) => {
+  order.forEach((j, i) => {
+    const p = pointsSlice[j];
     const rawDisp = displayVals[i];
     const absV = absVals[i];
     const x = barOrigin + i * barSlot + gap / 2;
@@ -9233,24 +9214,36 @@ function buildMonthSeriesChart(series){
     const h = Math.min(chartBarPixelSize(i, scale, barMaxH, 3), barMaxH);
     const y = baselineY - h;
     const color = rawDisp < 0 ? fillNeg : fill;
-    const tipLabel = monthKeyYyMm(mk);
+    const tipLabel = monthKeyYyMm(p.month);
     const tipValue = absV ? formatReportInt(Math.round(rawDisp)) : '--';
     bars += '<g data-chart-label="' + escapeAttr(tipLabel) + '" data-chart-value="' + escapeAttr(tipValue) + '"'
-      + ' data-chart-period="' + escapeAttr(mk) + '" data-chart-raw="' + escapeAttr(String(Math.round(rawDisp || 0))) + '">';
+      + ' data-chart-period="' + escapeAttr(String(p.month || '')) + '" data-chart-raw="' + escapeAttr(String(Math.round(rawDisp || 0))) + '">';
     bars += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + barMaxH + '" rx="3" fill="' + fillSoft + '"/>';
     if(h){
-      bars += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + color + '">'
-        + '<animate attributeName="height" from="0" to="' + h + '" dur="0.45s" begin="' + (0.03 * i) + 's" fill="freeze"/>'
-        + '<animate attributeName="y" from="' + baselineY + '" to="' + y + '" dur="0.45s" begin="' + (0.03 * i) + 's" fill="freeze"/>'
-        + '</rect>';
+      if(animate){
+        bars += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + color + '">'
+          + '<animate attributeName="height" from="0" to="' + h + '" dur="0.45s" begin="' + (0.03 * i) + 's" fill="freeze"/>'
+          + '<animate attributeName="y" from="' + baselineY + '" to="' + y + '" dur="0.45s" begin="' + (0.03 * i) + 's" fill="freeze"/>'
+          + '</rect>';
+      } else {
+        bars += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + color + '"/>';
+      }
       if(scale.isBroken[i]){
         bars += chartSvgBreakMarkVertical(x - 1, baselineY - breakVisualH, bw + 2);
       }
     }
     const amt = tipValue;
-    const labelY = absV ? Math.max(12, y - 5) : baselineY - 5;
-    bars += '<text x="' + (x + bw / 2) + '" y="' + labelY + '" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="' + (rawDisp < 0 ? fillNeg : '#1A3050') + '">'
-      + escapeHtml(amt) + '</text>';
+    const amtFill = rawDisp < 0 ? fillNeg : '#1A3050';
+    if(rotateAmounts && h){
+      const ax = x + bw / 2;
+      const ay = y - 4;
+      bars += '<text transform="translate(' + ax + ' ' + ay + ') rotate(-90)" text-anchor="start" font-family="JetBrains Mono, monospace" font-size="9" fill="' + amtFill + '">'
+        + escapeHtml(amt) + '</text>';
+    } else {
+      const labelY = absV ? Math.max(12, y - 5) : baselineY - 5;
+      bars += '<text x="' + (x + bw / 2) + '" y="' + labelY + '" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="' + amtFill + '">'
+        + escapeHtml(amt) + '</text>';
+    }
     const lab = tipLabel;
     if(rotateLabels){
       bars += '<text transform="translate(' + (x + bw / 2) + ' ' + (baselineY + 10) + ') rotate(-50)" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#5A6F88">'
@@ -9259,25 +9252,101 @@ function buildMonthSeriesChart(series){
       bars += '<text x="' + (x + bw / 2) + '" y="' + (baselineY + 18) + '" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5A6F88">'
         + escapeHtml(lab) + '</text>';
     }
-    bars += '<rect class="chart-bar-hitarea" x="' + x + '" y="' + padT + '" width="' + bw + '" height="' + (plotH + labelH) + '" fill="transparent"/>';
+    if(!forPrint){
+      bars += '<rect class="chart-bar-hitarea" x="' + x + '" y="' + padT + '" width="' + bw + '" height="' + (plotH + labelH) + '" fill="transparent"/>';
+    }
     bars += '</g>';
   });
   if(mean != null){
-    bars += chartVerticalMeanMarkup(mean, width - meanColW / 2, trackTop + barMaxH / 2);
+    bars += chartVerticalMeanMarkup(mean, width - meanColW / 2, trackTop + barMaxH / 2, {
+      fontScale: forPrint ? 0.72 : 1
+    });
   }
 
+  return '<svg class="payee-chart-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + escapeHtml(title) + '">'
+    + bars + '</svg>';
+}
+
+function buildMonthSeriesChunkedHtml(series, opts){
+  opts = opts || {};
+  const forPrint = !!opts.forPrint;
+  const includeTotalMean = opts.includeTotalMean !== false;
+  const points = monthSeriesToPoints(series);
+  const absolute = !!series.absolute;
+  const tone = series.tone || (absolute ? 'expense' : 'income');
+  const title = series.title || 'Fördelning';
+  const totalMean = chartSeriesMean(points.map(p => p.value));
+  let html = monthSeriesChartKickerHtml(true);
+  if(includeTotalMean) html += chartTotalMeanHeaderHtml(totalMean);
+  const starts = [];
+  for(let start = 0; start < points.length; start += NETTO_PRINT_CHUNK) starts.push(start);
+  starts.reverse();
+  for(let s = 0; s < starts.length; s++){
+    const start = starts[s];
+    const chunk = points.slice(start, start + NETTO_PRINT_CHUNK);
+    const yearLabel = nettoPrintChunkYearLabel(chunk);
+    html += '<div class="chart-chunk-section' + (forPrint ? ' netto-print-section' : '') + '">';
+    if(yearLabel){
+      html += '<p class="netto-print-year-label">' + escapeHtml(yearLabel) + '</p>';
+    }
+    html += buildMonthSeriesVerticalChartBlock(chunk, points, start, {
+      forPrint: forPrint,
+      newestFirst: true,
+      showMean: true,
+      animate: !forPrint,
+      tone: tone,
+      title: title,
+      scale: series.scale
+    });
+    html += '</div>';
+  }
+  return html;
+}
+
+function buildMonthSeriesChart(series){
+  const months = series.months || [];
+  const absolute = !!series.absolute;
+  const tone = series.tone || (absolute ? 'expense' : 'income');
+  const title = series.title || 'Rad';
+
+  if(!months.length){
+    return '<div class="payee-chart-panel is-' + tone + '">'
+      + monthSeriesChartKickerHtml(false)
+      + '<p class="payee-chart-empty">Inga månader</p>'
+      + '</div>';
+  }
+
+  if(months.length > CHART_STACKED_ROW_THRESHOLD){
+    return '<div class="payee-chart-panel is-' + tone + ' chart-chunked-panel">'
+      + buildMonthSeriesChunkedHtml(series, { forPrint: false, includeTotalMean: true })
+      + '</div>';
+  }
+
+  const points = monthSeriesToPoints(series);
   return '<div class="payee-chart-panel is-' + tone + '">'
     + monthSeriesChartKickerHtml(false)
-    + '<svg class="payee-chart-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + escapeHtml(title) + '">'
-    + bars
-    + '</svg>'
+    + buildMonthSeriesVerticalChartBlock(points, points, 0, {
+      newestFirst: true,
+      showMean: true,
+      animate: true,
+      tone: tone,
+      title: title,
+      scale: series.scale
+    })
     + '</div>';
 }
+
+function buildMonthSeriesPrintHtml(series){
+  return buildMonthSeriesChunkedHtml(series, { forPrint: true, includeTotalMean: true });
+}
+
+let lastReportRowChartSeries = null;
 
 function showReportRowChart(series){
   const overlay = el('reportRowChartOverlay');
   const body = el('reportRowChartBody');
   if(!overlay || !body || !series) return;
+  lastReportRowChartSeries = series;
   const from = activeReportRange.from || reportFrom.value || '';
   const to = activeReportRange.to || reportTo.value || '';
   const title = series.title || 'Rad';
