@@ -3534,7 +3534,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-08 v05';
+const APP_VERSION = '2026-09-10 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -6521,6 +6521,34 @@ function formatReportInt(n){
   return (neg ? '-' : '') + intPart;
 }
 
+/** Aritmetiskt medel av stapelvärden (upprätt diagram <13). */
+function chartSeriesMean(vals){
+  if(!vals || !vals.length) return null;
+  let sum = 0;
+  let n = 0;
+  for(let i = 0; i < vals.length; i++){
+    const v = Number(vals[i]);
+    if(!Number.isFinite(v)) continue;
+    sum += v;
+    n += 1;
+  }
+  if(!n) return null;
+  return sum / n;
+}
+
+/** Text "Medel" + belopp till höger om upprätta staplar. */
+function chartVerticalMeanMarkup(mean, xCenter, plotMidY){
+  if(mean == null || !Number.isFinite(mean)) return '';
+  const rounded = Math.round(mean);
+  const amt = formatReportInt(rounded);
+  const fill = rounded < 0 ? '#B42318' : '#067647';
+  return '<g class="chart-mean" aria-label="Medel">'
+    + '<text x="' + xCenter + '" y="' + (plotMidY - 8) + '" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5A6F88">Medel</text>'
+    + '<text x="' + xCenter + '" y="' + (plotMidY + 8) + '" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="' + fill + '">'
+    + escapeHtml(amt) + '</text>'
+    + '</g>';
+}
+
 function reportAmountCell(raw, absolute, opts){
   opts = opts || {};
   const drill = opts.drill || null;
@@ -8063,8 +8091,10 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
   const breakVisualH = Math.round(barMaxH * CHART_BREAK_VISUAL_RATIO);
   const rotateLabels = n > (mobileFit ? 5 : 8);
   const labelH = rotateLabels ? 52 : 32;
+  const mean = chartSeriesMean(displayVals);
+  const meanColW = mean != null ? 68 : 0;
   const padL = forPrint ? 24 : (mobileFit ? 16 : 28);
-  const padR = forPrint ? 14 : (mobileFit ? 10 : 16);
+  const padR = (forPrint ? 14 : (mobileFit ? 10 : 16)) + meanColW;
   const padT = 4;
   const padB = 8;
   const gap = forPrint ? 6 : (mobileFit ? 4 : 8);
@@ -8137,6 +8167,9 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
     }
     bars += '</g>';
   });
+  if(mean != null){
+    bars += chartVerticalMeanMarkup(mean, width - meanColW / 2, trackTop + barMaxH / 2);
+  }
 
   const svg = '<svg class="payee-chart-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="Netto över tid">'
     + bars + '</svg>';
@@ -9078,8 +9111,10 @@ function buildMonthSeriesChart(series){
   const breakVisualH = Math.round(barMaxH * CHART_BREAK_VISUAL_RATIO);
   const rotateLabels = months.length > (mobileFit ? 5 : 8);
   const labelH = rotateLabels ? 52 : 32;
+  const mean = chartSeriesMean(displayVals);
+  const meanColW = mean != null ? 68 : 0;
   const padL = mobileFit ? 16 : 28;
-  const padR = mobileFit ? 10 : 16;
+  const padR = (mobileFit ? 10 : 16) + meanColW;
   const padT = 4;
   const padB = 8;
   const gap = mobileFit ? 4 : 8;
@@ -9138,6 +9173,9 @@ function buildMonthSeriesChart(series){
     bars += '<rect class="chart-bar-hitarea" x="' + x + '" y="' + padT + '" width="' + bw + '" height="' + (plotH + labelH) + '" fill="transparent"/>';
     bars += '</g>';
   });
+  if(mean != null){
+    bars += chartVerticalMeanMarkup(mean, width - meanColW / 2, trackTop + barMaxH / 2);
+  }
 
   return '<div class="payee-chart-panel is-' + tone + '">'
     + monthSeriesChartKickerHtml(false)
