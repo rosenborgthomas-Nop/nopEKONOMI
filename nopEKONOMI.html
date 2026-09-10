@@ -1788,17 +1788,17 @@ input[type=file]{ display:none; }
   margin:0 0 8px;
   padding:0 8px 0 52px;
   font-family:'JetBrains Mono', monospace;
-  font-size:12px;
+  font-size:24px;
   color:var(--text-on-paper-soft);
 }
 .payee-chart-mean-lab{
   letter-spacing:0.08em;
   text-transform:uppercase;
-  font-size:10px;
+  font-size:20px;
 }
 .payee-chart-mean-amt{
   font-weight:700;
-  font-size:13px;
+  font-size:26px;
   color:#067647;
 }
 .payee-chart-mean.is-neg .payee-chart-mean-amt{
@@ -3554,7 +3554,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-10 v03';
+const APP_VERSION = '2026-09-10 v04';
 
 /* =====================================================================
    INNEHÅLL
@@ -6562,17 +6562,19 @@ function chartVerticalMeanMarkup(mean, xCenter, plotMidY){
   const rounded = Math.round(mean);
   const amt = formatReportInt(rounded);
   const fill = rounded < 0 ? '#B42318' : '#067647';
+  const labelFs = 18;
+  const amtFs = 22;
   // Uppskattad monospace-bredd så "Medel" och belopp inte överlappar (även 6+ siffror).
-  const labelW = 5 * 5.5;
-  const amtW = amt.length * 6.8;
-  const gap = 10;
+  const labelW = 5 * (labelFs * 0.62);
+  const amtW = amt.length * (amtFs * 0.62);
+  const gap = 14;
   const total = labelW + gap + amtW;
   const labelEnd = -total / 2 + labelW;
   const amtStart = labelEnd + gap;
   // rotate(-90): lokal +x pekar uppåt → texten läses nerifrån och upp.
   return '<g class="chart-mean" aria-label="Medel" transform="translate(' + xCenter + ' ' + plotMidY + ') rotate(-90)">'
-    + '<text text-anchor="end" x="' + labelEnd + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5A6F88">Medel</text>'
-    + '<text text-anchor="start" x="' + amtStart + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="' + fill + '">'
+    + '<text text-anchor="end" x="' + labelEnd + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="' + labelFs + '" fill="#5A6F88">Medel</text>'
+    + '<text text-anchor="start" x="' + amtStart + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="' + amtFs + '" font-weight="700" fill="' + fill + '">'
     + escapeHtml(amt) + '</text>'
     + '</g>';
 }
@@ -8132,7 +8134,7 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
   const rotateLabels = n > (mobileFit ? 5 : 8);
   const labelH = rotateLabels ? 52 : 32;
   const mean = chartSeriesMean(displayVals);
-  const meanColW = mean != null ? 68 : 0;
+  const meanColW = mean != null ? 88 : 0;
   const padL = forPrint ? 24 : (mobileFit ? 16 : 28);
   const padR = (forPrint ? 14 : (mobileFit ? 10 : 16)) + meanColW;
   const padT = 4;
@@ -9157,7 +9159,7 @@ function buildMonthSeriesChart(series){
   const rotateLabels = months.length > (mobileFit ? 5 : 8);
   const labelH = rotateLabels ? 52 : 32;
   const mean = chartSeriesMean(displayVals);
-  const meanColW = mean != null ? 68 : 0;
+  const meanColW = mean != null ? 88 : 0;
   const padL = mobileFit ? 16 : 28;
   const padR = (mobileFit ? 10 : 16) + meanColW;
   const padT = 4;
