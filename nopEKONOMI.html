@@ -3554,7 +3554,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-10 v02';
+const APP_VERSION = '2026-09-10 v03';
 
 /* =====================================================================
    INNEHÅLL
@@ -6541,14 +6541,14 @@ function formatReportInt(n){
   return (neg ? '-' : '') + intPart;
 }
 
-/** Aritmetiskt medel av stapelvärden (upprätt diagram <13). */
+/** Aritmetiskt medel av stapelvärden (nollvärden räknas inte). */
 function chartSeriesMean(vals){
   if(!vals || !vals.length) return null;
   let sum = 0;
   let n = 0;
   for(let i = 0; i < vals.length; i++){
     const v = Number(vals[i]);
-    if(!Number.isFinite(v)) continue;
+    if(!Number.isFinite(v) || v === 0) continue;
     sum += v;
     n += 1;
   }
@@ -6562,10 +6562,17 @@ function chartVerticalMeanMarkup(mean, xCenter, plotMidY){
   const rounded = Math.round(mean);
   const amt = formatReportInt(rounded);
   const fill = rounded < 0 ? '#B42318' : '#067647';
+  // Uppskattad monospace-bredd så "Medel" och belopp inte överlappar (även 6+ siffror).
+  const labelW = 5 * 5.5;
+  const amtW = amt.length * 6.8;
+  const gap = 10;
+  const total = labelW + gap + amtW;
+  const labelEnd = -total / 2 + labelW;
+  const amtStart = labelEnd + gap;
   // rotate(-90): lokal +x pekar uppåt → texten läses nerifrån och upp.
   return '<g class="chart-mean" aria-label="Medel" transform="translate(' + xCenter + ' ' + plotMidY + ') rotate(-90)">'
-    + '<text text-anchor="middle" x="-16" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5A6F88">Medel</text>'
-    + '<text text-anchor="middle" x="18" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="' + fill + '">'
+    + '<text text-anchor="end" x="' + labelEnd + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5A6F88">Medel</text>'
+    + '<text text-anchor="start" x="' + amtStart + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="' + fill + '">'
     + escapeHtml(amt) + '</text>'
     + '</g>';
 }
