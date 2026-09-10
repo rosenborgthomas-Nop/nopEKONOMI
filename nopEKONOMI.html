@@ -3554,7 +3554,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-10 v04';
+const APP_VERSION = '2026-09-10 v05';
 
 /* =====================================================================
    INNEHÅLL
@@ -7000,6 +7000,8 @@ async function svgElementToImage(svg){
   const h = Math.ceil(vb && vb.height ? vb.height : (svg.clientHeight || 320));
   const clone = svg.cloneNode(true);
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  // SMIL begin="0s" + from="0" ger tom första stapel i <img>/utskrift — behåll basattribut (slutläge).
+  clone.querySelectorAll('animate, animateTransform, animateMotion, set').forEach(node => node.remove());
   const svgStr = new XMLSerializer().serializeToString(clone);
   const url = URL.createObjectURL(new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' }));
   try{
