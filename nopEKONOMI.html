@@ -1808,9 +1808,17 @@ input[type=file]{ display:none; }
 .payee-chart-mean{
   margin:0 0 8px;
   padding:0 8px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px 28px;
   font-family:'JetBrains Mono', monospace;
   font-size:24px;
   color:var(--text-on-paper-soft);
+}
+.payee-chart-mean-pair{
+  display:inline-flex;
+  align-items:baseline;
+  gap:6px;
 }
 .payee-chart-mean-lab{
   letter-spacing:0.08em;
@@ -1822,8 +1830,28 @@ input[type=file]{ display:none; }
   font-size:26px;
   color:#067647;
 }
-.payee-chart-mean.is-neg .payee-chart-mean-amt{
+.payee-chart-mean.is-neg .payee-chart-mean-amt,
+.payee-chart-mean-pair.is-neg .payee-chart-mean-amt{
   color:#B42318;
+}
+.netto-print-year-label{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:8px 16px;
+}
+.chart-chunk-stats{
+  display:inline-flex;
+  flex-wrap:wrap;
+  gap:8px 18px;
+  font-family:'JetBrains Mono', monospace;
+}
+.chart-chunk-stats .payee-chart-mean-lab{
+  font-size:11px;
+}
+.chart-chunk-stats .payee-chart-mean-amt{
+  font-size:14px;
 }
 .payee-chart-heading{
   margin:0 0 12px;
@@ -3575,7 +3603,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-10 v10';
+const APP_VERSION = '2026-09-13 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -6562,72 +6590,141 @@ function formatReportInt(n){
   return (neg ? '-' : '') + intPart;
 }
 
-/** Aritmetiskt medel av stapelvärden (nollvärden räknas inte). */
-function chartSeriesMean(vals){
+/** Smart medel + summa.
+ *  Tätt spann (löpande kategori, t.ex. el): nollor mellan första och sista
+ *  icke-noll räknas in i medlet (tillfälliga månadsluckor).
+ *  Gles/sällsynt: bara icke-nollvärden i medlet.
+ *  Summa = summan av alla värden (nollor påverkar inte). */
+const CHART_MEAN_DENSE_RATIO = 0.5;
+
+function chartSeriesStats(vals){
   if(!vals || !vals.length) return null;
-  let sum = 0;
-  let n = 0;
+  let first = -1;
+  let last = -1;
+  let nonZero = 0;
+  let sumAll = 0;
   for(let i = 0; i < vals.length; i++){
     const v = Number(vals[i]);
-    if(!Number.isFinite(v) || v === 0) continue;
-    sum += v;
-    n += 1;
+    if(!Number.isFinite(v)) continue;
+    sumAll += v;
+    if(v !== 0){
+      nonZero += 1;
+      if(first < 0) first = i;
+      last = i;
+    }
+  }
+  if(!nonZero) return null;
+  const span = last - first + 1;
+  const dense = (nonZero / span) >= CHART_MEAN_DENSE_RATIO;
+  let meanSum = 0;
+  let n = 0;
+  if(dense){
+    for(let i = first; i <= last; i++){
+      const v = Number(vals[i]);
+      if(!Number.isFinite(v)) continue;
+      meanSum += v;
+      n += 1;
+    }
+  } else {
+    for(let i = 0; i < vals.length; i++){
+      const v = Number(vals[i]);
+      if(!Number.isFinite(v) || v === 0) continue;
+      meanSum += v;
+      n += 1;
+    }
   }
   if(!n) return null;
-  return sum / n;
+  return { mean: meanSum / n, sum: sumAll, n: n, dense: dense };
 }
 
-/** Text "Medel" + belopp till höger om upprätta staplar (nerifrån och upp, −90°). */
-function chartVerticalMeanMarkup(mean, xCenter, plotMidY, opts){
-  if(mean == null || !Number.isFinite(mean)) return '';
+function chartSeriesMean(vals){
+  const s = chartSeriesStats(vals);
+  return s ? s.mean : null;
+}
+
+function chartAmountFill(n){
+  const rounded = Math.round(n);
+  if(rounded < 0) return '#B42318';
+  if(rounded > 0) return '#067647';
+  return '#1A3050';
+}
+
+/** Text "Medel"/"Summa" + belopp till höger om upprätta staplar (nerifrån och upp, −90°). */
+function chartVerticalMeanMarkup(stats, xCenter, plotMidY, opts){
+  if(!stats || !Number.isFinite(stats.mean)) return '';
   opts = opts || {};
   const fontScale = opts.fontScale > 0 ? opts.fontScale : 1;
-  const rounded = Math.round(mean);
-  const amt = formatReportInt(rounded);
-  const fill = rounded < 0 ? '#B42318' : '#067647';
-  const labelFs = Math.round(18 * fontScale);
-  const amtFs = Math.round(22 * fontScale);
-  // Uppskattad monospace-bredd så "Medel" och belopp inte överlappar (även 6+ siffror).
-  const labelW = 5 * (labelFs * 0.62);
-  const amtW = amt.length * (amtFs * 0.62);
-  const gap = Math.round(14 * fontScale);
-  const total = labelW + gap + amtW;
-  const labelEnd = -total / 2 + labelW;
-  const amtStart = labelEnd + gap;
-  // rotate(-90): lokal +x pekar uppåt → texten läses nerifrån och upp.
-  return '<g class="chart-mean" aria-label="Medel" transform="translate(' + xCenter + ' ' + plotMidY + ') rotate(-90)">'
-    + '<text text-anchor="end" x="' + labelEnd + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="' + labelFs + '" fill="#5A6F88">Medel</text>'
-    + '<text text-anchor="start" x="' + amtStart + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="' + amtFs + '" font-weight="700" fill="' + fill + '">'
-    + escapeHtml(amt) + '</text>'
+  const meanAmt = formatReportInt(Math.round(stats.mean));
+  const sumAmt = formatReportInt(Math.round(stats.sum));
+  const meanFill = chartAmountFill(stats.mean);
+  const sumFill = chartAmountFill(stats.sum);
+  const labelFs = Math.round(16 * fontScale);
+  const amtFs = Math.round(20 * fontScale);
+  const gap = Math.round(10 * fontScale);
+  const blockGap = Math.round(16 * fontScale);
+  const meanLabelW = 5 * (labelFs * 0.62);
+  const meanAmtW = meanAmt.length * (amtFs * 0.62);
+  const sumLabelW = 5 * (labelFs * 0.62);
+  const sumAmtW = sumAmt.length * (amtFs * 0.62);
+  const meanBlock = meanLabelW + gap + meanAmtW;
+  const sumBlock = sumLabelW + gap + sumAmtW;
+  const total = meanBlock + blockGap + sumBlock;
+  let x = -total / 2;
+  const meanLabelEnd = x + meanLabelW;
+  const meanAmtStart = meanLabelEnd + gap;
+  x += meanBlock + blockGap;
+  const sumLabelEnd = x + sumLabelW;
+  const sumAmtStart = sumLabelEnd + gap;
+  return '<g class="chart-mean" aria-label="Medel och summa" transform="translate(' + xCenter + ' ' + plotMidY + ') rotate(-90)">'
+    + '<text text-anchor="end" x="' + meanLabelEnd + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="' + labelFs + '" fill="#5A6F88">Medel</text>'
+    + '<text text-anchor="start" x="' + meanAmtStart + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="' + amtFs + '" font-weight="700" fill="' + meanFill + '">'
+    + escapeHtml(meanAmt) + '</text>'
+    + '<text text-anchor="end" x="' + sumLabelEnd + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="' + labelFs + '" fill="#5A6F88">Summa</text>'
+    + '<text text-anchor="start" x="' + sumAmtStart + '" y="0" dominant-baseline="middle" font-family="JetBrains Mono, monospace" font-size="' + amtFs + '" font-weight="700" fill="' + sumFill + '">'
+    + escapeHtml(sumAmt) + '</text>'
     + '</g>';
 }
 
-/** Medel ovanför staplarna i staplat (>12) SVG (följer med vid utskrift). */
-function chartStackedMeanMarkup(mean, L){
-  if(mean == null || !Number.isFinite(mean) || !L) return '';
-  const rounded = Math.round(mean);
-  const amt = formatReportInt(rounded);
-  const fill = rounded < 0 ? '#B42318' : '#067647';
-  const y = Math.max(22, (L.meanBand || 36) - 8);
-  const labX = L.barX;
-  const amtX = L.barX + 78;
-  return '<g class="chart-mean" aria-label="Medel">'
-    + '<text x="' + labX + '" y="' + y + '" font-family="JetBrains Mono, monospace" font-size="20" fill="#5A6F88">Medel</text>'
-    + '<text x="' + amtX + '" y="' + y + '" font-family="JetBrains Mono, monospace" font-size="26" font-weight="700" fill="' + fill + '">'
-    + escapeHtml(amt) + '</text>'
-    + '</g>';
-}
-
-/** Totalt medel överst (HTML — skärm + utskrift). */
-function chartTotalMeanHeaderHtml(mean){
-  if(mean == null || !Number.isFinite(mean)) return '';
-  const rounded = Math.round(mean);
-  const amt = formatReportInt(rounded);
-  const negClass = rounded < 0 ? ' is-neg' : '';
-  return '<p class="payee-chart-mean' + negClass + '">'
+/** Medel + summa överst / i box (HTML — skärm + utskrift). */
+function chartTotalMeanHeaderHtml(stats){
+  if(!stats || !Number.isFinite(stats.mean)) return '';
+  const meanAmt = formatReportInt(Math.round(stats.mean));
+  const sumAmt = formatReportInt(Math.round(stats.sum));
+  const meanNeg = Math.round(stats.mean) < 0 ? ' is-neg' : '';
+  const sumNeg = Math.round(stats.sum) < 0 ? ' is-neg' : '';
+  return '<p class="payee-chart-mean">'
+    + '<span class="payee-chart-mean-pair' + meanNeg + '">'
     + '<span class="payee-chart-mean-lab">Medel</span> '
-    + '<span class="payee-chart-mean-amt">' + escapeHtml(amt) + '</span>'
+    + '<span class="payee-chart-mean-amt">' + escapeHtml(meanAmt) + '</span>'
+    + '</span>'
+    + '<span class="payee-chart-mean-pair' + sumNeg + '">'
+    + '<span class="payee-chart-mean-lab">Summa</span> '
+    + '<span class="payee-chart-mean-amt">' + escapeHtml(sumAmt) + '</span>'
+    + '</span>'
     + '</p>';
+}
+
+function chartChunkYearLabelHtml(yearLabel, stats){
+  if(!yearLabel) return '';
+  let html = '<p class="netto-print-year-label"><span class="chart-chunk-year">' + escapeHtml(yearLabel) + '</span>';
+  if(stats && Number.isFinite(stats.mean)){
+    const meanAmt = formatReportInt(Math.round(stats.mean));
+    const sumAmt = formatReportInt(Math.round(stats.sum));
+    const meanNeg = Math.round(stats.mean) < 0 ? ' is-neg' : '';
+    const sumNeg = Math.round(stats.sum) < 0 ? ' is-neg' : '';
+    html += '<span class="chart-chunk-stats">'
+      + '<span class="payee-chart-mean-pair' + meanNeg + '">'
+      + '<span class="payee-chart-mean-lab">Medel</span> '
+      + '<span class="payee-chart-mean-amt">' + escapeHtml(meanAmt) + '</span>'
+      + '</span>'
+      + '<span class="payee-chart-mean-pair' + sumNeg + '">'
+      + '<span class="payee-chart-mean-lab">Summa</span> '
+      + '<span class="payee-chart-mean-amt">' + escapeHtml(sumAmt) + '</span>'
+      + '</span>'
+      + '</span>';
+  }
+  html += '</p>';
+  return html;
 }
 
 function reportAmountCell(raw, absolute, opts){
@@ -7470,10 +7567,11 @@ function printHtmlDocument(title, bodyHtml, opts){
     + '.payee-chart-board{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 16px;}'
     + '.payee-chart-panel{padding:10px 10px 8px;border:1px solid #ddd;border-radius:8px;overflow:visible;}'
     + '.payee-chart-kicker{margin:0 0 6px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#666;}'
-    + '.payee-chart-mean{margin:0 0 6px;font-family:"JetBrains Mono",monospace;font-size:16px;color:#5A6F88;}'
+    + '.payee-chart-mean{margin:0 0 6px;display:flex;flex-wrap:wrap;gap:8px 22px;font-family:"JetBrains Mono",monospace;font-size:16px;color:#5A6F88;}'
+    + '.payee-chart-mean-pair{display:inline-flex;align-items:baseline;gap:6px;}'
     + '.payee-chart-mean-lab{letter-spacing:.08em;text-transform:uppercase;font-size:13px;}'
     + '.payee-chart-mean-amt{font-weight:700;font-size:16px;color:#067647;}'
-    + '.payee-chart-mean.is-neg .payee-chart-mean-amt{color:#B42318;}'
+    + '.payee-chart-mean.is-neg .payee-chart-mean-amt,.payee-chart-mean-pair.is-neg .payee-chart-mean-amt{color:#B42318;}'
     + '.payee-chart-svg{display:block;width:100%;height:auto;}'
     + '.toplist-plain{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px;}'
     + '.toplist-plain-col h3{margin:0 0 8px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;}'
@@ -7485,7 +7583,10 @@ function printHtmlDocument(title, bodyHtml, opts){
     + '.report-divider{border-top:1px solid #ddd;margin:8px 0 12px;}'
     + '.netto-print-section,.chart-chunk-section{page-break-inside:avoid;margin:0 0 2px;}'
     + '.netto-print-section + .netto-print-section,.chart-chunk-section + .chart-chunk-section{margin-top:4px;padding-top:4px;border-top:1px solid #ddd;}'
-    + '.netto-print-year-label{margin:0 0 2px;font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700;letter-spacing:.04em;color:#1A3050;}'
+    + '.netto-print-year-label{margin:0 0 2px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 12px;font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700;letter-spacing:.04em;color:#1A3050;}'
+    + '.chart-chunk-stats{display:inline-flex;flex-wrap:wrap;gap:6px 14px;font-weight:500;}'
+    + '.chart-chunk-stats .payee-chart-mean-lab{font-size:10px;}'
+    + '.chart-chunk-stats .payee-chart-mean-amt{font-size:12px;}'
     + '.netto-print-section .payee-chart-svg,.chart-chunk-section .payee-chart-svg{display:block;width:100%;max-width:185mm;max-height:78mm;height:auto;margin:0 auto;}'
     + tableCss
     + '</style></head><body><div class="report-print-sheet">'
@@ -8102,6 +8203,17 @@ function netOverTimePrevValue(points, idx, opening){
   return Number.isFinite(opening) ? opening : null;
 }
 
+function netOverTimeDeltaSum(points, opening, startIdx, count){
+  let sum = 0;
+  for(let i = 0; i < count; i++){
+    const idx = startIdx + i;
+    if(idx < 0 || idx >= points.length) continue;
+    const prev = netOverTimePrevValue(points, idx, opening);
+    sum += points[idx].value - (prev == null ? 0 : prev);
+  }
+  return sum;
+}
+
 const CHART_PAPER_CUT = '#E8EFF7';
 const CHART_ZIGZAG_STROKE = 'rgba(26,48,80,0.28)';
 const CHART_POSITIVE = '#3A8F5C';
@@ -8192,8 +8304,14 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
   const breakVisualH = Math.round(barMaxH * CHART_BREAK_VISUAL_RATIO);
   const rotateLabels = n > (mobileFit ? 5 : 8);
   const labelH = rotateLabels ? (forPrint ? 36 : 52) : (forPrint ? 22 : 32);
-  const mean = showMean ? chartSeriesMean(displayVals) : null;
-  const meanColW = mean != null ? (forPrint ? 72 : 88) : 0;
+  // Stats på kronologisk ordning (inte display-ordning) så täthet/nollor blir rätt.
+  let stats = showMean ? chartSeriesStats(pointsSlice.map(p => p.value)) : null;
+  if(stats && opts.useNetDeltaSum){
+    stats = Object.assign({}, stats, {
+      sum: netOverTimeDeltaSum(allPoints, opening, startIdx, n)
+    });
+  }
+  const meanColW = stats ? (forPrint ? 88 : 110) : 0;
   const padL = forPrint ? 18 : (mobileFit ? 16 : 28);
   const padR = (forPrint ? 10 : (mobileFit ? 10 : 16)) + meanColW;
   const padT = forPrint ? 2 : 4;
@@ -8269,9 +8387,9 @@ function buildNetOverTimeVerticalChartBlock(pointsSlice, allPoints, opening, sta
     }
     bars += '</g>';
   });
-  if(mean != null){
-    bars += chartVerticalMeanMarkup(mean, width - meanColW / 2, trackTop + barMaxH / 2, {
-      fontScale: forPrint ? 0.72 : 1
+  if(stats){
+    bars += chartVerticalMeanMarkup(stats, width - meanColW / 2, trackTop + barMaxH / 2, {
+      fontScale: forPrint ? 0.65 : 0.85
     });
   }
 
@@ -8297,8 +8415,14 @@ function buildNetOverTimeChunkedHtml(points, opening, opts){
   opts = opts || {};
   const forPrint = !!opts.forPrint;
   const includeTotalMean = opts.includeTotalMean !== false;
-  const totalMean = chartSeriesMean(points.map(p => p.value));
-  let html = includeTotalMean ? chartTotalMeanHeaderHtml(totalMean) : '';
+  const totalVals = points.map(p => p.value);
+  let totalStats = chartSeriesStats(totalVals);
+  if(totalStats){
+    totalStats = Object.assign({}, totalStats, {
+      sum: netOverTimeDeltaSum(points, opening, 0, points.length)
+    });
+  }
+  let html = includeTotalMean ? chartTotalMeanHeaderHtml(totalStats) : '';
   const starts = [];
   for(let start = 0; start < points.length; start += NETTO_PRINT_CHUNK) starts.push(start);
   starts.reverse();
@@ -8306,15 +8430,20 @@ function buildNetOverTimeChunkedHtml(points, opening, opts){
     const start = starts[s];
     const chunk = points.slice(start, start + NETTO_PRINT_CHUNK);
     const yearLabel = nettoPrintChunkYearLabel(chunk);
-    html += '<div class="chart-chunk-section' + (forPrint ? ' netto-print-section' : '') + '">';
-    if(yearLabel){
-      html += '<p class="netto-print-year-label">' + escapeHtml(yearLabel) + '</p>';
+    let chunkStats = chartSeriesStats(chunk.map(p => p.value));
+    if(chunkStats){
+      chunkStats = Object.assign({}, chunkStats, {
+        sum: netOverTimeDeltaSum(points, opening, start, chunk.length)
+      });
     }
+    html += '<div class="chart-chunk-section' + (forPrint ? ' netto-print-section' : '') + '">';
+    html += chartChunkYearLabelHtml(yearLabel, chunkStats);
     html += buildNetOverTimeVerticalChartBlock(chunk, points, opening, start, {
       forPrint: forPrint,
       wrapPanel: false,
       newestFirst: true,
-      showMean: true
+      showMean: false,
+      useNetDeltaSum: true
     });
     html += '</div>';
   }
@@ -8406,7 +8535,8 @@ function buildNetOverTimeChart(points, opening){
     wrapPanel: true,
     animate: true,
     newestFirst: true,
-    showMean: true
+    showMean: true,
+    useNetDeltaSum: true
   });
 }
 
@@ -9175,8 +9305,8 @@ function buildMonthSeriesVerticalChartBlock(pointsSlice, allPoints, startIdx, op
   const breakVisualH = Math.round(barMaxH * CHART_BREAK_VISUAL_RATIO);
   const rotateLabels = n > (mobileFit ? 5 : 8);
   const labelH = rotateLabels ? (forPrint ? 36 : 52) : (forPrint ? 22 : 32);
-  const mean = showMean ? chartSeriesMean(displayVals) : null;
-  const meanColW = mean != null ? (forPrint ? 72 : 88) : 0;
+  const stats = showMean ? chartSeriesStats(pointsSlice.map(p => p.value)) : null;
+  const meanColW = stats ? (forPrint ? 88 : 110) : 0;
   const padL = forPrint ? 18 : (mobileFit ? 16 : 28);
   const padR = (forPrint ? 10 : (mobileFit ? 10 : 16)) + meanColW;
   const padT = forPrint ? 2 : 4;
@@ -9251,9 +9381,9 @@ function buildMonthSeriesVerticalChartBlock(pointsSlice, allPoints, startIdx, op
     }
     bars += '</g>';
   });
-  if(mean != null){
-    bars += chartVerticalMeanMarkup(mean, width - meanColW / 2, trackTop + barMaxH / 2, {
-      fontScale: forPrint ? 0.72 : 1
+  if(stats){
+    bars += chartVerticalMeanMarkup(stats, width - meanColW / 2, trackTop + barMaxH / 2, {
+      fontScale: forPrint ? 0.65 : 0.85
     });
   }
 
@@ -9269,9 +9399,9 @@ function buildMonthSeriesChunkedHtml(series, opts){
   const absolute = !!series.absolute;
   const tone = series.tone || (absolute ? 'expense' : 'income');
   const title = series.title || 'Fördelning';
-  const totalMean = chartSeriesMean(points.map(p => p.value));
+  const totalStats = chartSeriesStats(points.map(p => p.value));
   let html = monthSeriesChartKickerHtml(true);
-  if(includeTotalMean) html += chartTotalMeanHeaderHtml(totalMean);
+  if(includeTotalMean) html += chartTotalMeanHeaderHtml(totalStats);
   const starts = [];
   for(let start = 0; start < points.length; start += NETTO_PRINT_CHUNK) starts.push(start);
   starts.reverse();
@@ -9279,14 +9409,13 @@ function buildMonthSeriesChunkedHtml(series, opts){
     const start = starts[s];
     const chunk = points.slice(start, start + NETTO_PRINT_CHUNK);
     const yearLabel = nettoPrintChunkYearLabel(chunk);
+    const chunkStats = chartSeriesStats(chunk.map(p => p.value));
     html += '<div class="chart-chunk-section' + (forPrint ? ' netto-print-section' : '') + '">';
-    if(yearLabel){
-      html += '<p class="netto-print-year-label">' + escapeHtml(yearLabel) + '</p>';
-    }
+    html += chartChunkYearLabelHtml(yearLabel, chunkStats);
     html += buildMonthSeriesVerticalChartBlock(chunk, points, start, {
       forPrint: forPrint,
       newestFirst: true,
-      showMean: true,
+      showMean: false,
       animate: !forPrint,
       tone: tone,
       title: title,
