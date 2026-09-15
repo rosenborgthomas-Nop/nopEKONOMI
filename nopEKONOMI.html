@@ -3603,7 +3603,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-13 v01';
+const APP_VERSION = '2026-09-15 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -12562,6 +12562,8 @@ function buildSplitRowEl(data){
   amt.placeholder = 'Belopp';
   if(splitAmountNonZero(data.total)) amt.value = formatSignedSummaInput(data.total);
   bindSignedAmountInput(amt);
+  bindDatalistAutocomplete(cat);
+  bindDatalistAutocomplete(sub);
 
   const rm = document.createElement('button');
   rm.type = 'button';
@@ -12757,6 +12759,61 @@ function fillDatalist(datalistEl, items){
     opt.value = name;
     datalistEl.appendChild(opt);
   }
+}
+
+/** Bästa prefixträff i inputens datalist (skiftlägesokänsligt). */
+function findDatalistPrefixMatch(inputEl){
+  if(!inputEl) return null;
+  const listId = inputEl.getAttribute('list');
+  if(!listId) return null;
+  const list = document.getElementById(listId);
+  if(!list) return null;
+  const q = String(inputEl.value || '').trim();
+  if(!q) return null;
+  const qLower = q.toLowerCase();
+  let caseFoldExact = null;
+  let prefix = null;
+  for(let i = 0; i < list.options.length; i++){
+    const v = list.options[i].value;
+    if(!v) continue;
+    if(v === q) return v;
+    const vLower = v.toLowerCase();
+    if(vLower === qLower){
+      if(caseFoldExact == null) caseFoldExact = v;
+      continue;
+    }
+    if(prefix == null && vLower.startsWith(qLower)) prefix = v;
+  }
+  return caseFoldExact || prefix;
+}
+
+/** Tab/Enter fyller i bästa datalist-prefixträff (utan att kräva klick). */
+function bindDatalistAutocomplete(inputEl){
+  if(!inputEl || inputEl.dataset.datalistAcBound) return;
+  inputEl.dataset.datalistAcBound = '1';
+  inputEl.addEventListener('keydown', e => {
+    if(e.key !== 'Tab' && e.key !== 'Enter') return;
+    if(e.isComposing) return;
+    const match = findDatalistPrefixMatch(inputEl);
+    if(!match) return;
+    const cur = String(inputEl.value || '');
+    if(cur === match) return;
+    inputEl.value = match;
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+}
+
+function bindNewTxDatalistAutocomplete(){
+  const ids = [
+    'newTxUtPayee', 'newTxUtCategory', 'newTxUtSubCategory',
+    'newTxInPayee', 'newTxInCategory', 'newTxInSubCategory'
+  ];
+  for(const id of ids) bindDatalistAutocomplete(el(id));
 }
 
 function populateNewTxLookups(){
@@ -13808,6 +13865,7 @@ views.newTransaction.addEventListener('input', e => {
     newTxSuggest.summa = false;
   }
 });
+bindNewTxDatalistAutocomplete();
 
 
 /* --- 8. Inställningar ------------------------------------------------ */
