@@ -3613,7 +3613,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v01';
+const APP_VERSION = '2026-09-16 v02';
 
 /* =====================================================================
    INNEHÅLL
@@ -8011,9 +8011,13 @@ function reportHeaderOnlyRow(label, colCount, rowClass){
     + (colCount - 1) + '"></td></tr>';
 }
 
-/** Sektionsrubrik med Namn/Belopp-sortering (Payee-rapport: In/Ut var för sig). */
-function reportSectionSortHeaderRow(label, colCount, side, sortKey, sortDir){
-  const sortHtml = toplistSortHeadHtml(sortKey, sortDir, 'Payee');
+/** Sektionsrubrik med namnsortering (Payee-rapport: In/Ut var för sig). */
+function reportSectionSortHeaderRow(label, colCount, side, sortDir){
+  const arrow = sortDir === 'asc' ? '▲' : '▼';
+  const sortHtml = '<div class="toplist-sort-head" role="group" aria-label="Sortering">'
+    + '<button type="button" class="toplist-sort active-sort" data-sort="name" title="Sortera efter Payee">'
+    + 'Payee <span class="arrow" aria-hidden="true">' + arrow + '</span></button>'
+    + '</div>';
   const labelCell = '<span class="report-section-title">' + escapeHtml(label) + '</span>' + sortHtml;
   if(colCount <= 1){
     return '<tr class="report-section" data-payee-sort-side="' + escapeAttr(side) + '">'
@@ -8024,17 +8028,17 @@ function reportSectionSortHeaderRow(label, colCount, side, sortKey, sortDir){
     + '<td class="report-section-fill" colspan="' + (colCount - 1) + '"></td></tr>';
 }
 
-function sortPayeeReportNames(names, totals, sortKey, sortDir){
+function sortPayeeReportNames(names, totals, sortDir){
   return sortToplistEntries(
     (names || []).map(n => ({ name: n, total: (totals && totals[n]) || 0 })),
-    sortKey,
-    sortDir
+    'name',
+    sortDir || 'asc'
   ).map(e => e.name);
 }
 
 let payeeReportSort = {
-  in: { sortKey: 'value', sortDir: 'desc' },
-  out: { sortKey: 'value', sortDir: 'desc' }
+  in: { sortDir: 'asc' },
+  out: { sortDir: 'asc' }
 };
 
 function bindPayeeReportSortUi(){
@@ -8048,18 +8052,12 @@ function bindPayeeReportSortUi(){
     if(!row) return;
     const side = row.getAttribute('data-payee-sort-side');
     if(side !== 'in' && side !== 'out') return;
-    const key = btn.getAttribute('data-sort');
-    if(key !== 'name' && key !== 'value') return;
+    if(btn.getAttribute('data-sort') !== 'name') return;
     e.preventDefault();
     e.stopPropagation();
-    if(!payeeReportSort[side]) payeeReportSort[side] = { sortKey: 'value', sortDir: 'desc' };
+    if(!payeeReportSort[side]) payeeReportSort[side] = { sortDir: 'asc' };
     const state = payeeReportSort[side];
-    if(state.sortKey === key){
-      state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      state.sortKey = key;
-      state.sortDir = key === 'name' ? 'asc' : 'desc';
-    }
+    state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
     const from = activeReportRange.from || (reportFrom && reportFrom.value) || '';
     const to = activeReportRange.to || (reportTo && reportTo.value) || '';
     if(from && to) renderPayeeReportTable(from, to);
@@ -9208,10 +9206,10 @@ function renderPayeeReportTable(fromIso, toIso){
   setActiveReportRange(fromIso, toIso);
   const data = collectPayeeReport(fromIso, toIso);
   const { months, payeeTotals, payeeMonthly } = data;
-  const sortIn = payeeReportSort.in || { sortKey: 'value', sortDir: 'desc' };
-  const sortOut = payeeReportSort.out || { sortKey: 'value', sortDir: 'desc' };
-  const posPayees = sortPayeeReportNames(data.posPayees, payeeTotals, sortIn.sortKey, sortIn.sortDir);
-  const negPayees = sortPayeeReportNames(data.negPayees, payeeTotals, sortOut.sortKey, sortOut.sortDir);
+  const sortIn = payeeReportSort.in || { sortDir: 'asc' };
+  const sortOut = payeeReportSort.out || { sortDir: 'asc' };
+  const posPayees = sortPayeeReportNames(data.posPayees, payeeTotals, sortIn.sortDir);
+  const negPayees = sortPayeeReportNames(data.negPayees, payeeTotals, sortOut.sortDir);
   const colCount = months.length + 2;
 
   clearReportCanvas();
@@ -9237,7 +9235,7 @@ function renderPayeeReportTable(fromIso, toIso){
   }
   html += '<th>Totalt</th></tr></thead><tbody>';
 
-  html += reportSectionSortHeaderRow('Inkomster', colCount, 'in', sortIn.sortKey, sortIn.sortDir);
+  html += reportSectionSortHeaderRow('Inkomster', colCount, 'in', sortIn.sortDir);
   for(const p of posPayees){
     html += reportLabelRowHtml(
       p, months, payeeMonthly[p] || {}, payeeTotals[p], false, 'report-sub',
@@ -9273,7 +9271,7 @@ function renderPayeeReportTable(fromIso, toIso){
     }
   );
 
-  html += reportSectionSortHeaderRow('Utgifter', colCount, 'out', sortOut.sortKey, sortOut.sortDir);
+  html += reportSectionSortHeaderRow('Utgifter', colCount, 'out', sortOut.sortDir);
   for(const p of negPayees){
     html += reportLabelRowHtml(
       p, months, payeeMonthly[p] || {}, payeeTotals[p], true, 'report-sub',
