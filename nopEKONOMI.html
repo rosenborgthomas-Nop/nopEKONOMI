@@ -648,6 +648,15 @@ input[type=file]{ display:none; }
     min-width:9rem;
     max-width:16rem;
   }
+  #viewReport.report-mobile .report-table tbody tr:nth-child(even) td.report-label-col{
+    background:var(--paper-surface);
+  }
+  #viewReport.report-mobile .report-table tr.report-section td.report-label-col,
+  #viewReport.report-mobile .report-table tr.report-sum td.report-label-col,
+  #viewReport.report-mobile .report-table tr.report-cat-total td.report-label-col,
+  #viewReport.report-mobile .report-table tr.report-net td.report-label-col{
+    background:var(--paper-alt);
+  }
   #viewReport.report-mobile .report-table thead th.report-label-col{
     z-index:6;
   }
@@ -749,6 +758,10 @@ input[type=file]{ display:none; }
   overflow:hidden;
   text-overflow:ellipsis;
   border-right:0.5px solid var(--paper-line-strong);
+}
+/* Sticky etikettkolumn måste spegla radens pyjamas — annars täcker den tr-bakgrunden. */
+.report-table tbody tr:nth-child(even) td.report-label-col{
+  background:var(--paper-surface);
 }
 .report-table thead th.report-label-col{
   z-index:6;
@@ -2140,6 +2153,9 @@ input[type=file]{ display:none; }
   isolation:isolate;
   background-color:color-mix(in srgb, var(--paper) 92%, var(--gold) 8%);
 }
+.report-table tbody tr:nth-child(even):not(.report-section):hover td.report-label-col{
+  background-color:color-mix(in srgb, var(--paper-surface) 92%, var(--gold) 8%);
+}
 .report-table tr.report-sum:hover td.report-label-col,
 .report-table tr.report-cat-total:hover td.report-label-col,
 .report-table tr.report-net:hover td.report-label-col{
@@ -2166,6 +2182,9 @@ input[type=file]{ display:none; }
   background-color:color-mix(in srgb, var(--paper) 84%, var(--gold) 16%);
   box-shadow:none;
 }
+.report-table tr.report-highlight-row:nth-child(even) td.report-label-col{
+  background-color:color-mix(in srgb, var(--paper-surface) 84%, var(--gold) 16%);
+}
 .report-table tr.report-highlight-row.report-sum td.report-label-col,
 .report-table tr.report-highlight-row.report-cat-total td.report-label-col,
 .report-table tr.report-highlight-row.report-net td.report-label-col{
@@ -2190,6 +2209,9 @@ input[type=file]{ display:none; }
 .report-table tr.report-highlight-row:hover td.report-label-col{
   background-color:color-mix(in srgb, var(--paper) 80%, var(--gold) 20%);
   box-shadow:none;
+}
+.report-table tr.report-highlight-row:nth-child(even):hover td.report-label-col{
+  background-color:color-mix(in srgb, var(--paper-surface) 80%, var(--gold) 20%);
 }
 .report-table tr.report-highlight-row.report-sum:hover td.report-label-col,
 .report-table tr.report-highlight-row.report-cat-total:hover td.report-label-col,
@@ -3645,7 +3667,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v09';
+const APP_VERSION = '2026-09-16 v10';
 
 /* =====================================================================
    INNEHÅLL
