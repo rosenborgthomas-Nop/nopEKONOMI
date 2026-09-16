@@ -822,15 +822,13 @@ input[type=file]{ display:none; }
   letter-spacing:0.08em;
   text-transform:uppercase;
   color:var(--ink);
-  padding-top:7px;
-  padding-bottom:4px;
+  padding:4px 8px;
   border-top:0.5px solid var(--paper-line-strong);
   border-bottom:0.5px solid var(--paper-line-strong);
   background:var(--paper-alt);
 }
 .report-table tr.report-section:first-child td{
   border-top:none;
-  padding-top:7px;
 }
 .report-table tr.report-section td.report-label-col{
   background:var(--paper-alt);
@@ -2036,13 +2034,20 @@ input[type=file]{ display:none; }
 .report-section .toplist-sort-head{
   display:inline-flex;
   margin:0;
-  width:100%;
-  max-width:14rem;
+  padding:0;
+  border:none;
+  width:auto;
+  max-width:none;
+  vertical-align:middle;
 }
 .report-section .toplist-sort{
   font-weight:700;
-  letter-spacing:0.04em;
+  letter-spacing:0.08em;
   text-transform:uppercase;
+  font-size:12px;
+  padding:0;
+  line-height:inherit;
+  color:inherit;
 }
 .toplist-plain-col ol{
   margin:0;
@@ -3614,7 +3619,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v04';
+const APP_VERSION = '2026-09-16 v05';
 
 /* =====================================================================
    INNEHÅLL
