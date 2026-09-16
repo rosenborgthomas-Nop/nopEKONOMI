@@ -880,17 +880,23 @@ input[type=file]{ display:none; }
 }
 .report-table tr.report-cat-toggle td.report-label-col::before{
   content:'▾ ';
+  font-size:2em;
   font-weight:700;
-  color:var(--text-on-paper-soft);
+  line-height:1;
+  vertical-align:-0.12em;
+  color:#22b14c;
 }
 .report-table tr.report-cat-toggle.is-collapsed td.report-label-col::before{
   content:'▸ ';
-  color:var(--gold);
+  color:#22b14c;
 }
 .report-table tr.report-cat-toggle.is-collapsed td.report-label-col::after{
   content:' ∗';
-  color:var(--gold);
+  font-size:2em;
   font-weight:700;
+  line-height:1;
+  vertical-align:-0.12em;
+  color:#22b14c;
 }
 .report-table tr.report-cat-child[hidden]{
   display:none;
@@ -3639,7 +3645,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v07';
+const APP_VERSION = '2026-09-16 v08';
 
 /* =====================================================================
    INNEHÅLL
