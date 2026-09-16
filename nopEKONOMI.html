@@ -2033,6 +2033,16 @@ input[type=file]{ display:none; }
   flex:0 0 auto;
   text-align:right;
 }
+.report-section .toplist-sort-head{
+  display:inline-flex;
+  margin:4px 0 0;
+  width:100%;
+  max-width:14rem;
+}
+.report-section .report-section-title{
+  display:block;
+  font-weight:700;
+}
 .toplist-plain-col ol{
   margin:0;
   padding-left:18px;
@@ -3603,7 +3613,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-15 v01';
+const APP_VERSION = '2026-09-16 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -8001,6 +8011,61 @@ function reportHeaderOnlyRow(label, colCount, rowClass){
     + (colCount - 1) + '"></td></tr>';
 }
 
+/** Sektionsrubrik med Namn/Belopp-sortering (Payee-rapport: In/Ut var för sig). */
+function reportSectionSortHeaderRow(label, colCount, side, sortKey, sortDir){
+  const sortHtml = toplistSortHeadHtml(sortKey, sortDir, 'Payee');
+  const labelCell = '<span class="report-section-title">' + escapeHtml(label) + '</span>' + sortHtml;
+  if(colCount <= 1){
+    return '<tr class="report-section" data-payee-sort-side="' + escapeAttr(side) + '">'
+      + '<td class="report-label-col">' + labelCell + '</td></tr>';
+  }
+  return '<tr class="report-section" data-payee-sort-side="' + escapeAttr(side) + '">'
+    + '<td class="report-label-col">' + labelCell + '</td>'
+    + '<td class="report-section-fill" colspan="' + (colCount - 1) + '"></td></tr>';
+}
+
+function sortPayeeReportNames(names, totals, sortKey, sortDir){
+  return sortToplistEntries(
+    (names || []).map(n => ({ name: n, total: (totals && totals[n]) || 0 })),
+    sortKey,
+    sortDir
+  ).map(e => e.name);
+}
+
+let payeeReportSort = {
+  in: { sortKey: 'value', sortDir: 'desc' },
+  out: { sortKey: 'value', sortDir: 'desc' }
+};
+
+function bindPayeeReportSortUi(){
+  if(!reportBody || reportBody.dataset.payeeSortBound === '1') return;
+  reportBody.dataset.payeeSortBound = '1';
+  reportBody.addEventListener('click', e => {
+    const hit = e.target && (e.target.nodeType === 1 ? e.target : e.target.parentElement);
+    const btn = hit && hit.closest && hit.closest('.toplist-sort');
+    if(!btn) return;
+    const row = btn.closest('tr[data-payee-sort-side]');
+    if(!row) return;
+    const side = row.getAttribute('data-payee-sort-side');
+    if(side !== 'in' && side !== 'out') return;
+    const key = btn.getAttribute('data-sort');
+    if(key !== 'name' && key !== 'value') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if(!payeeReportSort[side]) payeeReportSort[side] = { sortKey: 'value', sortDir: 'desc' };
+    const state = payeeReportSort[side];
+    if(state.sortKey === key){
+      state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.sortKey = key;
+      state.sortDir = key === 'name' ? 'asc' : 'desc';
+    }
+    const from = activeReportRange.from || (reportFrom && reportFrom.value) || '';
+    const to = activeReportRange.to || (reportTo && reportTo.value) || '';
+    if(from && to) renderPayeeReportTable(from, to);
+  }, true);
+}
+
 function sumMaps(keys, monthlyMap, monthKey){
   let sum = 0;
   for(const k of keys) sum += (monthlyMap[k] && monthlyMap[k][monthKey]) || 0;
@@ -9142,7 +9207,11 @@ function renderTopListReport(kind, fromIso, toIso){
 function renderPayeeReportTable(fromIso, toIso){
   setActiveReportRange(fromIso, toIso);
   const data = collectPayeeReport(fromIso, toIso);
-  const { months, posPayees, negPayees, payeeTotals, payeeMonthly } = data;
+  const { months, payeeTotals, payeeMonthly } = data;
+  const sortIn = payeeReportSort.in || { sortKey: 'value', sortDir: 'desc' };
+  const sortOut = payeeReportSort.out || { sortKey: 'value', sortDir: 'desc' };
+  const posPayees = sortPayeeReportNames(data.posPayees, payeeTotals, sortIn.sortKey, sortIn.sortDir);
+  const negPayees = sortPayeeReportNames(data.negPayees, payeeTotals, sortOut.sortKey, sortOut.sortDir);
   const colCount = months.length + 2;
 
   clearReportCanvas();
@@ -9168,7 +9237,7 @@ function renderPayeeReportTable(fromIso, toIso){
   }
   html += '<th>Totalt</th></tr></thead><tbody>';
 
-  html += reportHeaderOnlyRow('Inkomster', colCount, 'report-section');
+  html += reportSectionSortHeaderRow('Inkomster', colCount, 'in', sortIn.sortKey, sortIn.sortDir);
   for(const p of posPayees){
     html += reportLabelRowHtml(
       p, months, payeeMonthly[p] || {}, payeeTotals[p], false, 'report-sub',
@@ -9204,7 +9273,7 @@ function renderPayeeReportTable(fromIso, toIso){
     }
   );
 
-  html += reportHeaderOnlyRow('Utgifter', colCount, 'report-section');
+  html += reportSectionSortHeaderRow('Utgifter', colCount, 'out', sortOut.sortKey, sortOut.sortDir);
   for(const p of negPayees){
     html += reportLabelRowHtml(
       p, months, payeeMonthly[p] || {}, payeeTotals[p], true, 'report-sub',
@@ -9263,6 +9332,7 @@ function renderPayeeReportTable(fromIso, toIso){
   wrap.innerHTML = head + '<div class="report-table-scroll"></div>';
   wrap.querySelector('.report-table-scroll').innerHTML = html;
   reportBody.appendChild(wrap);
+  bindPayeeReportSortUi();
   syncReportCopyBtn();
 }
 
