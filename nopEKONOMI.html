@@ -38,7 +38,7 @@
   --report-band-total: color-mix(in srgb, var(--paper-alt) 88%, var(--ink) 12%);
   --report-band-stripe-a: var(--paper);
   --report-band-stripe-b: var(--paper-surface);
-  --report-col-highlight: color-mix(in srgb, var(--paper) 78%, var(--gold) 22%);
+  --report-highlight: color-mix(in srgb, var(--paper) 78%, var(--gold) 22%);
   --gold:#C9A227;
   --gold-bright:#E0BC3A;
   --wine:#A33B3B;
@@ -654,11 +654,11 @@ input[type=file]{ display:none; }
     max-width:16rem;
   }
   #viewReport.report-mobile .report-table thead th.report-label-col{
-    z-index:6;
+    z-index:22;
     background:var(--paper);
   }
   #viewReport.report-mobile .report-table tr.report-highlight-row td.report-label-col{
-    z-index:5;
+    z-index:3;
   }
 #viewReport.report-mobile .toplist-block,
 #viewReport.report-mobile .payee-chart-board{
@@ -737,8 +737,11 @@ input[type=file]{ display:none; }
   color:var(--text-on-paper-soft);
   position:sticky;
   top:0;
-  z-index:5;
+  /* Högre än alla tbody-celler — annars kan siffror "skina igenom" sticky-rubriken. */
+  z-index:20;
   background:var(--paper);
+  background-color:var(--paper);
+  overflow:hidden;
   border-bottom:0.5px solid var(--paper-line-strong);
   box-shadow:0 0.5px 0 var(--paper-line-strong);
 }
@@ -763,9 +766,10 @@ input[type=file]{ display:none; }
   background:var(--report-band-stripe-b);
 }
 .report-table thead th.report-label-col{
-  z-index:6;
+  z-index:22;
   text-align:left;
   background:var(--paper);
+  background-color:var(--paper);
   border-bottom:0.5px solid var(--paper-line-strong);
   box-shadow:0 0.5px 0 var(--paper-line-strong);
 }
@@ -820,6 +824,9 @@ input[type=file]{ display:none; }
   font-size:12px;
   color:var(--text-on-paper-soft);
   white-space:nowrap;
+  position:relative;
+  z-index:4;
+  background:var(--paper-surface);
 }
 .report-empty-note{
   margin:8px 0 0;
@@ -2153,8 +2160,8 @@ input[type=file]{ display:none; }
   background:rgba(43,87,154,0.10);
 }
 .report-table tr:not(.report-section):hover td.num{
-  position:relative;
-  z-index:0;
+  position:static;
+  z-index:auto;
 }
 .report-table tbody tr:not(.report-section):not(.report-sum):not(.report-cat-total):not(.report-net):hover td{
   background-color:color-mix(in srgb, var(--report-band-stripe-a) 92%, var(--gold) 8%);
@@ -2163,8 +2170,8 @@ input[type=file]{ display:none; }
   background-color:color-mix(in srgb, var(--report-band-stripe-b) 92%, var(--gold) 8%);
 }
 .report-table tbody tr:not(.report-section):not(.report-sum):not(.report-cat-total):not(.report-net):hover td.report-label-col{
-  z-index:5;
-  isolation:isolate;
+  z-index:3;
+  isolation:auto;
 }
 .report-table tr.report-sum:hover td,
 .report-table tr.report-cat-total:hover td,
@@ -2174,8 +2181,8 @@ input[type=file]{ display:none; }
 .report-table tr.report-sum:hover td.report-label-col,
 .report-table tr.report-cat-total:hover td.report-label-col,
 .report-table tr.report-net:hover td.report-label-col{
-  z-index:5;
-  isolation:isolate;
+  z-index:3;
+  isolation:auto;
 }
 .report-table tr:not(.report-section):hover td.num[data-report-col]:hover,
 .report-table tr:not(.report-section):hover td.num.report-drillable:hover{
@@ -2183,46 +2190,32 @@ input[type=file]{ display:none; }
 }
 .report-table tr:not(.report-section):hover td.num.report-highlight-col:hover,
 .report-table tr:not(.report-section):hover td.num.report-highlight-col.report-drillable:hover{
-  background:var(--report-col-highlight);
+  background:var(--report-highlight);
 }
-.report-table tr.report-highlight-row td{
-  background-color:color-mix(in srgb, var(--report-band-stripe-a) 84%, var(--gold) 16%);
-}
-.report-table tr.report-highlight-row:nth-child(even) td{
-  background-color:color-mix(in srgb, var(--report-band-stripe-b) 84%, var(--gold) 16%);
+.report-table tr.report-highlight-row td,
+.report-table tr.report-highlight-row:nth-child(even) td,
+.report-table tr.report-highlight-row.report-sum td,
+.report-table tr.report-highlight-row.report-cat-total td,
+.report-table tr.report-highlight-row.report-net td,
+.report-table tr.report-highlight-row:hover td,
+.report-table tr.report-highlight-row:nth-child(even):hover td,
+.report-table tr.report-highlight-row.report-sum:hover td,
+.report-table tr.report-highlight-row.report-cat-total:hover td,
+.report-table tr.report-highlight-row.report-net:hover td{
+  background:var(--report-highlight);
+  background-color:var(--report-highlight);
+  box-shadow:none;
 }
 .report-table tr.report-highlight-row td.num{
-  position:relative;
-  z-index:0;
-  box-shadow:none;
+  position:static;
+  z-index:auto;
 }
 .report-table tr.report-highlight-row td.report-label-col{
   position:sticky;
   left:0;
-  z-index:5;
-  isolation:isolate;
+  z-index:3;
+  isolation:auto;
   box-shadow:none;
-}
-.report-table tr.report-highlight-row.report-sum td,
-.report-table tr.report-highlight-row.report-cat-total td,
-.report-table tr.report-highlight-row.report-net td{
-  background-color:color-mix(in srgb, var(--report-band-total) 84%, var(--gold) 16%);
-}
-.report-table tr.report-highlight-row td.num:hover,
-.report-table tr.report-highlight-row td.num.report-drillable:hover,
-.report-table tr.report-highlight-row td.num[data-report-col]:hover{
-  box-shadow:none;
-}
-.report-table tr.report-highlight-row:hover td{
-  background-color:color-mix(in srgb, var(--report-band-stripe-a) 80%, var(--gold) 20%);
-}
-.report-table tr.report-highlight-row:nth-child(even):hover td{
-  background-color:color-mix(in srgb, var(--report-band-stripe-b) 80%, var(--gold) 20%);
-}
-.report-table tr.report-highlight-row.report-sum:hover td,
-.report-table tr.report-highlight-row.report-cat-total:hover td,
-.report-table tr.report-highlight-row.report-net:hover td{
-  background-color:color-mix(in srgb, var(--report-band-total) 80%, var(--gold) 20%);
 }
 .report-table th.report-highlight-col,
 .report-table td.report-highlight-col,
@@ -2245,9 +2238,13 @@ input[type=file]{ display:none; }
 .report-table th.report-highlight-col:hover,
 .report-table td.report-highlight-col:hover{
   box-shadow:none;
-  /* Täckande färg så pyjamas/rader inte syns igenom (sticky th får heller ingen spöktext). */
-  background:var(--report-col-highlight);
-  background-color:var(--report-col-highlight);
+  background:var(--report-highlight);
+  background-color:var(--report-highlight);
+}
+.report-table thead th.report-highlight-col{
+  z-index:21;
+  background:var(--report-highlight);
+  background-color:var(--report-highlight);
 }
 .report-table td.num.report-drillable{
   cursor:pointer;
@@ -2256,7 +2253,7 @@ input[type=file]{ display:none; }
   background:rgba(201,162,39,0.14);
 }
 .report-table td.num.report-drillable.report-highlight-col:hover{
-  background:var(--report-col-highlight);
+  background:var(--report-highlight);
 }
 .ledger-drill-bar{
   margin:0 0 12px;
@@ -3696,7 +3693,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v13';
+const APP_VERSION = '2026-09-16 v14';
 
 /* =====================================================================
    INNEHÅLL
