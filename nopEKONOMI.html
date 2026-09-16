@@ -33,6 +33,11 @@
   --paper-surface:#E8EFF7;
   --paper-line:#A8BDD4;
   --paper-line-strong:#8FA4BE;
+  /* Rapport: 4 steg i samma blåskala (mörkast → ljusast) */
+  --report-band-section: color-mix(in srgb, var(--paper-alt) 70%, var(--ink) 30%);
+  --report-band-total: var(--paper-alt);
+  --report-band-stripe-a: var(--paper);
+  --report-band-stripe-b: var(--paper-surface);
   --gold:#C9A227;
   --gold-bright:#E0BC3A;
   --wine:#A33B3B;
@@ -644,21 +649,12 @@ input[type=file]{ display:none; }
     position:sticky;
     left:0;
     z-index:2;
-    background:var(--paper);
     min-width:9rem;
     max-width:16rem;
   }
-  #viewReport.report-mobile .report-table tbody tr:nth-child(even) td.report-label-col{
-    background:var(--paper-surface);
-  }
-  #viewReport.report-mobile .report-table tr.report-section td.report-label-col,
-  #viewReport.report-mobile .report-table tr.report-sum td.report-label-col,
-  #viewReport.report-mobile .report-table tr.report-cat-total td.report-label-col,
-  #viewReport.report-mobile .report-table tr.report-net td.report-label-col{
-    background:var(--paper-alt);
-  }
   #viewReport.report-mobile .report-table thead th.report-label-col{
     z-index:6;
+    background:var(--paper);
   }
   #viewReport.report-mobile .report-table tr.report-highlight-row td.report-label-col{
     z-index:5;
@@ -750,7 +746,6 @@ input[type=file]{ display:none; }
   text-align:left;
   position:sticky;
   left:0;
-  background:var(--paper);
   z-index:2;
   font-weight:500;
   min-width:9rem;
@@ -759,9 +754,12 @@ input[type=file]{ display:none; }
   text-overflow:ellipsis;
   border-right:0.5px solid var(--paper-line-strong);
 }
-/* Sticky etikettkolumn måste spegla radens pyjamas — annars täcker den tr-bakgrunden. */
-.report-table tbody tr:nth-child(even) td.report-label-col{
-  background:var(--paper-surface);
+/* Radbakgrund: samma färg på etikett + siffror (sticky får inte egen avvikande färg). */
+.report-table tbody tr td{
+  background:var(--report-band-stripe-a);
+}
+.report-table tbody tr:nth-child(even) td{
+  background:var(--report-band-stripe-b);
 }
 .report-table thead th.report-label-col{
   z-index:6;
@@ -828,7 +826,8 @@ input[type=file]{ display:none; }
   color:var(--text-on-paper-soft);
   font-style:italic;
 }
-.report-table tr.report-section td{
+.report-table tr.report-section td,
+.report-table tbody tr.report-section:nth-child(even) td{
   font-family:'JetBrains Mono', monospace;
   font-weight:700;
   font-size:12px;
@@ -838,23 +837,25 @@ input[type=file]{ display:none; }
   padding:4px 8px;
   border-top:0.5px solid var(--paper-line-strong);
   border-bottom:0.5px solid var(--paper-line-strong);
-  background:var(--paper-alt);
+  background:var(--report-band-section);
 }
 .report-table tr.report-section:first-child td{
   border-top:none;
 }
-.report-table tr.report-section td.report-label-col{
-  background:var(--paper-alt);
+.report-table tr.report-section td.report-label-col,
+.report-table tbody tr.report-section:nth-child(even) td.report-label-col{
+  background:var(--report-band-section);
   box-shadow:none;
   color:var(--ink);
   max-width:none;
   overflow:visible;
 }
-.report-table tr.report-section td.report-section-fill{
+.report-table tr.report-section td.report-section-fill,
+.report-table tbody tr.report-section:nth-child(even) td.report-section-fill{
   padding:0;
   border-top:0.5px solid var(--paper-line-strong);
   border-bottom:0.5px solid var(--paper-line-strong);
-  background:var(--paper-alt);
+  background:var(--report-band-section);
 }
 .report-table tr.report-sub td.report-label-col{
   padding-left:1.25rem;
@@ -867,18 +868,24 @@ input[type=file]{ display:none; }
 }
 .report-table tr.report-sum td,
 .report-table tr.report-cat-total td,
-.report-table tr.report-net td{
+.report-table tr.report-net td,
+.report-table tbody tr.report-sum:nth-child(even) td,
+.report-table tbody tr.report-cat-total:nth-child(even) td,
+.report-table tbody tr.report-net:nth-child(even) td{
   font-weight:700;
   border-bottom-color:var(--paper-line-strong);
-  background:var(--paper-alt);
+  background:var(--report-band-total);
 }
 .report-table tr.report-sum td.report-label-col,
 .report-table tr.report-cat-total td.report-label-col,
-.report-table tr.report-net td.report-label-col{
+.report-table tr.report-net td.report-label-col,
+.report-table tbody tr.report-sum:nth-child(even) td.report-label-col,
+.report-table tbody tr.report-cat-total:nth-child(even) td.report-label-col,
+.report-table tbody tr.report-net:nth-child(even) td.report-label-col{
   font-family:'JetBrains Mono', monospace;
   letter-spacing:0.02em;
   max-width:none;
-  background:var(--paper-alt);
+  background:var(--report-band-total);
   box-shadow:none;
 }
 .report-table tr.report-sum td.report-label-col,
@@ -2148,30 +2155,40 @@ input[type=file]{ display:none; }
   position:relative;
   z-index:0;
 }
-.report-table tr:not(.report-section):hover td.report-label-col{
+.report-table tbody tr:not(.report-section):not(.report-sum):not(.report-cat-total):not(.report-net):hover td{
+  background-color:color-mix(in srgb, var(--report-band-stripe-a) 92%, var(--gold) 8%);
+}
+.report-table tbody tr:nth-child(even):not(.report-section):not(.report-sum):not(.report-cat-total):not(.report-net):hover td{
+  background-color:color-mix(in srgb, var(--report-band-stripe-b) 92%, var(--gold) 8%);
+}
+.report-table tbody tr:not(.report-section):not(.report-sum):not(.report-cat-total):not(.report-net):hover td.report-label-col{
   z-index:5;
   isolation:isolate;
-  background-color:color-mix(in srgb, var(--paper) 92%, var(--gold) 8%);
 }
-.report-table tbody tr:nth-child(even):not(.report-section):hover td.report-label-col{
-  background-color:color-mix(in srgb, var(--paper-surface) 92%, var(--gold) 8%);
+.report-table tr.report-sum:hover td,
+.report-table tr.report-cat-total:hover td,
+.report-table tr.report-net:hover td{
+  background-color:color-mix(in srgb, var(--report-band-total) 92%, var(--gold) 8%);
 }
 .report-table tr.report-sum:hover td.report-label-col,
 .report-table tr.report-cat-total:hover td.report-label-col,
 .report-table tr.report-net:hover td.report-label-col{
-  background-color:color-mix(in srgb, var(--paper-alt) 92%, var(--gold) 8%);
+  z-index:5;
+  isolation:isolate;
 }
 .report-table tr:not(.report-section):hover td.num[data-report-col]:hover,
 .report-table tr:not(.report-section):hover td.num.report-drillable:hover{
   background:transparent;
 }
-.report-table tr.report-highlight-row{
-  background:rgba(201,162,39,0.16);
+.report-table tr.report-highlight-row td{
+  background-color:color-mix(in srgb, var(--report-band-stripe-a) 84%, var(--gold) 16%);
+}
+.report-table tr.report-highlight-row:nth-child(even) td{
+  background-color:color-mix(in srgb, var(--report-band-stripe-b) 84%, var(--gold) 16%);
 }
 .report-table tr.report-highlight-row td.num{
   position:relative;
   z-index:0;
-  background:transparent;
   box-shadow:none;
 }
 .report-table tr.report-highlight-row td.report-label-col{
@@ -2179,16 +2196,12 @@ input[type=file]{ display:none; }
   left:0;
   z-index:5;
   isolation:isolate;
-  background-color:color-mix(in srgb, var(--paper) 84%, var(--gold) 16%);
   box-shadow:none;
 }
-.report-table tr.report-highlight-row:nth-child(even) td.report-label-col{
-  background-color:color-mix(in srgb, var(--paper-surface) 84%, var(--gold) 16%);
-}
-.report-table tr.report-highlight-row.report-sum td.report-label-col,
-.report-table tr.report-highlight-row.report-cat-total td.report-label-col,
-.report-table tr.report-highlight-row.report-net td.report-label-col{
-  background-color:color-mix(in srgb, var(--paper-alt) 84%, var(--gold) 16%);
+.report-table tr.report-highlight-row.report-sum td,
+.report-table tr.report-highlight-row.report-cat-total td,
+.report-table tr.report-highlight-row.report-net td{
+  background-color:color-mix(in srgb, var(--report-band-total) 84%, var(--gold) 16%);
 }
 .report-table th.report-highlight-col{
   box-shadow:none;
@@ -2203,20 +2216,18 @@ input[type=file]{ display:none; }
 .report-table tr.report-highlight-row td.num:hover,
 .report-table tr.report-highlight-row td.num.report-drillable:hover,
 .report-table tr.report-highlight-row td.num[data-report-col]:hover{
-  background:transparent;
   box-shadow:none;
 }
-.report-table tr.report-highlight-row:hover td.report-label-col{
-  background-color:color-mix(in srgb, var(--paper) 80%, var(--gold) 20%);
-  box-shadow:none;
+.report-table tr.report-highlight-row:hover td{
+  background-color:color-mix(in srgb, var(--report-band-stripe-a) 80%, var(--gold) 20%);
 }
-.report-table tr.report-highlight-row:nth-child(even):hover td.report-label-col{
-  background-color:color-mix(in srgb, var(--paper-surface) 80%, var(--gold) 20%);
+.report-table tr.report-highlight-row:nth-child(even):hover td{
+  background-color:color-mix(in srgb, var(--report-band-stripe-b) 80%, var(--gold) 20%);
 }
-.report-table tr.report-highlight-row.report-sum:hover td.report-label-col,
-.report-table tr.report-highlight-row.report-cat-total:hover td.report-label-col,
-.report-table tr.report-highlight-row.report-net:hover td.report-label-col{
-  background-color:color-mix(in srgb, var(--paper-alt) 80%, var(--gold) 20%);
+.report-table tr.report-highlight-row.report-sum:hover td,
+.report-table tr.report-highlight-row.report-cat-total:hover td,
+.report-table tr.report-highlight-row.report-net:hover td{
+  background-color:color-mix(in srgb, var(--report-band-total) 80%, var(--gold) 20%);
 }
 .report-table th.report-highlight-col:hover,
 .report-table td.report-highlight-col:hover{
@@ -3667,7 +3678,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v10';
+const APP_VERSION = '2026-09-16 v11';
 
 /* =====================================================================
    INNEHÅLL
