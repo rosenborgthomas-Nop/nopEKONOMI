@@ -3619,7 +3619,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v05';
+const APP_VERSION = '2026-09-16 v06';
 
 /* =====================================================================
    INNEHÅLL
@@ -8017,15 +8017,21 @@ function reportHeaderOnlyRow(label, colCount, rowClass){
     + (colCount - 1) + '"></td></tr>';
 }
 
-/** Sektionsrubrik som också är namnsortering (Payee-rapport: In/Ut var för sig). */
+/** Sektionsrubrik som också är namnsortering (Payee-rapport: In/Ut var för sig).
+ *  3-steg: belopp (standard) → Payee A–Ö → Payee Ö–A → belopp. */
 function reportSectionSortHeaderRow(label, colCount, side, sortState){
   sortState = sortState || {};
   const active = !!sortState.active;
   const sortDir = sortState.sortDir === 'desc' ? 'desc' : 'asc';
   const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '◇';
+  const title = !active
+    ? 'Sortering: belopp. Klicka för Payee A–Ö'
+    : (sortDir === 'asc'
+      ? 'Sortering: Payee A–Ö. Klicka för Ö–A'
+      : 'Sortering: Payee Ö–A. Klicka för belopp');
   const sortHtml = '<div class="toplist-sort-head" role="group" aria-label="Sortering">'
     + '<button type="button" class="toplist-sort' + (active ? ' active-sort' : '')
-    + '" data-sort="name" title="Sortera efter namn">'
+    + '" data-sort="name" title="' + escapeAttr(title) + '">'
     + escapeHtml(label)
     + ' <span class="arrow" aria-hidden="true">' + arrow + '</span></button>'
     + '</div>';
@@ -8067,11 +8073,15 @@ function bindPayeeReportSortUi(){
     e.stopPropagation();
     if(!payeeReportSort[side]) payeeReportSort[side] = { active: false, sortDir: 'asc' };
     const state = payeeReportSort[side];
+    // 1 belopp → 2 A–Ö → 3 Ö–A → 1 belopp
     if(!state.active){
       state.active = true;
       state.sortDir = 'asc';
+    } else if(state.sortDir === 'asc'){
+      state.sortDir = 'desc';
     } else {
-      state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+      state.active = false;
+      state.sortDir = 'asc';
     }
     const from = activeReportRange.from || (reportFrom && reportFrom.value) || '';
     const to = activeReportRange.to || (reportTo && reportTo.value) || '';
