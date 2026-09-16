@@ -2035,13 +2035,14 @@ input[type=file]{ display:none; }
 }
 .report-section .toplist-sort-head{
   display:inline-flex;
-  margin:4px 0 0;
+  margin:0;
   width:100%;
   max-width:14rem;
 }
-.report-section .report-section-title{
-  display:block;
+.report-section .toplist-sort{
   font-weight:700;
+  letter-spacing:0.04em;
+  text-transform:uppercase;
 }
 .toplist-plain-col ol{
   margin:0;
@@ -3613,7 +3614,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v03';
+const APP_VERSION = '2026-09-16 v04';
 
 /* =====================================================================
    INNEHÅLL
@@ -8011,7 +8012,7 @@ function reportHeaderOnlyRow(label, colCount, rowClass){
     + (colCount - 1) + '"></td></tr>';
 }
 
-/** Sektionsrubrik med namnsortering (Payee-rapport: In/Ut var för sig). */
+/** Sektionsrubrik som också är namnsortering (Payee-rapport: In/Ut var för sig). */
 function reportSectionSortHeaderRow(label, colCount, side, sortState){
   sortState = sortState || {};
   const active = !!sortState.active;
@@ -8019,16 +8020,16 @@ function reportSectionSortHeaderRow(label, colCount, side, sortState){
   const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '◇';
   const sortHtml = '<div class="toplist-sort-head" role="group" aria-label="Sortering">'
     + '<button type="button" class="toplist-sort' + (active ? ' active-sort' : '')
-    + '" data-sort="name" title="Sortera efter Payee">'
-    + 'Payee <span class="arrow" aria-hidden="true">' + arrow + '</span></button>'
+    + '" data-sort="name" title="Sortera efter namn">'
+    + escapeHtml(label)
+    + ' <span class="arrow" aria-hidden="true">' + arrow + '</span></button>'
     + '</div>';
-  const labelCell = '<span class="report-section-title">' + escapeHtml(label) + '</span>' + sortHtml;
   if(colCount <= 1){
     return '<tr class="report-section" data-payee-sort-side="' + escapeAttr(side) + '">'
-      + '<td class="report-label-col">' + labelCell + '</td></tr>';
+      + '<td class="report-label-col">' + sortHtml + '</td></tr>';
   }
   return '<tr class="report-section" data-payee-sort-side="' + escapeAttr(side) + '">'
-    + '<td class="report-label-col">' + labelCell + '</td>'
+    + '<td class="report-label-col">' + sortHtml + '</td>'
     + '<td class="report-section-fill" colspan="' + (colCount - 1) + '"></td></tr>';
 }
 
