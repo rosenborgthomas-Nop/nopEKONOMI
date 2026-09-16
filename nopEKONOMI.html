@@ -3613,7 +3613,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v02';
+const APP_VERSION = '2026-09-16 v03';
 
 /* =====================================================================
    INNEHÅLL
@@ -8012,10 +8012,14 @@ function reportHeaderOnlyRow(label, colCount, rowClass){
 }
 
 /** Sektionsrubrik med namnsortering (Payee-rapport: In/Ut var för sig). */
-function reportSectionSortHeaderRow(label, colCount, side, sortDir){
-  const arrow = sortDir === 'asc' ? '▲' : '▼';
+function reportSectionSortHeaderRow(label, colCount, side, sortState){
+  sortState = sortState || {};
+  const active = !!sortState.active;
+  const sortDir = sortState.sortDir === 'desc' ? 'desc' : 'asc';
+  const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '◇';
   const sortHtml = '<div class="toplist-sort-head" role="group" aria-label="Sortering">'
-    + '<button type="button" class="toplist-sort active-sort" data-sort="name" title="Sortera efter Payee">'
+    + '<button type="button" class="toplist-sort' + (active ? ' active-sort' : '')
+    + '" data-sort="name" title="Sortera efter Payee">'
     + 'Payee <span class="arrow" aria-hidden="true">' + arrow + '</span></button>'
     + '</div>';
   const labelCell = '<span class="report-section-title">' + escapeHtml(label) + '</span>' + sortHtml;
@@ -8037,8 +8041,8 @@ function sortPayeeReportNames(names, totals, sortDir){
 }
 
 let payeeReportSort = {
-  in: { sortDir: 'asc' },
-  out: { sortDir: 'asc' }
+  in: { active: false, sortDir: 'asc' },
+  out: { active: false, sortDir: 'asc' }
 };
 
 function bindPayeeReportSortUi(){
@@ -8055,9 +8059,14 @@ function bindPayeeReportSortUi(){
     if(btn.getAttribute('data-sort') !== 'name') return;
     e.preventDefault();
     e.stopPropagation();
-    if(!payeeReportSort[side]) payeeReportSort[side] = { sortDir: 'asc' };
+    if(!payeeReportSort[side]) payeeReportSort[side] = { active: false, sortDir: 'asc' };
     const state = payeeReportSort[side];
-    state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+    if(!state.active){
+      state.active = true;
+      state.sortDir = 'asc';
+    } else {
+      state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+    }
     const from = activeReportRange.from || (reportFrom && reportFrom.value) || '';
     const to = activeReportRange.to || (reportTo && reportTo.value) || '';
     if(from && to) renderPayeeReportTable(from, to);
@@ -9206,10 +9215,14 @@ function renderPayeeReportTable(fromIso, toIso){
   setActiveReportRange(fromIso, toIso);
   const data = collectPayeeReport(fromIso, toIso);
   const { months, payeeTotals, payeeMonthly } = data;
-  const sortIn = payeeReportSort.in || { sortDir: 'asc' };
-  const sortOut = payeeReportSort.out || { sortDir: 'asc' };
-  const posPayees = sortPayeeReportNames(data.posPayees, payeeTotals, sortIn.sortDir);
-  const negPayees = sortPayeeReportNames(data.negPayees, payeeTotals, sortOut.sortDir);
+  const sortIn = payeeReportSort.in || { active: false, sortDir: 'asc' };
+  const sortOut = payeeReportSort.out || { active: false, sortDir: 'asc' };
+  const posPayees = sortIn.active
+    ? sortPayeeReportNames(data.posPayees, payeeTotals, sortIn.sortDir)
+    : data.posPayees.slice();
+  const negPayees = sortOut.active
+    ? sortPayeeReportNames(data.negPayees, payeeTotals, sortOut.sortDir)
+    : data.negPayees.slice();
   const colCount = months.length + 2;
 
   clearReportCanvas();
@@ -9235,7 +9248,7 @@ function renderPayeeReportTable(fromIso, toIso){
   }
   html += '<th>Totalt</th></tr></thead><tbody>';
 
-  html += reportSectionSortHeaderRow('Inkomster', colCount, 'in', sortIn.sortDir);
+  html += reportSectionSortHeaderRow('Inkomster', colCount, 'in', sortIn);
   for(const p of posPayees){
     html += reportLabelRowHtml(
       p, months, payeeMonthly[p] || {}, payeeTotals[p], false, 'report-sub',
@@ -9271,7 +9284,7 @@ function renderPayeeReportTable(fromIso, toIso){
     }
   );
 
-  html += reportSectionSortHeaderRow('Utgifter', colCount, 'out', sortOut.sortDir);
+  html += reportSectionSortHeaderRow('Utgifter', colCount, 'out', sortOut);
   for(const p of negPayees){
     html += reportLabelRowHtml(
       p, months, payeeMonthly[p] || {}, payeeTotals[p], true, 'report-sub',
@@ -9870,6 +9883,10 @@ function runReport(){
     return;
   }
   if(kind === 'payeeRapport'){
+    payeeReportSort = {
+      in: { active: false, sortDir: 'asc' },
+      out: { active: false, sortDir: 'asc' }
+    };
     renderPayeeReportTable(from, to);
     return;
   }
