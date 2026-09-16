@@ -3645,7 +3645,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v08';
+const APP_VERSION = '2026-09-16 v09';
 
 /* =====================================================================
    INNEHÅLL
@@ -16432,7 +16432,19 @@ initApp();
 </script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(refreshing) return;
+    refreshing = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const check = () => { try{ reg.update(); }catch(err){} };
+    check();
+    document.addEventListener('visibilitychange', () => {
+      if(document.visibilityState === 'visible') check();
+    });
+  }).catch(() => {});
 }
 </script>
 </body>
