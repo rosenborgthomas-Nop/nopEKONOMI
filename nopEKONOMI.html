@@ -875,6 +875,26 @@ input[type=file]{ display:none; }
 .report-table tr.report-cat-total td.report-label-col{
   text-align:left;
 }
+.report-table tr.report-cat-toggle td.report-label-col{
+  cursor:pointer;
+}
+.report-table tr.report-cat-toggle td.report-label-col::before{
+  content:'▾ ';
+  font-weight:700;
+  color:var(--text-on-paper-soft);
+}
+.report-table tr.report-cat-toggle.is-collapsed td.report-label-col::before{
+  content:'▸ ';
+  color:var(--gold);
+}
+.report-table tr.report-cat-toggle.is-collapsed td.report-label-col::after{
+  content:' ∗';
+  color:var(--gold);
+  font-weight:700;
+}
+.report-table tr.report-cat-child[hidden]{
+  display:none;
+}
 .report-table tr.report-net td{
   padding-top:14px;
   border-top:0.5px solid var(--paper-line-strong);
@@ -3619,7 +3639,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v06';
+const APP_VERSION = '2026-09-16 v07';
 
 /* =====================================================================
    INNEHÅLL
@@ -7994,14 +8014,28 @@ function reportLabelRowHtml(label, months, monthly, total, absolute, rowClass, o
   const classes = [rowClass, chartId ? 'report-chartable' : ''].filter(Boolean).join(' ');
   const cls = classes ? ' class="' + classes + '"' : '';
   const dataAttr = chartId ? ' data-chart-id="' + escapeHtml(chartId) + '"' : '';
+  const groupAttr = opts.catGroup
+    ? ' data-cat-group="' + escapeAttr(opts.catGroup) + '"'
+    : '';
+  const hiddenAttr = opts.hidden ? ' hidden' : '';
+  const ariaAttr = opts.collapseToggle
+    ? ' aria-expanded="' + (opts.collapsed ? 'false' : 'true') + '"'
+    : '';
   const labelHtml = opts.italic
     ? '<em class="report-fallback-sub">' + escapeHtml(label) + '</em>'
     : escapeHtml(label);
   const amountOpts = Object.assign({}, opts.parenItalic ? { parenItalic: true } : {}, opts.drill ? { drill: opts.drill } : {});
-  const tip = chartId
-    ? ' title="Dubbelklicka för diagram: ' + escapeHtml(label) + '"'
-    : ' title="' + escapeHtml(label) + '"';
-  return '<tr' + cls + dataAttr + '><td class="report-label-col"' + tip + '>'
+  let tipText = label;
+  if(opts.collapseToggle){
+    tipText = opts.collapsed
+      ? 'Klicka för att visa underkategorier. Dubbelklicka för diagram: ' + label
+      : 'Klicka för att dölja underkategorier. Dubbelklicka för diagram: ' + label;
+  } else if(chartId){
+    tipText = 'Dubbelklicka för diagram: ' + label;
+  }
+  const tip = ' title="' + escapeHtml(tipText) + '"';
+  return '<tr' + cls + dataAttr + groupAttr + hiddenAttr + ariaAttr + '>'
+    + '<td class="report-label-col"' + tip + '>'
     + labelHtml + '</td>'
     + reportAmountCells(months, monthly, total, absolute, amountOpts)
     + '</tr>';
@@ -8107,8 +8141,12 @@ function renderCategoryBlock(cat, months, catTotals, catMonthly, subsForCat, abs
   const subs = subsForCat(cat);
   // Tom underkategori redovisas inte som egen rad — beloppet finns i Total.
   const namedSubs = subs.filter(sub => !!sub.name);
-  // En enda namngiven underkategori → visa bara Total [kategori].
-  if(namedSubs.length > 1){
+  // Flera namngivna underkategorier → dolda som standard, Total fäller ut/in.
+  const collapsible = namedSubs.length > 1;
+  const catGroup = collapsible
+    ? ((absolute ? 'out:' : 'in:') + cat)
+    : '';
+  if(collapsible){
     for(const sub of namedSubs){
       const subChartId = registerReportChartSeries({
         title: cat + ' · ' + sub.name,
@@ -8118,10 +8156,12 @@ function renderCategoryBlock(cat, months, catTotals, catMonthly, subsForCat, abs
         tone: tone
       });
       html += reportLabelRowHtml(
-        sub.name, months, sub.monthly, sub.total, absolute, 'report-sub',
+        sub.name, months, sub.monthly, sub.total, absolute, 'report-sub report-cat-child',
         {
           chartId: subChartId,
-          drill: { t: 'cat', category: cat, sub: sub.name }
+          drill: { t: 'cat', category: cat, sub: sub.name },
+          catGroup: catGroup,
+          hidden: true
         }
       );
     }
@@ -8133,12 +8173,18 @@ function renderCategoryBlock(cat, months, catTotals, catMonthly, subsForCat, abs
     absolute: !!absolute,
     tone: tone
   });
+  const totalClass = collapsible
+    ? 'report-cat-total report-cat-toggle is-collapsed'
+    : 'report-cat-total';
   html += reportLabelRowHtml(
-    'Total ' + cat, months, catMonthly[cat] || {}, catTotals[cat], absolute, 'report-cat-total',
+    'Total ' + cat, months, catMonthly[cat] || {}, catTotals[cat], absolute, totalClass,
     {
       parenItalic: true,
       chartId: catChartId,
-      drill: { t: 'cat', category: cat, sub: '' }
+      drill: { t: 'cat', category: cat, sub: '' },
+      catGroup: catGroup || undefined,
+      collapseToggle: collapsible,
+      collapsed: collapsible
     }
   );
   return html;
@@ -8246,7 +8292,68 @@ function renderCategoryReportTable(fromIso, toIso){
   wrap.innerHTML = head + '<div class="report-table-scroll"></div>';
   wrap.querySelector('.report-table-scroll').innerHTML = html;
   reportBody.appendChild(wrap);
+  bindCategoryReportCollapseUi();
   syncReportCopyBtn();
+}
+
+function bindCategoryReportCollapseUi(){
+  if(!reportBody || reportBody.dataset.catCollapseBound === '1') return;
+  reportBody.dataset.catCollapseBound = '1';
+  let collapseTimer = null;
+
+  function clearCollapseTimer(){
+    if(!collapseTimer) return;
+    clearTimeout(collapseTimer);
+    collapseTimer = null;
+  }
+
+  function toggleCategoryBlock(tr, labelTd){
+    const group = tr.getAttribute('data-cat-group');
+    if(!group) return;
+    const collapsing = !tr.classList.contains('is-collapsed');
+    const children = [];
+    let prev = tr.previousElementSibling;
+    while(prev && prev.classList.contains('report-cat-child')
+      && prev.getAttribute('data-cat-group') === group){
+      children.unshift(prev);
+      prev = prev.previousElementSibling;
+    }
+    for(const child of children){
+      child.hidden = collapsing;
+    }
+    tr.classList.toggle('is-collapsed', collapsing);
+    tr.setAttribute('aria-expanded', collapsing ? 'false' : 'true');
+    const label = (labelTd.textContent || '').trim();
+    labelTd.title = collapsing
+      ? 'Klicka för att visa underkategorier. Dubbelklicka för diagram: ' + label
+      : 'Klicka för att dölja underkategorier. Dubbelklicka för diagram: ' + label;
+  }
+
+  reportBody.addEventListener('click', e => {
+    const hit = e.target && (e.target.nodeType === 1 ? e.target : e.target.parentElement);
+    const labelTd = hit && hit.closest && hit.closest('td.report-label-col');
+    if(!labelTd) return;
+    const tr = labelTd.closest('tr.report-cat-toggle');
+    if(!tr || !tr.getAttribute('data-cat-group')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Vänta kort så dubbelklick (diagram) inte råkar fälla in/ut.
+    if(e.detail > 1){
+      clearCollapseTimer();
+      return;
+    }
+    clearCollapseTimer();
+    collapseTimer = setTimeout(() => {
+      collapseTimer = null;
+      toggleCategoryBlock(tr, labelTd);
+    }, 280);
+  }, true);
+
+  reportBody.addEventListener('dblclick', e => {
+    const hit = e.target && (e.target.nodeType === 1 ? e.target : e.target.parentElement);
+    const labelTd = hit && hit.closest && hit.closest('td.report-label-col');
+    if(labelTd && labelTd.closest('tr.report-cat-toggle')) clearCollapseTimer();
+  }, true);
 }
 
 function collectNetOverTime(fromIso, toIso){
