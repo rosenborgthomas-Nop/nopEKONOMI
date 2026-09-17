@@ -3693,7 +3693,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-16 v14';
+const APP_VERSION = '2026-09-17 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -8679,14 +8679,8 @@ function buildNetOverTimeChunkedHtml(points, opening, opts){
     const start = starts[s];
     const chunk = points.slice(start, start + NETTO_PRINT_CHUNK);
     const yearLabel = nettoPrintChunkYearLabel(chunk);
-    let chunkStats = chartSeriesStats(chunk.map(p => p.value));
-    if(chunkStats){
-      chunkStats = Object.assign({}, chunkStats, {
-        sum: netOverTimeDeltaSum(points, opening, start, chunk.length)
-      });
-    }
     html += '<div class="chart-chunk-section' + (forPrint ? ' netto-print-section' : '') + '">';
-    html += chartChunkYearLabelHtml(yearLabel, chunkStats);
+    html += chartChunkYearLabelHtml(yearLabel, null);
     html += buildNetOverTimeVerticalChartBlock(chunk, points, opening, start, {
       forPrint: forPrint,
       wrapPanel: false,
@@ -8700,7 +8694,7 @@ function buildNetOverTimeChunkedHtml(points, opening, opts){
 }
 
 function buildNetOverTimePrintHtml(points, opening){
-  return buildNetOverTimeChunkedHtml(points, opening, { forPrint: true, includeTotalMean: true });
+  return buildNetOverTimeChunkedHtml(points, opening, { forPrint: true, includeTotalMean: false });
 }
 
 function netOverTimeChartPlotWidth(){
@@ -8776,7 +8770,7 @@ function buildNetOverTimeChart(points, opening){
 
   if(points.length > CHART_STACKED_ROW_THRESHOLD){
     return '<div class="payee-chart-panel is-income chart-chunked-panel">'
-      + buildNetOverTimeChunkedHtml(points, opening, { forPrint: false, includeTotalMean: true })
+      + buildNetOverTimeChunkedHtml(points, opening, { forPrint: false, includeTotalMean: false })
       + '</div>';
   }
 
@@ -8784,7 +8778,7 @@ function buildNetOverTimeChart(points, opening){
     wrapPanel: true,
     animate: true,
     newestFirst: true,
-    showMean: true,
+    showMean: false,
     useNetDeltaSum: true
   });
 }
