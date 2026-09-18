@@ -3796,7 +3796,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-18 v06';
+const APP_VERSION = '2026-09-18 v07';
 
 /* =====================================================================
    INNEHÅLL
@@ -16752,8 +16752,13 @@ async function obFetch(path, opts){
   try{ data = await res.json(); } catch(e){ data = null; }
   if(!res.ok){
     const code = data && data.error ? String(data.error) : '';
+    if(code === 'SESSION_PENDING' || res.status === 503){
+      const err = new Error((data && data.message) || 'Bankkoppling sparas fortfarande — försök igen.');
+      err.code = 'SESSION_PENDING';
+      throw err;
+    }
     if(code === 'CONSENT_EXPIRED' || res.status === 401){
-      const err = new Error((data && data.message) || 'Förnya BankID-koppling');
+      const err = new Error((data && data.message) || 'Tink-sessionen har gått ut. Koppla bank igen.');
       err.code = 'CONSENT_EXPIRED';
       throw err;
     }
@@ -16793,10 +16798,10 @@ function renderOpenBanking(){
   const sec = el('obAccountsSection');
   if(sec) sec.hidden = !sid;
   if(sid && !obFetchedAccounts.length){
-    obLoadAccounts().catch(err => {
+    obLoadAccountsWithRetry().catch(err => {
       if(err && err.code === 'CONSENT_EXPIRED'){
         obSetSessionId('');
-        obMsg('notice', 'Förnya BankID-koppling');
+        obMsg('notice', err.message || 'Tink-sessionen har gått ut. Koppla bank igen.');
         if(sec) sec.hidden = true;
       } else {
         obMsg('notice', err && err.message ? err.message : 'Kunde inte hämta konton.');
@@ -16863,6 +16868,26 @@ async function obLoadAccounts(){
   }
 }
 
+async function obLoadAccountsWithRetry(){
+  let lastErr = null;
+  for(let attempt = 0; attempt < 5; attempt++){
+    try{
+      if(attempt > 0){
+        obMsg('report', 'Väntar in bankkoppling… (' + (attempt + 1) + '/5)');
+        await new Promise(r => setTimeout(r, 600 * attempt));
+      }
+      await obLoadAccounts();
+      return;
+    } catch(err){
+      lastErr = err;
+      if(err && err.code === 'SESSION_PENDING') continue;
+      if(err && err.code === 'CONSENT_EXPIRED' && attempt < 3) continue;
+      throw err;
+    }
+  }
+  throw lastErr || new Error('Kunde inte hämta konton.');
+}
+
 function obSelectedBankAccounts(){
   const list = el('obAccountsList');
   if(!list) return [];
@@ -16875,6 +16900,11 @@ function obSelectedBankAccounts(){
 async function obStartConnect(demo){
   clear(el('obMessages'));
   obSaveApiBase();
+  // Rensa ev. död session så vi inte omedelbart visar "förnya" från gammal id.
+  if(!demo){
+    obSetSessionId('');
+    obFetchedAccounts = [];
+  }
   try{
     const data = await obFetch('/ob/start', {
       method: 'POST',
@@ -16906,7 +16936,7 @@ async function obStartConnect(demo){
         ? 'Demo-session klar (påhittad data — inte din bank).'
         : 'Session skapad.');
       renderOpenBanking();
-      await obLoadAccounts();
+      await obLoadAccountsWithRetry();
       return;
     }
     obMsg('notice', 'Oväntat svar från Worker.');
@@ -16967,7 +16997,7 @@ async function obFetchAndPreview(){
   } catch(err){
     if(err && err.code === 'CONSENT_EXPIRED'){
       obSetSessionId('');
-      obMsg('notice', 'Förnya BankID-koppling');
+      obMsg('notice', err.message || 'Tink-sessionen har gått ut. Koppla bank igen.');
       const sec = el('obAccountsSection');
       if(sec) sec.hidden = true;
       return;
