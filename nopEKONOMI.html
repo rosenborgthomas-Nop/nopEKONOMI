@@ -3796,7 +3796,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-18 v08';
+const APP_VERSION = '2026-09-18 v09';
 
 /* =====================================================================
    INNEHÅLL
@@ -16660,6 +16660,7 @@ document.addEventListener('keydown', e => {
 const OB_API_BASE_KEY = 'nopEKONOMI.openBanking.apiBase';
 const OB_SESSION_KEY = 'nopEKONOMI.openBanking.sessionId';
 const OB_META_KEY = 'nopEKONOMI.openBanking.meta';
+const OB_TOKEN_KEY = 'nopEKONOMI.openBanking.accessToken';
 
 let obPendingRows = null;
 let obPendingAccountName = '';
@@ -16670,6 +16671,17 @@ function obApiBase(){
   const fromInput = input && input.value ? input.value.trim().replace(/\/+$/, '') : '';
   if(fromInput) return fromInput;
   try{ return (localStorage.getItem(OB_API_BASE_KEY) || '').trim().replace(/\/+$/, ''); } catch(e){ return ''; }
+}
+
+function obGetAccessToken(){
+  try{ return sessionStorage.getItem(OB_TOKEN_KEY) || ''; } catch(e){ return ''; }
+}
+
+function obSetAccessToken(token){
+  try{
+    if(token) sessionStorage.setItem(OB_TOKEN_KEY, token);
+    else sessionStorage.removeItem(OB_TOKEN_KEY);
+  } catch(e){ /* ignore */ }
 }
 
 function obIsFileProtocol(){
@@ -16700,7 +16712,10 @@ function obGetSessionId(){
 function obSetSessionId(id){
   try{
     if(id) localStorage.setItem(OB_SESSION_KEY, id);
-    else localStorage.removeItem(OB_SESSION_KEY);
+    else {
+      localStorage.removeItem(OB_SESSION_KEY);
+      obSetAccessToken('');
+    }
   } catch(e){ /* ignore */ }
 }
 
@@ -16719,31 +16734,66 @@ function obMsg(kind, text){
   if(text) addBox(box, kind || 'notice', text);
 }
 
-function consumeOpenBankingReturnQuery(){
+async function consumeOpenBankingReturnQuery(){
   const u = new URL(location.href);
   const session = u.searchParams.get('obSession');
+  const token = u.searchParams.get('obToken');
   const err = u.searchParams.get('obError');
   const errDesc = u.searchParams.get('obErrorDesc');
   if(!session && !err) return;
   if(session){
     obSetSessionId(session);
+    if(token) obSetAccessToken(token);
     const meta = obReadMeta();
     meta.lastConnectAt = new Date().toISOString();
     meta.sessionMode = 'tink';
     obWriteMeta(meta);
     try{ sessionStorage.setItem('nopEKONOMI.obPendingNav', '1'); } catch(e){ /* ignore */ }
+    if(token && obApiBase()){
+      try{
+        await obFetch('/ob/bootstrap', {
+          method: 'POST',
+          body: JSON.stringify({ sessionId: session, accessToken: token })
+        });
+      } catch(bootErr){ /* header-token räcker för efterföljande anrop */ }
+    }
   }
   u.searchParams.delete('obSession');
+  u.searchParams.delete('obToken');
+  u.searchParams.delete('obTicket');
+  u.searchParams.delete('obBoot');
   u.searchParams.delete('obError');
   u.searchParams.delete('obErrorDesc');
   history.replaceState({}, '', u.pathname + u.search + u.hash);
   if(err){
     const friendly = err === 'CONSENT_EXPIRED' || /consent|expired|unauthorized/i.test(err)
-      ? 'Förnya BankID-koppling'
+      ? 'Tink-sessionen har gått ut. Koppla bank igen.'
       : ('Bankkoppling misslyckades: ' + err + (errDesc ? ' — ' + errDesc : ''));
     try{ sessionStorage.setItem('nopEKONOMI.obFlash', friendly); } catch(e){ /* ignore */ }
   } else if(session){
     try{ sessionStorage.setItem('nopEKONOMI.obFlash', 'Bank kopplad via Tink. Välj konton att synka.'); } catch(e){ /* ignore */ }
+  }
+}
+
+async function obEnsureBootstrapped(){
+  const sid = obGetSessionId();
+  const token = obGetAccessToken();
+  if(!sid || !token || !obApiBase()) return;
+  try{
+    await obFetch('/ob/bootstrap', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId: sid, accessToken: token })
+    });
+  } catch(e){ /* header-token räcker */ }
+}
+
+function consumeOpenBankingPendingNav(){
+  try{
+    if(sessionStorage.getItem('nopEKONOMI.obPendingNav') !== '1') return false;
+    sessionStorage.removeItem('nopEKONOMI.obPendingNav');
+    return true;
+  } catch(e){
+    return false;
   }
 }
 
@@ -16763,11 +16813,16 @@ async function obFetch(path, opts){
   const invalid = obValidateApiBase(base);
   if(invalid) throw new Error(invalid);
   const url = base + path;
+  const headers = Object.assign(
+    { 'Accept': 'application/json' },
+    opts.body ? { 'Content-Type': 'application/json' } : {},
+    opts.headers || {}
+  );
+  const tok = obGetAccessToken();
+  if(tok) headers['X-OB-Access-Token'] = tok;
   let res;
   try{
-    res = await fetch(url, Object.assign({
-      headers: Object.assign({ 'Accept': 'application/json' }, opts.body ? { 'Content-Type': 'application/json' } : {})
-    }, opts));
+    res = await fetch(url, Object.assign({}, opts, { headers: headers }));
   } catch(netErr){
     throw new Error('Ingen kontakt med Worker (nätverk/CORS). Kontrollera URL och att du kör via https://…github.io — inte lokal fil.');
   }
@@ -16892,12 +16947,14 @@ async function obLoadAccounts(){
 }
 
 async function obLoadAccountsWithRetry(){
+  await obEnsureBootstrapped();
   let lastErr = null;
   for(let attempt = 0; attempt < 5; attempt++){
     try{
       if(attempt > 0){
         obMsg('report', 'Väntar in bankkoppling… (' + (attempt + 1) + '/5)');
         await new Promise(r => setTimeout(r, 600 * attempt));
+        await obEnsureBootstrapped();
       }
       await obLoadAccounts();
       return;
@@ -16926,6 +16983,7 @@ async function obStartConnect(demo){
   // Rensa ev. död session så vi inte omedelbart visar "förnya" från gammal id.
   if(!demo){
     obSetSessionId('');
+    obSetAccessToken('');
     obFetchedAccounts = [];
   }
   try{
@@ -17143,7 +17201,7 @@ async function obDisconnect(){
 })();
 
 async function initApp(){
-  consumeOpenBankingReturnQuery();
+  await consumeOpenBankingReturnQuery();
   applyAppVersionLabels();
   await openIdb();
   try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
