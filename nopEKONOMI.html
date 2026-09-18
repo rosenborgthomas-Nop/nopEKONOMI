@@ -3070,7 +3070,7 @@ td.num.dash .cell-content{
         <p class="sub">Bas-URL till din Cloudflare Worker (utan avslutande snedstreck).</p>
         <div class="field">
           <label for="obApiBase">API-bas</label>
-          <input type="url" id="obApiBase" placeholder="https://nop-ekonomi-ob.example.workers.dev" autocomplete="off" spellcheck="false">
+          <input type="url" id="obApiBase" placeholder="https://nop-ekonomi-ob.nop383ekonomi.workers.dev" autocomplete="off" spellcheck="false">
         </div>
         <div class="quiet-row">
           <button class="btn-quiet" id="obSaveApiBtn" type="button">Spara URL</button>
@@ -3796,7 +3796,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-18 v02';
+const APP_VERSION = '2026-09-18 v03';
 
 /* =====================================================================
    INNEHÅLL
@@ -4880,7 +4880,7 @@ function wireViewFormKeys(viewEl, okBtn, cancelBtn, isBlocked){
 
 function el(id){ return document.getElementById(id); }
 
-function clear(node){ node.innerHTML = ''; }
+function clear(node){ if(node) node.innerHTML = ''; }
 
 function addBox(node, className, text){
   const div = document.createElement('div');
@@ -16619,6 +16619,21 @@ function obApiBase(){
   try{ return (localStorage.getItem(OB_API_BASE_KEY) || '').trim().replace(/\/+$/, ''); } catch(e){ return ''; }
 }
 
+function obIsFileProtocol(){
+  return location.protocol === 'file:';
+}
+
+function obValidateApiBase(base){
+  if(!base) return 'Klistra in Worker-URL först (grå text i fältet är bara exempel).';
+  if(!/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i.test(base)){
+    return 'Ogiltig Worker-URL. Exempel: https://nop-ekonomi-ob.nop383ekonomi.workers.dev';
+  }
+  if(obIsFileProtocol()){
+    return 'Bankkoppling fungerar inte från lokal fil (file://). Öppna appen via GitHub Pages och testa där.';
+  }
+  return '';
+}
+
 function obSaveApiBase(){
   const base = obApiBase();
   try{ localStorage.setItem(OB_API_BASE_KEY, base); } catch(e){ /* ignore */ }
@@ -16680,11 +16695,17 @@ function consumeOpenBankingReturnQuery(){
 async function obFetch(path, opts){
   opts = opts || {};
   const base = obApiBase();
-  if(!base) throw new Error('Ange Worker-URL först.');
+  const invalid = obValidateApiBase(base);
+  if(invalid) throw new Error(invalid);
   const url = base + path;
-  const res = await fetch(url, Object.assign({
-    headers: Object.assign({ 'Accept': 'application/json' }, opts.body ? { 'Content-Type': 'application/json' } : {})
-  }, opts));
+  let res;
+  try{
+    res = await fetch(url, Object.assign({
+      headers: Object.assign({ 'Accept': 'application/json' }, opts.body ? { 'Content-Type': 'application/json' } : {})
+    }, opts));
+  } catch(netErr){
+    throw new Error('Ingen kontakt med Worker (nätverk/CORS). Kontrollera URL och att du kör via https://…github.io — inte lokal fil.');
+  }
   let data = null;
   try{ data = await res.json(); } catch(e){ data = null; }
   if(!res.ok){
@@ -16741,6 +16762,10 @@ function renderOpenBanking(){
     if(flash){
       sessionStorage.removeItem('nopEKONOMI.obFlash');
       obMsg('report', flash);
+    } else if(obIsFileProtocol()){
+      obMsg('notice', 'Du kör en lokal fil. Bankkoppling kräver GitHub Pages (https://rosenborgthomas-nop.github.io/nopEKONOMI/nopEKONOMI.html).');
+    } else if(!obApiBase()){
+      obMsg('notice', 'Klistra in Worker-URL: https://nop-ekonomi-ob.nop383ekonomi.workers.dev');
     }
   } catch(e){ /* ignore */ }
   refreshViewHeadline('openBanking', 'Bankkoppling');
@@ -16957,13 +16982,19 @@ async function obDisconnect(){
   if(back) back.addEventListener('click', () => show('careHub'));
   const save = el('obSaveApiBtn');
   if(save) save.addEventListener('click', () => {
-    obSaveApiBase();
-    obMsg('report', 'Worker-URL sparad.');
+    const base = obSaveApiBase();
+    const invalid = obValidateApiBase(base);
+    if(invalid){
+      obMsg('notice', invalid);
+      return;
+    }
+    obMsg('report', 'Worker-URL sparad: ' + base);
   });
   const health = el('obHealthBtn');
   if(health) health.addEventListener('click', async () => {
     clear(el('obMessages'));
     obSaveApiBase();
+    obMsg('report', 'Testar anslutning…');
     try{
       const data = await obFetch('/ob/health');
       obMsg('report', 'Worker OK' + (data.demo ? ' (demo-läge)' : '') + '.');
@@ -16972,9 +17003,15 @@ async function obDisconnect(){
     }
   });
   const demo = el('obDemoBtn');
-  if(demo) demo.addEventListener('click', () => obStartConnect(true));
+  if(demo) demo.addEventListener('click', () => {
+    obMsg('report', 'Startar demo…');
+    obStartConnect(true);
+  });
   const connect = el('obConnectBtn');
-  if(connect) connect.addEventListener('click', () => obStartConnect(false));
+  if(connect) connect.addEventListener('click', () => {
+    obMsg('report', 'Startar BankID-koppling…');
+    obStartConnect(false);
+  });
   const fetchBtn = el('obFetchBtn');
   if(fetchBtn) fetchBtn.addEventListener('click', () => obFetchAndPreview());
   const importBtn = el('obImportBtn');
