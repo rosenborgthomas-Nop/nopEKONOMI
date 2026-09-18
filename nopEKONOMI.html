@@ -3796,7 +3796,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-18 v04';
+const APP_VERSION = '2026-09-18 v05';
 
 /* =====================================================================
    INNEHÅLL
@@ -5859,7 +5859,11 @@ async function openBook(id){
       }
     }
     rebuildBookLookup();
-    show('start');
+    if(consumeOpenBankingPendingNav() && obGetSessionId()){
+      show('openBanking');
+    } else {
+      show('start');
+    }
   } catch(e){
     bookId = '';
     book = { order: [], accounts: {} };
@@ -16678,6 +16682,7 @@ function consumeOpenBankingReturnQuery(){
     meta.lastConnectAt = new Date().toISOString();
     meta.sessionMode = 'tink';
     obWriteMeta(meta);
+    try{ sessionStorage.setItem('nopEKONOMI.obPendingNav', '1'); } catch(e){ /* ignore */ }
   }
   u.searchParams.delete('obSession');
   u.searchParams.delete('obError');
@@ -16690,6 +16695,16 @@ function consumeOpenBankingReturnQuery(){
     try{ sessionStorage.setItem('nopEKONOMI.obFlash', friendly); } catch(e){ /* ignore */ }
   } else if(session){
     try{ sessionStorage.setItem('nopEKONOMI.obFlash', 'Bank kopplad via Tink. Välj konton att synka.'); } catch(e){ /* ignore */ }
+  }
+}
+
+function consumeOpenBankingPendingNav(){
+  try{
+    if(sessionStorage.getItem('nopEKONOMI.obPendingNav') !== '1') return false;
+    sessionStorage.removeItem('nopEKONOMI.obPendingNav');
+    return true;
+  } catch(e){
+    return false;
   }
 }
 
