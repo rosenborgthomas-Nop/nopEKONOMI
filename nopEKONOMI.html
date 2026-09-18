@@ -3796,7 +3796,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-18 v05';
+const APP_VERSION = '2026-09-18 v06';
 
 /* =====================================================================
    INNEHÅLL
@@ -5119,23 +5119,47 @@ function finalizeAccount(rows){
 
 function mergeAccount(existing, incomingRows){
   if(!existing || !Array.isArray(existing.rows)){
-    return { data: finalizeAccount(incomingRows.slice()), added: incomingRows.length, skipped: 0, isNew: true };
+    return { data: finalizeAccount(incomingRows.slice()), added: incomingRows.length, skipped: 0, isNew: true, updated: 0 };
   }
 
   const counts = new Map();
-  for(const r of existing.rows){
+  const byExt = new Map();
+  for(let i = 0; i < existing.rows.length; i++){
+    const r = existing.rows[i];
     const k = rowKey(r);
     counts.set(k, (counts.get(k) || 0) + 1);
+    if(r && r.externalId && !byExt.has(String(r.externalId))){
+      byExt.set(String(r.externalId), i);
+    }
   }
 
   const merged = existing.rows.slice();
-  let added = 0, skipped = 0;
+  let added = 0, skipped = 0, updated = 0;
 
   for(const r of incomingRows){
     const k = rowKey(r);
     const left = counts.get(k) || 0;
     if(left > 0){
       counts.set(k, left - 1);
+      // Reparera tidigare OB-import där belopp blev 0 p.g.a. fel Tink-tolkning.
+      if(r.externalId){
+        const idx = byExt.get(String(r.externalId));
+        if(idx != null){
+          const old = merged[idx];
+          const oldTot = Number(old && old.total);
+          const newTot = Number(r.total);
+          if(Number.isFinite(newTot) && newTot !== 0 && (!Number.isFinite(oldTot) || oldTot === 0)){
+            merged[idx] = Object.assign({}, old, {
+              total: newTot,
+              payee: (old.payee && String(old.payee).trim()) ? old.payee : r.payee,
+              memo: (old.memo && String(old.memo).trim()) ? old.memo : r.memo
+            });
+            updated++;
+            skipped--; // räknas som uppdatering, inte hopp
+            continue;
+          }
+        }
+      }
       skipped++;
       continue;
     }
@@ -5143,14 +5167,16 @@ function mergeAccount(existing, incomingRows){
     added++;
   }
 
-  return { data: finalizeAccount(merged), added: added, skipped: skipped, isNew: false };
+  return { data: finalizeAccount(merged), added: added, skipped: skipped, updated: updated, isNew: false };
 }
 
 /** PSD2/AIS-transaktioner (normaliserade från Worker) → samma format som QIF/CSV-buildRows. */
 function openBankingToRows(txList){
   const transactions = (txList || []).map(t => {
     const dateText = String(t.bookedDate || t.valueDate || '').slice(0, 10);
-    const total = typeof t.amount === 'number' ? t.amount : Number(t.amount);
+    let total = null;
+    if(typeof t.amount === 'number') total = t.amount;
+    else if(t.amount != null && t.amount !== '') total = Number(t.amount);
     return {
       dateText: /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dateText : '',
       payee: String(t.payee || '').trim(),
@@ -16927,12 +16953,16 @@ async function obFetchAndPreview(){
       hint.textContent = 'Konto "' + obPendingAccountName + '": '
         + allRows.length + ' hämtade · '
         + preview.added + ' nya · '
+        + (preview.updated || 0) + ' belopp uppdaterade · '
         + preview.skipped + ' dubbletter hoppas över.';
     }
     const imp = el('obImportBtn');
-    if(imp) imp.disabled = !allRows.length || preview.added === 0;
-    obMsg('report', preview.added
-      ? ('Redo att importera ' + preview.added + ' nya poster.')
+    if(imp) imp.disabled = !allRows.length || (preview.added === 0 && !(preview.updated > 0));
+    obMsg('report', (preview.added || preview.updated)
+      ? ('Redo att importera'
+        + (preview.added ? (' ' + preview.added + ' nya') : '')
+        + (preview.updated ? ((preview.added ? ' och' : '') + ' uppdatera ' + preview.updated + ' belopp') : '')
+        + '.')
       : 'Inga nya poster att importera (allt fanns redan).');
   } catch(err){
     if(err && err.code === 'CONSENT_EXPIRED'){
@@ -16977,6 +17007,7 @@ async function obImportToBook(){
     meta.lastAccount = obPendingAccountName;
     obWriteMeta(meta);
     obMsg('report', 'Importerade ' + merged.added + ' poster till "' + obPendingAccountName + '"'
+      + (merged.updated ? (', uppdaterade ' + merged.updated + ' belopp') : '')
       + (merged.skipped ? (' (' + merged.skipped + ' dubbletter hoppades).') : '.'));
     const imp = el('obImportBtn');
     if(imp) imp.disabled = true;
