@@ -3796,7 +3796,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-18 v01';
+const APP_VERSION = '2026-09-18 v02';
 
 /* =====================================================================
    INNEHÅLL
@@ -16868,7 +16868,7 @@ async function obFetchAndPreview(){
     const preview = openBankingPreviewMerge(obPendingAccountName, allRows);
     const hint = el('obPreviewHint');
     if(hint){
-      hint.textContent = 'Konto “‘ + obPendingAccountName + '”: '
+      hint.textContent = 'Konto "' + obPendingAccountName + '": '
         + allRows.length + ' hämtade · '
         + preview.added + ' nya · '
         + preview.skipped + ' dubbletter hoppas över.';
@@ -16920,7 +16920,7 @@ async function obImportToBook(){
     meta.lastSyncAt = new Date().toISOString();
     meta.lastAccount = obPendingAccountName;
     obWriteMeta(meta);
-    obMsg('report', 'Importerade ' + merged.added + ' poster till “‘ + obPendingAccountName + '”'
+    obMsg('report', 'Importerade ' + merged.added + ' poster till "' + obPendingAccountName + '"'
       + (merged.skipped ? (' (' + merged.skipped + ' dubbletter hoppades).') : '.'));
     const imp = el('obImportBtn');
     if(imp) imp.disabled = true;

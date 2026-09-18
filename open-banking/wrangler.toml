@@ -6,8 +6,8 @@ workers_dev = true
 # Ersätt med dina KV-id från: wrangler kv namespace create OB_SESSIONS
 [[kv_namespaces]]
 binding = "OB_SESSIONS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
+id = "345836c96d1c4ba0a6e76ba85741bf83"
+preview_id = "fa4e17d354d64cc8b02968c5d39e78ec"
 
 [vars]
 TINK_API_BASE = "https://api.tink.com"
