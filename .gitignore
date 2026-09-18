@@ -19,3 +19,8 @@ demo-budget-prompt.md
 # Python-cache
 __pycache__/
 *.pyc
+
+# Open Banking Worker (secrets + deps)
+open-banking/.dev.vars
+open-banking/node_modules/
+open-banking/.wrangler/
