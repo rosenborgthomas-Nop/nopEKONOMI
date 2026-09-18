@@ -3796,7 +3796,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-18 v03';
+const APP_VERSION = '2026-09-18 v04';
 
 /* =====================================================================
    INNEHÅLL
@@ -16676,6 +16676,7 @@ function consumeOpenBankingReturnQuery(){
     obSetSessionId(session);
     const meta = obReadMeta();
     meta.lastConnectAt = new Date().toISOString();
+    meta.sessionMode = 'tink';
     obWriteMeta(meta);
   }
   u.searchParams.delete('obSession');
@@ -16688,7 +16689,7 @@ function consumeOpenBankingReturnQuery(){
       : ('Bankkoppling misslyckades: ' + err + (errDesc ? ' — ' + errDesc : ''));
     try{ sessionStorage.setItem('nopEKONOMI.obFlash', friendly); } catch(e){ /* ignore */ }
   } else if(session){
-    try{ sessionStorage.setItem('nopEKONOMI.obFlash', 'Bank kopplad. Välj konton att synka.'); } catch(e){ /* ignore */ }
+    try{ sessionStorage.setItem('nopEKONOMI.obFlash', 'Bank kopplad via Tink. Välj konton att synka.'); } catch(e){ /* ignore */ }
   }
 }
 
@@ -16729,8 +16730,12 @@ function renderOpenBanking(){
   const hint = el('obSessionHint');
   if(hint){
     const meta = obReadMeta();
+    const mode = meta.sessionMode === 'demo' ? ' · demoläge (påhittad data)'
+      : meta.sessionMode === 'tink' ? ' · bankkoppling (Tink)'
+      : '';
     hint.textContent = sid
-      ? ('Session aktiv' + (meta.lastConnectAt ? ' · kopplad ' + meta.lastConnectAt.slice(0, 16).replace('T', ' ') : '')
+      ? ('Session aktiv' + mode
+        + (meta.lastConnectAt ? ' · kopplad ' + meta.lastConnectAt.slice(0, 16).replace('T', ' ') : '')
         + (meta.lastSyncAt ? ' · synkad ' + meta.lastSyncAt.slice(0, 16).replace('T', ' ') : ''))
       : 'Ingen aktiv session.';
   }
@@ -16838,16 +16843,27 @@ async function obStartConnect(demo){
         personalIdentifier: (el('obSsn') && el('obSsn').value) || ''
       })
     });
+    if(!demo && data && data.mode === 'demo'){
+      obMsg('notice', 'Workern svarade i demoläge trots BankID. Kontrollera att DEMO_MODE=0 och att Tink-secrets sitter på Workern.');
+      return;
+    }
     if(data.redirectUrl){
+      const meta = obReadMeta();
+      meta.sessionMode = 'tink';
+      meta.lastConnectAt = new Date().toISOString();
+      obWriteMeta(meta);
       location.href = data.redirectUrl;
       return;
     }
     if(data.sessionId){
       obSetSessionId(data.sessionId);
-      if(data.returnUrl && demo){
-        // Demo: stanna i appen, ladda konton direkt.
-      }
-      obMsg('report', demo ? 'Demo-session klar.' : 'Session skapad.');
+      const meta = obReadMeta();
+      meta.sessionMode = data.mode === 'demo' ? 'demo' : 'tink';
+      meta.lastConnectAt = new Date().toISOString();
+      obWriteMeta(meta);
+      obMsg('report', demo || data.mode === 'demo'
+        ? 'Demo-session klar (påhittad data — inte din bank).'
+        : 'Session skapad.');
       renderOpenBanking();
       await obLoadAccounts();
       return;
@@ -16969,6 +16985,9 @@ async function obDisconnect(){
   obSetSessionId('');
   obFetchedAccounts = [];
   obPendingRows = null;
+  const meta = obReadMeta();
+  delete meta.sessionMode;
+  obWriteMeta(meta);
   const sec = el('obAccountsSection');
   if(sec) sec.hidden = true;
   const list = el('obAccountsList');
