@@ -3796,7 +3796,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-18 v07';
+const APP_VERSION = '2026-09-18 v08';
 
 /* =====================================================================
    INNEHÅLL
@@ -5119,7 +5119,7 @@ function finalizeAccount(rows){
 
 function mergeAccount(existing, incomingRows){
   if(!existing || !Array.isArray(existing.rows)){
-    return { data: finalizeAccount(incomingRows.slice()), added: incomingRows.length, skipped: 0, isNew: true, updated: 0 };
+    return { data: finalizeAccount(incomingRows.slice()), added: incomingRows.length, skipped: 0, isNew: true, updated: 0, removed: 0 };
   }
 
   const counts = new Map();
@@ -5164,10 +5164,33 @@ function mergeAccount(existing, incomingRows){
       continue;
     }
     merged.push(r);
+    if(r.externalId) byExt.set(String(r.externalId), merged.length - 1);
     added++;
   }
 
-  return { data: finalizeAccount(merged), added: added, skipped: skipped, updated: updated, isNew: false };
+  // Städa spök-rader: OB-nollbelopp samma dag+payee när det finns en rad med belopp.
+  let removed = 0;
+  const keep = [];
+  const hasNonZero = new Set();
+  for(const r of merged){
+    const tot = Number(r && r.total);
+    if(Number.isFinite(tot) && tot !== 0){
+      hasNonZero.add(String(r.date || '') + '\u0001' + String(r.payee || '').trim().toLowerCase());
+    }
+  }
+  for(const r of merged){
+    const tot = Number(r && r.total);
+    const isGhostZero = (!Number.isFinite(tot) || tot === 0)
+      && r && r.externalId
+      && hasNonZero.has(String(r.date || '') + '\u0001' + String(r.payee || '').trim().toLowerCase());
+    if(isGhostZero){
+      removed++;
+      continue;
+    }
+    keep.push(r);
+  }
+
+  return { data: finalizeAccount(keep), added: added, skipped: skipped, updated: updated, removed: removed, isNew: false };
 }
 
 /** PSD2/AIS-transaktioner (normaliserade från Worker) → samma format som QIF/CSV-buildRows. */
@@ -5180,14 +5203,14 @@ function openBankingToRows(txList){
     return {
       dateText: /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dateText : '',
       payee: String(t.payee || '').trim(),
-      total: Number.isFinite(total) ? total : 0,
+      total: Number.isFinite(total) ? total : null,
       category: '',
       subCategory: '',
       memo: String(t.memo || '').trim(),
       splits: [],
       externalId: t.id ? String(t.id) : ''
     };
-  }).filter(tx => tx.dateText);
+  }).filter(tx => tx.dateText && tx.total != null && tx.total !== 0);
   return buildRows(transactions);
 }
 
@@ -16984,14 +17007,17 @@ async function obFetchAndPreview(){
         + allRows.length + ' hämtade · '
         + preview.added + ' nya · '
         + (preview.updated || 0) + ' belopp uppdaterade · '
+        + (preview.removed || 0) + ' noll-dubbletter tas bort · '
         + preview.skipped + ' dubbletter hoppas över.';
     }
     const imp = el('obImportBtn');
-    if(imp) imp.disabled = !allRows.length || (preview.added === 0 && !(preview.updated > 0));
-    obMsg('report', (preview.added || preview.updated)
+    if(imp) imp.disabled = !allRows.length
+      || (preview.added === 0 && !(preview.updated > 0) && !(preview.removed > 0));
+    obMsg('report', (preview.added || preview.updated || preview.removed)
       ? ('Redo att importera'
         + (preview.added ? (' ' + preview.added + ' nya') : '')
-        + (preview.updated ? ((preview.added ? ' och' : '') + ' uppdatera ' + preview.updated + ' belopp') : '')
+        + (preview.updated ? ((preview.added ? ',' : '') + ' uppdatera ' + preview.updated + ' belopp') : '')
+        + (preview.removed ? (((preview.added || preview.updated) ? ' och' : '') + ' ta bort ' + preview.removed + ' noll-dubbletter') : '')
         + '.')
       : 'Inga nya poster att importera (allt fanns redan).');
   } catch(err){
@@ -17038,6 +17064,7 @@ async function obImportToBook(){
     obWriteMeta(meta);
     obMsg('report', 'Importerade ' + merged.added + ' poster till "' + obPendingAccountName + '"'
       + (merged.updated ? (', uppdaterade ' + merged.updated + ' belopp') : '')
+      + (merged.removed ? (', tog bort ' + merged.removed + ' noll-dubbletter') : '')
       + (merged.skipped ? (' (' + merged.skipped + ' dubbletter hoppades).') : '.'));
     const imp = el('obImportBtn');
     if(imp) imp.disabled = true;
