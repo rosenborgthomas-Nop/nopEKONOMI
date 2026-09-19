@@ -3814,7 +3814,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-19 v06';
+const APP_VERSION = '2026-09-19 v07';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11451,8 +11451,10 @@ function careListRowHtml(item, idx){
     const isSub = item.rowKind === 'sub';
     const rowCls = (on ? '' : ' trend-off') + (isSub ? ' trend-sub' : '');
     const tip = isSub
-      ? 'Bocka av underkategorier som inte ska påverka trendprognosen'
-      : 'Bocka av kategorier som inte ska påverka trendprognosen';
+      ? 'Använd bockrutan för att inkludera underkategorin i trend'
+      : (item.hasSubs
+        ? 'Pilen fäller ut underkategorier. Bockrutan styr om kategorin räknas i trend'
+        : 'Använd bockrutan för att inkludera kategorin i trend');
     let nameHtml = '';
     if(isSub){
       nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span>' + esc;
@@ -11460,7 +11462,7 @@ function careListRowHtml(item, idx){
       const chev = item.expanded ? '▼' : '▶';
       nameHtml = '<button type="button" class="trend-expand-btn" data-trend-expand="'
         + idx + '" aria-expanded="' + (item.expanded ? 'true' : 'false')
-        + '" title="Visa underkategorier">' + chev + '</button>' + esc;
+        + '" title="Fäll ut/in underkategorier">' + chev + '</button>' + esc;
     } else {
       nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span>' + esc;
     }
@@ -12056,6 +12058,7 @@ careListBody.addEventListener('click', e => {
   }
   const toggle = e.target.closest('input[data-trend-toggle]');
   if(toggle && careListKind === 'trend'){
+    e.stopPropagation();
     const idx = +toggle.getAttribute('data-trend-toggle');
     careListHighlightIdx = idx;
     updateCareListHighlight();
@@ -12072,14 +12075,7 @@ careListBody.addEventListener('click', e => {
   careListHighlightIdx = idx;
   updateCareListHighlight();
   if(careListScroll) careListScroll.focus();
-  if(careListKind === 'trend'){
-    const item = careListItems[idx];
-    if(!item) return;
-    const next = !item.included;
-    const box = tr.querySelector('input[data-trend-toggle]');
-    if(box) box.checked = next;
-    setTrendIncludeForItem(idx, next);
-  }
+  // Trend: ingen toggle på radklick — bara pil (expand) och bockruta.
 });
 
 careListBody.addEventListener('dblclick', e => {
