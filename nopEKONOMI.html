@@ -2412,6 +2412,22 @@ footer p{
   width:5.5rem;
   text-align:right;
 }
+.care-list-table th.cl-trend,
+.care-list-table td.cl-trend{
+  width:5.5rem;
+  text-align:center;
+  vertical-align:middle;
+}
+.care-list-table td.cl-trend input[type="checkbox"]{
+  width:1.15rem;
+  height:1.15rem;
+  margin:0;
+  cursor:pointer;
+  accent-color:var(--ink, #1a3050);
+}
+.care-list-table tr.trend-off td.cl-name{
+  opacity:0.55;
+}
 .care-list-table th.cl-backup,
 .care-list-table td.cl-backup{
   width:7.2rem;
@@ -2839,6 +2855,7 @@ td.num.dash .cell-content{
         <option value="kategoriRapport">Kategori-Rapport</option>
         <option value="payeeRapport">Payee-Rapport</option>
         <option value="nettoOverTid">Netto över tid</option>
+        <option value="trendPrognos">Trendprognos (In/Ut)</option>
         <option value="" disabled class="menu-sep menu-sep-title">──── Topplistor ────</option>
         <option value="topPayee">Payee</option>
         <option value="topKategori">Kategori</option>
@@ -2954,6 +2971,7 @@ td.num.dash .cell-content{
         <option value="payee">Payee</option>
         <option value="kategori">Kategori</option>
         <option value="underkategori">Underkategori</option>
+        <option value="trend">Trend</option>
         <option value="" disabled class="menu-sep" id="careHubBookSep">────────</option>
         <option value="bok">Bok (backup)</option>
       </select>
@@ -3693,7 +3711,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-19 v01';
+const APP_VERSION = '2026-09-19 v02';
 
 /* =====================================================================
    INNEHÅLL
@@ -3818,12 +3836,21 @@ function sanitizeBook(book){
   const subCategoryList = Array.isArray(book.subCategoryList)
     ? book.subCategoryList.map(s => String(s || '').trim()).filter(Boolean)
     : [];
+  const trendInclude = {};
+  if(book.trendInclude && typeof book.trendInclude === 'object'){
+    for(const key of Object.keys(book.trendInclude)){
+      const name = String(key || '').trim();
+      if(!name || isTransferCategory(name)) continue;
+      trendInclude[name] = !!book.trendInclude[key];
+    }
+  }
   return {
     order: book.order.slice(),
     accounts: accounts,
     payeeList: payeeList,
     categoryList: categoryList,
-    subCategoryList: subCategoryList
+    subCategoryList: subCategoryList,
+    trendInclude: trendInclude
   };
 }
 
@@ -5066,6 +5093,49 @@ function isTransferCategory(cat){
   return s.length > 1 && s.charAt(0) === '[' && s.charAt(s.length - 1) === ']';
 }
 
+/** Trend-inkluderingsregister: vilka kategorier räknas i trendprognoser. Sparat i boken. */
+function syncTrendIncludeMap(bookData){
+  if(!bookData || typeof bookData !== 'object') return false;
+  if(!bookData.trendInclude || typeof bookData.trendInclude !== 'object'){
+    bookData.trendInclude = {};
+  }
+  const map = bookData.trendInclude;
+  const lookup = buildBookLookup(bookData);
+  const known = new Set(lookup.categories || []);
+  let changed = false;
+  for(const cat of known){
+    if(!Object.prototype.hasOwnProperty.call(map, cat)){
+      map[cat] = true;
+      changed = true;
+    }
+  }
+  for(const key of Object.keys(map)){
+    if(!known.has(key) || isTransferCategory(key)){
+      delete map[key];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function isCategoryIncludedInTrend(cat){
+  const name = (cat || '').trim();
+  if(!name || isTransferCategory(name)) return false;
+  if(!book || !book.trendInclude || typeof book.trendInclude !== 'object') return true;
+  if(!Object.prototype.hasOwnProperty.call(book.trendInclude, name)) return true;
+  return !!book.trendInclude[name];
+}
+
+async function persistTrendInclude(){
+  if(!bookId || !book) return;
+  try{
+    book = sanitizeBook(book);
+    await writeBookPreferGranted(bookId, book);
+  } catch(e){
+    /* ignore — UI visar fel vid behov */
+  }
+}
+
 function transferAccountFromCategory(cat){
   const s = (cat || '').trim();
   if(!isTransferCategory(s)) return '';
@@ -5599,6 +5669,9 @@ let bookLookup = emptyBookLookup(); // payee/kategori/underkategori i boken
 
 function rebuildBookLookup(){
   bookLookup = buildBookLookup(book);
+  if(book && syncTrendIncludeMap(book)){
+    // Nya kategorier default:på — sparas vid nästa vanliga bokskrivning / Trend-toggle.
+  }
 }
 
 function markBookDirty(){ /* kvar som no-op — sparning sker direkt till disk */ }
@@ -8808,6 +8881,228 @@ function renderNetOverTimeReport(fromIso, toIso){
   syncReportCopyBtn();
 }
 
+/** Linjär OLS: y ≈ a + b·t, t = 0..n-1. */
+function olsFitSeries(values){
+  const n = values.length;
+  if(n < 1) return { a: 0, b: 0 };
+  if(n === 1) return { a: values[0], b: 0 };
+  let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
+  for(let i = 0; i < n; i++){
+    const y = values[i];
+    sumX += i;
+    sumY += y;
+    sumXX += i * i;
+    sumXY += i * y;
+  }
+  const den = n * sumXX - sumX * sumX;
+  const b = den ? (n * sumXY - sumX * sumY) / den : 0;
+  const a = (sumY - b * sumX) / n;
+  return { a: a, b: b };
+}
+
+/** IQR-band; returnerar null om för få punkter. */
+function iqrBounds(values){
+  const n = values.length;
+  if(n < 4) return null;
+  const s = values.slice().sort((a, b) => a - b);
+  const q = p => {
+    const pos = (s.length - 1) * p;
+    const lo = Math.floor(pos);
+    const hi = Math.ceil(pos);
+    if(lo === hi) return s[lo];
+    return s[lo] + (s[hi] - s[lo]) * (pos - lo);
+  };
+  const q1 = q(0.25);
+  const q3 = q(0.75);
+  const iqr = q3 - q1;
+  return { lo: q1 - 1.5 * iqr, hi: q3 + 1.5 * iqr };
+}
+
+function winsorizeSeries(values){
+  const bounds = iqrBounds(values);
+  if(!bounds) return values.slice();
+  return values.map(v => Math.min(bounds.hi, Math.max(bounds.lo, v)));
+}
+
+function addMonthKey(mk, delta){
+  let y = Number(mk.slice(0, 4));
+  let m = Number(mk.slice(5, 7)) + delta;
+  while(m > 12){ m -= 12; y += 1; }
+  while(m < 1){ m += 12; y -= 1; }
+  return y + '-' + String(m).padStart(2, '0');
+}
+
+/**
+ * Månadsserie In/Ut från Trend-registret (ibockade kategorier).
+ * Gemensam bas för In/Ut-prognos och framtida trendvyer.
+ */
+function collectTrendInUtSeries(fromIso, toIso){
+  syncTrendIncludeMap(book);
+  const income = Object.create(null);
+  const expense = Object.create(null);
+  let includedCats = 0;
+  let excludedCats = 0;
+  if(book.trendInclude && typeof book.trendInclude === 'object'){
+    for(const key of Object.keys(book.trendInclude)){
+      if(book.trendInclude[key]) includedCats += 1;
+      else excludedCats += 1;
+    }
+  }
+
+  for(const name of book.order){
+    const acc = book.accounts[name];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(isReportExcludedRow(r)) continue;
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(d < fromIso || d > toIso) continue;
+      if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
+      for(const piece of reportPiecesFromRow(r)){
+        const cat = (piece.category || '').trim();
+        if(!isCategoryIncludedInTrend(cat)) continue;
+        const amount = piece.amount;
+        if(!Number.isFinite(amount) || !amount) continue;
+        const mk = monthKeyFromIso(d);
+        if(amount > 0) income[mk] = (income[mk] || 0) + amount;
+        else expense[mk] = (expense[mk] || 0) + (-amount);
+      }
+    }
+  }
+
+  const months = monthKeysInRange(fromIso, toIso);
+  const incomeSeries = months.map(mk => income[mk] || 0);
+  const expenseSeries = months.map(mk => expense[mk] || 0);
+  return {
+    months,
+    incomeSeries,
+    expenseSeries,
+    includedCats,
+    excludedCats
+  };
+}
+
+function buildTrendForecast(fromIso, toIso, horizon){
+  horizon = horizon || 12;
+  const series = collectTrendInUtSeries(fromIso, toIso);
+  const { months, incomeSeries, expenseSeries, includedCats, excludedCats } = series;
+  if(months.length < 2){
+    return {
+      ok: false,
+      reason: 'Behöver minst två månader i intervallet.',
+      months, includedCats, excludedCats
+    };
+  }
+
+  const incW = winsorizeSeries(incomeSeries);
+  const expW = winsorizeSeries(expenseSeries);
+  const fitIn = olsFitSeries(incW);
+  const fitUt = olsFitSeries(expW);
+  const n = months.length;
+  const lastMk = months[n - 1];
+  const forecast = [];
+  let sumIn = 0, sumUt = 0;
+  for(let h = 1; h <= horizon; h++){
+    const t = n - 1 + h;
+    const fi = fitIn.a + fitIn.b * t;
+    const fe = fitUt.a + fitUt.b * t;
+    const mk = addMonthKey(lastMk, h);
+    forecast.push({ month: mk, income: fi, expense: fe, net: fi - fe });
+    sumIn += fi;
+    sumUt += fe;
+  }
+
+  return {
+    ok: true,
+    months,
+    incomeSeries,
+    expenseSeries,
+    fitIn,
+    fitUt,
+    forecast,
+    sumIn,
+    sumUt,
+    sumNet: sumIn - sumUt,
+    includedCats,
+    excludedCats,
+    historyFrom: months[0],
+    historyTo: lastMk
+  };
+}
+
+function formatTrendSlope(b){
+  const v = Math.round(b);
+  const sign = v > 0 ? '+' : '';
+  return sign + formatAmount(v) + '/mån';
+}
+
+function renderTrendPrognosReport(fromIso, toIso){
+  const data = buildTrendForecast(fromIso, toIso, 12);
+
+  clearReportCanvas();
+  if(reportPlaceholder) reportPlaceholder.hidden = true;
+  reportBody.classList.add('has-report');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'report-table-wrap';
+
+  const headMonths = data.ok
+    ? data.forecast.map(p => p.month)
+    : monthKeysInRange(fromIso, toIso);
+  let head = reportTableHeadHtml(
+    'TRENDPROGNOS IN/UT' + reportTimeTitleSuffixHtml(),
+    fromIso,
+    toIso,
+    headMonths
+  );
+
+  if(!data.ok){
+    wrap.innerHTML = head
+      + '<p class="report-empty-note">' + escapeHtml(data.reason || 'Kunde inte beräkna trend.') + '</p>';
+    reportBody.appendChild(wrap);
+    syncReportCopyBtn();
+    return;
+  }
+
+  const note = '<p class="report-empty-note" style="margin:0 0 10px">'
+    + 'Bas: ibockade kategorier i Registervård → Trend'
+    + ' (' + data.includedCats + ' med, ' + data.excludedCats + ' utan). '
+    + 'Historik ' + escapeHtml(data.historyFrom) + '–' + escapeHtml(data.historyTo)
+    + '. Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
+    + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))
+    + ' (OLS, lätt IQR-winsorize).</p>';
+
+  let table = '<table class="report-table trend-forecast-table"><thead><tr>'
+    + '<th class="report-label-col">Månad</th>'
+    + '<th class="num">In</th>'
+    + '<th class="num">Ut</th>'
+    + '<th class="num">Netto</th>'
+    + '</tr></thead><tbody>';
+
+  for(const p of data.forecast){
+    const netCls = p.net < 0 ? ' neg' : '';
+    table += '<tr>'
+      + '<td class="report-label-col">' + escapeHtml(p.month) + '</td>'
+      + '<td class="num">' + escapeHtml(formatAmount(Math.round(p.income))) + '</td>'
+      + '<td class="num">' + escapeHtml(formatAmount(Math.round(p.expense))) + '</td>'
+      + '<td class="num' + netCls + '">' + escapeHtml(formatAmount(Math.round(p.net))) + '</td>'
+      + '</tr>';
+  }
+
+  const sumNetCls = data.sumNet < 0 ? ' neg' : '';
+  table += '<tr class="report-sum">'
+    + '<td class="report-label-col">Summa 12 mån</td>'
+    + '<td class="num total-amt">' + escapeHtml(formatAmount(Math.round(data.sumIn))) + '</td>'
+    + '<td class="num total-amt">' + escapeHtml(formatAmount(Math.round(data.sumUt))) + '</td>'
+    + '<td class="num total-amt' + sumNetCls + '">'
+    + escapeHtml(formatAmount(Math.round(data.sumNet))) + '</td>'
+    + '</tr></tbody></table>';
+
+  wrap.innerHTML = head + note + '<div class="report-table-scroll">' + table + '</div>';
+  reportBody.appendChild(wrap);
+  syncReportCopyBtn();
+}
+
 function collectPayeeReport(fromIso, toIso){
   const payeeTotals = Object.create(null);
   const payeeMonthly = Object.create(null);
@@ -9947,7 +10242,8 @@ const REPORT_KINDS = new Set([
   'topKategori',
   'topUnderkategori',
   'topplistor',
-  'nettoOverTid'
+  'nettoOverTid',
+  'trendPrognos'
 ]);
 
 function readReportPrefsStore(){
@@ -10069,6 +10365,10 @@ function runReport(){
     renderNetOverTimeReport(from, to);
     return;
   }
+  if(kind === 'trendPrognos'){
+    renderTrendPrognosReport(from, to);
+    return;
+  }
 
   showReportPlaceholder('RAPPORT', 'Okänd rapporttyp.');
 }
@@ -10134,6 +10434,7 @@ const CARE_HUB_SECTIONS = {
   payee: { title: 'Payee', kind: 'list' },
   kategori: { title: 'Kategori', kind: 'list' },
   underkategori: { title: 'Underkategori', kind: 'list' },
+  trend: { title: 'Trend', kind: 'list' },
   bok: { title: 'Bok (backup)', kind: 'list' }
 };
 
@@ -10219,6 +10520,13 @@ const CARE_LIST_KINDS = {
     newLabel: 'Ny underkategori…',
     nameLabel: 'Underkategori - Nytt Namn',
     deleteLabel: 'Ta bort…',
+    maxLen: 60
+  },
+  trend: {
+    title: 'Trend',
+    newLabel: '',
+    nameLabel: 'Kategori',
+    deleteLabel: '',
     maxLen: 60
   },
   bok: {
@@ -10375,6 +10683,17 @@ function buildCareListItems(){
       .sort((a, b) => a.localeCompare(b, 'sv'))
       .map(name => ({ name, count: countPayeeUsage(name) }));
   }
+  if(careListKind === 'trend'){
+    syncTrendIncludeMap(book);
+    return bookLookup.categories
+      .slice()
+      .sort((a, b) => a.localeCompare(b, 'sv'))
+      .map(name => ({
+        name,
+        count: countCategoryUsage(name),
+        included: isCategoryIncludedInTrend(name)
+      }));
+  }
   const source = careListKind === 'kategori' ? bookLookup.categories : bookLookup.subCategories;
   const counter = careListKind === 'kategori' ? countCategoryUsage : countSubCategoryUsage;
   return source
@@ -10416,6 +10735,7 @@ function careListKindLabel(){
   if(careListKind === 'underkategori') return 'Underkategori';
   if(careListKind === 'payee') return 'Payee';
   if(careListKind === 'konto') return 'Konto';
+  if(careListKind === 'trend') return 'Trend';
   if(careListKind === 'bok') return 'Bok';
   return '';
 }
@@ -10543,6 +10863,16 @@ function careListRowHtml(item, idx){
       + '<td class="cl-saldo ' + saldoCls + '">' + escapeHtml(formatAmount(item.saldo)) + '</td>'
       + '</tr>';
   }
+  if(careListKind === 'trend'){
+    const on = !!item.included;
+    const rowCls = on ? '' : ' trend-off';
+    return '<tr data-idx="' + idx + '" class="' + rowCls.trim() + '" title="Bocka av kategorier som inte ska påverka trendprognosen">'
+      + '<td class="cl-name">' + esc + '</td>'
+      + '<td class="cl-count">' + formatCount(item.count) + '</td>'
+      + '<td class="cl-trend"><input type="checkbox" data-trend-toggle="' + idx + '"'
+      + (on ? ' checked' : '') + ' aria-label="Räkna ' + esc + ' i trend"></td>'
+      + '</tr>';
+  }
   return '<tr data-idx="' + idx + '" title="Dubbelklicka för att ändra namn">'
     + '<td class="cl-name">' + esc + '</td>'
     + '<td class="cl-count">' + formatCount(item.count) + '</td>'
@@ -10562,6 +10892,14 @@ function renderCareListHead(){
       + '</tr>';
     return;
   }
+  if(careListKind === 'trend'){
+    careListHead.innerHTML = '<tr>'
+      + '<th>Kategori</th>'
+      + '<th class="cl-count num">Poster</th>'
+      + '<th class="cl-trend">I trend</th>'
+      + '</tr>';
+    return;
+  }
   const label = careListKind === 'kategori' ? 'Kategori'
     : careListKind === 'underkategori' ? 'Underkategori' : 'Payee';
   careListHead.innerHTML = '<tr>'
@@ -10573,7 +10911,8 @@ function renderCareListHead(){
 function renderCareList(){
   const meta = careListMeta();
   careListNewBtn.textContent = meta.newLabel;
-  careListNewBtn.hidden = careListKind === 'bok' || !meta.newLabel;
+  careListNewBtn.hidden = careListKind === 'bok' || careListKind === 'trend' || !meta.newLabel;
+  if(careListOkBtn) careListOkBtn.hidden = careListKind === 'trend';
   if(careListBackupBtn) careListBackupBtn.hidden = careListKind !== 'bok';
   clear(careListMessages);
   closeCareListEdit();
@@ -10583,9 +10922,11 @@ function renderCareList(){
   clear(careListBody);
 
   if(!careListItems.length){
-    const cols = careListKind === 'bok' ? 2 : (careListKind === 'konto' ? 3 : 2);
+    const cols = careListKind === 'bok' ? 2
+      : (careListKind === 'konto' || careListKind === 'trend' ? 3 : 2);
     careListBody.innerHTML = '<tr class="empty-row"><td colspan="' + cols
-      + '">Inga ' + meta.title.toLowerCase() + ' ännu.</td></tr>';
+      + '">Inga ' + (careListKind === 'trend' ? 'kategorier' : meta.title.toLowerCase())
+      + ' ännu.</td></tr>';
     careListHighlightIdx = -1;
   } else {
     careListHighlightIdx = 0;
@@ -10603,6 +10944,7 @@ function renderCareList(){
 }
 
 function careListOpenHighlighted(){
+  if(careListKind === 'trend') return;
   const item = careListHighlightedItem();
   if(!item) return;
   if(careListKind === 'bok' && !item.isCurrent){
@@ -10611,6 +10953,22 @@ function careListOpenHighlighted(){
     return;
   }
   openCareListEdit(item.name);
+}
+
+async function setTrendIncludeForItem(idx, included){
+  const item = careListItems[idx];
+  if(!item || !book) return;
+  if(!book.trendInclude || typeof book.trendInclude !== 'object') book.trendInclude = {};
+  book.trendInclude[item.name] = !!included;
+  item.included = !!included;
+  const tr = careListBody.querySelector('tr[data-idx="' + idx + '"]');
+  if(tr) tr.classList.toggle('trend-off', !included);
+  clear(careListMessages);
+  try{
+    await persistTrendInclude();
+  } catch(e){
+    addBox(careListMessages, 'notice', 'Kunde inte spara trendvalet.');
+  }
 }
 
 async function saveCareListEdit(opts){
@@ -11044,6 +11402,14 @@ async function confirmCareListDelete(){
 }
 
 careListBody.addEventListener('click', e => {
+  const toggle = e.target.closest('input[data-trend-toggle]');
+  if(toggle && careListKind === 'trend'){
+    const idx = +toggle.getAttribute('data-trend-toggle');
+    careListHighlightIdx = idx;
+    updateCareListHighlight();
+    setTrendIncludeForItem(idx, toggle.checked);
+    return;
+  }
   const tr = e.target.closest('tr[data-idx]');
   if(!tr || careListIsEditOpen()) return;
   const idx = +tr.dataset.idx;
@@ -11054,9 +11420,18 @@ careListBody.addEventListener('click', e => {
   careListHighlightIdx = idx;
   updateCareListHighlight();
   if(careListScroll) careListScroll.focus();
+  if(careListKind === 'trend'){
+    const item = careListItems[idx];
+    if(!item) return;
+    const next = !item.included;
+    const box = tr.querySelector('input[data-trend-toggle]');
+    if(box) box.checked = next;
+    setTrendIncludeForItem(idx, next);
+  }
 });
 
 careListBody.addEventListener('dblclick', e => {
+  if(careListKind === 'trend') return;
   const tr = e.target.closest('tr[data-idx]');
   if(!tr || careListIsEditOpen()) return;
   const idx = +tr.dataset.idx;
@@ -11638,6 +12013,20 @@ function rewriteCategoryInBook(draft, fromName, toName){
           }
         }
       }
+    }
+  }
+  if(draft.trendInclude && typeof draft.trendInclude === 'object'){
+    let fromExact = '';
+    for(const key of Object.keys(draft.trendInclude)){
+      if(key.trim().toLowerCase() === fromKey){
+        fromExact = key;
+        break;
+      }
+    }
+    if(fromExact){
+      const wasOn = !!draft.trendInclude[fromExact];
+      delete draft.trendInclude[fromExact];
+      if(to) draft.trendInclude[to] = wasOn;
     }
   }
   return n;
