@@ -3824,7 +3824,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-19 v09';
+const APP_VERSION = '2026-09-19 v10';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9225,124 +9225,27 @@ function prevCalendarMonth(y, m){
   return shiftCalendarMonth(y, m, -1);
 }
 
-/** Dagnummer → { income, expense } för en kalendermånad (Trend-filter). */
-function collectTrendDailyInUt(y, m){
-  const daysIn = daysInCalendarMonth(y, m);
-  const byDay = Object.create(null);
-  for(let d = 1; d <= daysIn; d++){
-    byDay[d] = { income: 0, expense: 0 };
-  }
-  const fromIso = startOfMonthIso(y, m);
-  const toIso = endOfCalendarMonthIso(y, m);
-  const mkWant = y + '-' + String(m).padStart(2, '0');
-
-  for(const name of book.order){
-    const acc = book.accounts[name];
-    if(!acc || !Array.isArray(acc.rows)) continue;
-    for(const r of acc.rows){
-      if(isReportExcludedRow(r)) continue;
-      const iso = (r.date || '').trim();
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;
-      if(iso < fromIso || iso > toIso) continue;
-      if(monthKeyFromIso(iso) !== mkWant) continue;
-      if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
-      const day = Number(iso.slice(8, 10));
-      if(!byDay[day]) byDay[day] = { income: 0, expense: 0 };
-      for(const piece of reportPiecesFromRow(r)){
-        const cat = (piece.category || '').trim();
-        const sub = (piece.subCategory || '').trim();
-        if(!isTrendPieceIncluded(cat, sub)) continue;
-        const amount = piece.amount;
-        if(!Number.isFinite(amount) || !amount) continue;
-        if(amount > 0) byDay[day].income += amount;
-        else byDay[day].expense += (-amount);
-      }
-    }
-  }
-  return byDay;
-}
-
-/** Sista bokningsdag (1–31) i månaden bland Trend-inkluderade poster; 0 om ingen. */
-function lastTrendBookingDayInMonth(y, m){
-  const fromIso = startOfMonthIso(y, m);
-  const toIso = endOfCalendarMonthIso(y, m);
-  let maxDay = 0;
-  for(const name of book.order){
-    const acc = book.accounts[name];
-    if(!acc || !Array.isArray(acc.rows)) continue;
-    for(const r of acc.rows){
-      if(isReportExcludedRow(r)) continue;
-      const iso = (r.date || '').trim();
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;
-      if(iso < fromIso || iso > toIso) continue;
-      if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
-      let hasPiece = false;
-      for(const piece of reportPiecesFromRow(r)){
-        if(isTrendPieceIncluded(piece.category, piece.subCategory)){
-          hasPiece = true;
-          break;
-        }
-      }
-      if(!hasPiece) continue;
-      const day = Number(iso.slice(8, 10));
-      if(day > maxDay) maxDay = day;
-    }
-  }
-  return maxDay;
+/**
+ * Sista dagen i senast fulländade månad (pågående/ofullständig månad ingår inte).
+ * Anchor = tidigaste av idag och bokens senaste datum.
+ */
+function endOfLastCompleteTrendMonthIso(){
+  const bookLatest = latestBookDateIso(true) || todayIsoDate();
+  const today = todayIsoDate();
+  const asOf = bookLatest < today ? bookLatest : today;
+  const y = Number(asOf.slice(0, 4));
+  const m = Number(asOf.slice(5, 7));
+  const d = Number(asOf.slice(8, 10));
+  const dim = daysInCalendarMonth(y, m);
+  if(d >= dim) return endOfCalendarMonthIso(y, m);
+  const prev = prevCalendarMonth(y, m);
+  return endOfCalendarMonthIso(prev.y, prev.m);
 }
 
 /**
- * Skatta saknade slutdagar i sista historikmånaden:
- * addera (saknadeDagar / dagarIMånaden) × hela föregående månadens In/Ut.
- * (Oberoende av om hyra låg 30:e eller 31:a i föregående månad.)
+ * Månadsserie In/Ut från Trend-registret (ibockade kategorier / underkategorier).
+ * Bara fulländade månader — ingen skattning av pågående månad.
  */
-function collectTrendMonthInUtTotals(y, m){
-  const daily = collectTrendDailyInUt(y, m);
-  let income = 0;
-  let expense = 0;
-  for(const d of Object.keys(daily)){
-    income += daily[d].income || 0;
-    expense += daily[d].expense || 0;
-  }
-  return { income: income, expense: expense };
-}
-
-function imputeIncompleteTrendMonthTail(monthKey){
-  if(!/^\d{4}-\d{2}$/.test(monthKey || '')) return null;
-  const y = Number(monthKey.slice(0, 4));
-  const m = Number(monthKey.slice(5, 7));
-  const daysInM = daysInCalendarMonth(y, m);
-  const today = todayIsoDate();
-  const todayMk = today.slice(0, 7);
-  let asOfDay;
-  if(todayMk === monthKey){
-    asOfDay = Number(today.slice(8, 10));
-  } else {
-    asOfDay = lastTrendBookingDayInMonth(y, m);
-  }
-  if(!asOfDay || asOfDay >= daysInM) return null;
-
-  const fromDay = asOfDay + 1;
-  const toDay = daysInM;
-  const missingDays = toDay - fromDay + 1;
-  if(missingDays <= 0) return null;
-
-  const prev = prevCalendarMonth(y, m);
-  const prevTotals = collectTrendMonthInUtTotals(prev.y, prev.m);
-  const fraction = missingDays / daysInM;
-
-  return {
-    incomeAdd: prevTotals.income * fraction,
-    expenseAdd: prevTotals.expense * fraction,
-    fromDay: fromDay,
-    toDay: toDay,
-    missingDays: missingDays,
-    daysInMonth: daysInM,
-    fraction: fraction,
-    monthKey: monthKey
-  };
-}
-
 function collectTrendInUtSeries(fromIso, toIso){
   syncTrendIncludeMap(book);
   const income = Object.create(null);
@@ -9382,36 +9285,24 @@ function collectTrendInUtSeries(fromIso, toIso){
   const incomeSeries = months.map(mk => income[mk] || 0);
   const expenseSeries = months.map(mk => expense[mk] || 0);
 
-  let impute = null;
-  if(months.length){
-    const lastMk = months[months.length - 1];
-    impute = imputeIncompleteTrendMonthTail(lastMk);
-    if(impute){
-      const i = months.length - 1;
-      incomeSeries[i] += impute.incomeAdd;
-      expenseSeries[i] += impute.expenseAdd;
-    }
-  }
-
   return {
     months,
     incomeSeries,
     expenseSeries,
     includedCats,
-    excludedCats,
-    impute: impute
+    excludedCats
   };
 }
 
 function buildTrendForecast(fromIso, toIso, horizon){
   horizon = horizon || 12;
   const series = collectTrendInUtSeries(fromIso, toIso);
-  const { months, incomeSeries, expenseSeries, includedCats, excludedCats, impute } = series;
+  const { months, incomeSeries, expenseSeries, includedCats, excludedCats } = series;
   if(months.length < 2){
     return {
       ok: false,
       reason: 'Behöver minst två månader i intervallet.',
-      months, includedCats, excludedCats, impute: null
+      months, includedCats, excludedCats
     };
   }
 
@@ -9447,8 +9338,7 @@ function buildTrendForecast(fromIso, toIso, horizon){
     includedCats,
     excludedCats,
     historyFrom: months[0],
-    historyTo: lastMk,
-    impute: impute
+    historyTo: lastMk
   };
 }
 
@@ -9567,12 +9457,14 @@ function clearTrendCanvas(){
   if(trendPlaceholder) trendPlaceholder.hidden = false;
 }
 
-/** Lookback-spann för Trend: N månader bakåt från bokens sista datum, eller allt. */
+/** Lookback-spann för Trend: N fulländade månader bakåt, eller allt t.o.m. sista fulla. */
 function trendHistoryDateRange(historyVal){
-  const toIso = latestBookDateIso(true) || todayIsoDate();
+  const toIso = endOfLastCompleteTrendMonthIso();
   const earliest = earliestBookDateIso(true);
   if(historyVal === 'allt'){
-    return { from: earliest, to: toIso };
+    let from = earliest;
+    if(from > toIso) from = startOfMonthIso(Number(toIso.slice(0, 4)), Number(toIso.slice(5, 7)));
+    return { from: from, to: toIso };
   }
   const n = Number(historyVal) || 12;
   const y = Number(toIso.slice(0, 4));
@@ -9615,18 +9507,14 @@ function renderTrendPrognosInUt(){
 
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
     + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
-    + ' · ' + data.months.length + ' månader. '
+    + ' · ' + data.months.length + ' fulländade månader'
+    + ' (pågående månad ingår inte). '
     + 'Bas: ibockade kategorier i Registervård → Trend'
     + ' (' + data.includedCats + ' med, ' + data.excludedCats + ' utan). '
     + 'Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
     + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))
     + ' (OLS, lätt IQR-winsorize). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
-    + (data.impute
-      ? ' Sista månaden skattad: '
-        + data.impute.missingDays + '/' + data.impute.daysInMonth
-        + ' av föregående månads In/Ut (proportionellt).'
-      : '')
     + '</p>';
 
   const historyRows = data.months.map((mk, i) => {
