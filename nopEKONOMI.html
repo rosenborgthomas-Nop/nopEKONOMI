@@ -439,6 +439,32 @@ input[type=file]{ display:none; }
   grid-row:2;
   max-width:19.8em;
 }
+.trend-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px 12px;
+}
+.trend-toolbar .report-back{
+  margin-right:4px;
+}
+.trend-toolbar .report-col-label{
+  margin:0;
+}
+.trend-toolbar #trendTypeMenu,
+.trend-toolbar #trendHorizonMenu{
+  width:auto;
+  min-width:10em;
+}
+.trend-section-title{
+  margin:14px 0 6px;
+  font-size:13px;
+  font-weight:700;
+  letter-spacing:0.04em;
+  text-transform:uppercase;
+  color:var(--ink, #1a3050);
+}
+.trend-section-title:first-of-type{ margin-top:0; }
 .report-toolbar input[type=date]{
   width:7.2rem;
   box-sizing:border-box;
@@ -2800,6 +2826,7 @@ td.num.dash .cell-content{
       <select id="startMenu" class="menu-select">
         <option value="newTransaction">Ny transaktion</option>
         <option value="report">Rapport</option>
+        <option value="trend">Trend</option>
         <option value="" disabled class="menu-sep">────────</option>
         <option value="registervard">Registervård</option>
         <option value="settings">Inställningar</option>
@@ -2855,7 +2882,6 @@ td.num.dash .cell-content{
         <option value="kategoriRapport">Kategori-Rapport</option>
         <option value="payeeRapport">Payee-Rapport</option>
         <option value="nettoOverTid">Netto över tid</option>
-        <option value="trendPrognos">Trendprognos (In/Ut)</option>
         <option value="" disabled class="menu-sep menu-sep-title">──── Topplistor ────</option>
         <option value="topPayee">Payee</option>
         <option value="topKategori">Kategori</option>
@@ -2888,6 +2914,45 @@ td.num.dash .cell-content{
       <p class="report-placeholder" id="reportPlaceholder">
         <span class="report-placeholder-title">RAPPORT</span>
         <span class="report-placeholder-hint">Välj rapport och period ovan</span>
+      </p>
+    </main>
+
+    <footer>
+      <p class="app-version"></p>
+    </footer>
+
+  </div>
+</div>
+
+<!-- ===================== VY: TRENDHANTERING ===================== -->
+<div class="view" id="viewTrend" hidden>
+  <div class="wrap wide report-wrap">
+
+    <p class="eyebrow view-headline" id="trendViewHeadline">nopEKONOMI - — - Trendhantering</p>
+
+    <div class="report-toolbar-scroll">
+    <div class="report-toolbar trend-toolbar">
+      <button class="nav-link nav-back report-back" id="trendBackBtn" type="button">← Start</button>
+      <label class="report-col-label" for="trendTypeMenu">Typ</label>
+      <label class="report-col-label" for="trendHorizonMenu">Horisont</label>
+      <select id="trendTypeMenu" class="menu-select" aria-label="Trendtyp">
+        <option value="prognosInUt">Prognos (In/Ut)</option>
+      </select>
+      <select id="trendHorizonMenu" class="menu-select" aria-label="Prognoshorisont">
+        <option value="1">1 månad</option>
+        <option value="3">3 månader</option>
+        <option value="6">6 Månader</option>
+        <option value="12" selected>1 år</option>
+      </select>
+    </div>
+    </div>
+
+    <div class="messages" id="trendMessages"></div>
+
+    <main class="panel report-canvas" id="trendBody">
+      <p class="report-placeholder" id="trendPlaceholder">
+        <span class="report-placeholder-title">TREND</span>
+        <span class="report-placeholder-hint">Välj typ och horisont ovan</span>
       </p>
     </main>
 
@@ -3711,7 +3776,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-19 v02';
+const APP_VERSION = '2026-09-19 v03';
 
 /* =====================================================================
    INNEHÅLL
@@ -5681,6 +5746,7 @@ const views = {
   login: el('viewLogin'),
   start: el('viewStart'),
   report: el('viewReport'),
+  trend: el('viewTrend'),
   careHub: el('viewCareHub'),
   accountEdit: el('viewAccountEdit'),
   categoryEdit: el('viewCategoryEdit'),
@@ -5695,6 +5761,7 @@ const views = {
 const VIEW_HEADLINES = {
   login: { id: 'loginViewHeadline', title: 'Inloggning', withBook: false },
   start: { id: 'startViewHeadline', title: 'Start' },
+  trend: { id: 'trendViewHeadline', title: 'Trendhantering' },
   accountEdit: { id: 'acctEditViewHeadline', title: 'Konto' },
   careHub: { id: 'careHubViewHeadline', title: 'Registervård' },
   categoryEdit: { id: 'catEditViewHeadline', title: 'Kategori' },
@@ -5744,6 +5811,7 @@ async function show(name, opts){
   } else {
     syncReportMobileLayout();
   }
+  if(name === 'trend') renderTrendPage();
   if(name === 'careHub') renderCareHub();
   if(name === 'accountEdit') renderAccountEdit();
   if(name === 'categoryEdit') renderCategoryEdit();
@@ -6310,6 +6378,15 @@ function runStartMenu(){
         break;
       }
       show('report');
+      break;
+    case 'trend':
+      if(bookTransactionCount() < REPORT_MIN_TRANSACTIONS){
+        addBox(startMessages, 'notice',
+          'Trend kräver minst ' + REPORT_MIN_TRANSACTIONS
+          + ' transaktioner i boken (nu: ' + bookTransactionCount() + ').');
+        break;
+      }
+      show('trend');
       break;
   }
 }
@@ -9036,71 +9113,207 @@ function formatTrendSlope(b){
   return sign + formatAmount(v) + '/mån';
 }
 
-function renderTrendPrognosReport(fromIso, toIso){
-  const data = buildTrendForecast(fromIso, toIso, 12);
+function trendHorizonLabel(n){
+  if(n === 1) return '1 månad';
+  if(n === 12) return '1 år';
+  return n + ' månader';
+}
 
-  clearReportCanvas();
-  if(reportPlaceholder) reportPlaceholder.hidden = true;
-  reportBody.classList.add('has-report');
+function trendInUtRowHtml(month, income, expense, net, opts){
+  opts = opts || {};
+  const netCls = net < 0 ? ' neg' : '';
+  const rowCls = opts.sum ? ' class="report-sum"' : '';
+  const amtCls = opts.sum ? ' total-amt' : '';
+  return '<tr' + rowCls + '>'
+    + '<td class="report-label-col">' + escapeHtml(month) + '</td>'
+    + '<td class="num' + amtCls + '">' + escapeHtml(formatAmount(Math.round(income))) + '</td>'
+    + '<td class="num' + amtCls + '">' + escapeHtml(formatAmount(Math.round(expense))) + '</td>'
+    + '<td class="num' + amtCls + netCls + '">' + escapeHtml(formatAmount(Math.round(net))) + '</td>'
+    + '</tr>';
+}
 
-  const wrap = document.createElement('div');
-  wrap.className = 'report-table-wrap';
-
-  const headMonths = data.ok
-    ? data.forecast.map(p => p.month)
-    : monthKeysInRange(fromIso, toIso);
-  let head = reportTableHeadHtml(
-    'TRENDPROGNOS IN/UT' + reportTimeTitleSuffixHtml(),
-    fromIso,
-    toIso,
-    headMonths
-  );
-
-  if(!data.ok){
-    wrap.innerHTML = head
-      + '<p class="report-empty-note">' + escapeHtml(data.reason || 'Kunde inte beräkna trend.') + '</p>';
-    reportBody.appendChild(wrap);
-    syncReportCopyBtn();
-    return;
-  }
-
-  const note = '<p class="report-empty-note" style="margin:0 0 10px">'
-    + 'Bas: ibockade kategorier i Registervård → Trend'
-    + ' (' + data.includedCats + ' med, ' + data.excludedCats + ' utan). '
-    + 'Historik ' + escapeHtml(data.historyFrom) + '–' + escapeHtml(data.historyTo)
-    + '. Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
-    + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))
-    + ' (OLS, lätt IQR-winsorize).</p>';
-
-  let table = '<table class="report-table trend-forecast-table"><thead><tr>'
+function trendInUtTableHtml(rows, sumLabel, sumIn, sumUt, sumNet){
+  let html = '<table class="report-table trend-forecast-table"><thead><tr>'
     + '<th class="report-label-col">Månad</th>'
     + '<th class="num">In</th>'
     + '<th class="num">Ut</th>'
     + '<th class="num">Netto</th>'
     + '</tr></thead><tbody>';
+  for(const r of rows){
+    html += trendInUtRowHtml(r.month, r.income, r.expense, r.net);
+  }
+  if(sumLabel != null){
+    html += trendInUtRowHtml(sumLabel, sumIn, sumUt, sumNet, { sum: true });
+  }
+  html += '</tbody></table>';
+  return html;
+}
 
-  for(const p of data.forecast){
-    const netCls = p.net < 0 ? ' neg' : '';
-    table += '<tr>'
-      + '<td class="report-label-col">' + escapeHtml(p.month) + '</td>'
-      + '<td class="num">' + escapeHtml(formatAmount(Math.round(p.income))) + '</td>'
-      + '<td class="num">' + escapeHtml(formatAmount(Math.round(p.expense))) + '</td>'
-      + '<td class="num' + netCls + '">' + escapeHtml(formatAmount(Math.round(p.net))) + '</td>'
-      + '</tr>';
+const TREND_PREFS_KEY = 'msmoney_trend_prefs__' + STORAGE_SCOPE;
+const TREND_TYPES = new Set(['prognosInUt']);
+const TREND_HORIZONS = new Set([1, 3, 6, 12]);
+
+const trendTypeMenu = el('trendTypeMenu');
+const trendHorizonMenu = el('trendHorizonMenu');
+const trendMessages = el('trendMessages');
+const trendBody = el('trendBody');
+const trendPlaceholder = el('trendPlaceholder');
+const trendBackBtn = el('trendBackBtn');
+
+function readTrendPrefsStore(){
+  try{
+    const all = JSON.parse(localStorage.getItem(TREND_PREFS_KEY));
+    if(all && typeof all === 'object') return all;
+  } catch(e){ /* ignore */ }
+  return {};
+}
+
+function loadTrendPrefs(){
+  if(!bookId) return null;
+  const saved = readTrendPrefsStore()[bookId];
+  if(!saved || typeof saved !== 'object') return null;
+  return saved;
+}
+
+function saveTrendPrefs(){
+  if(!bookId || !trendTypeMenu || !trendHorizonMenu) return;
+  const all = readTrendPrefsStore();
+  const horizon = Number(trendHorizonMenu.value);
+  all[bookId] = {
+    type: trendTypeMenu.value,
+    horizon: TREND_HORIZONS.has(horizon) ? horizon : 12
+  };
+  localStorage.setItem(TREND_PREFS_KEY, JSON.stringify(all));
+}
+
+function restoreTrendPrefs(){
+  const saved = loadTrendPrefs();
+  if(trendTypeMenu){
+    const type = saved && TREND_TYPES.has(saved.type) ? saved.type : 'prognosInUt';
+    if(trendTypeMenu.querySelector('option[value="' + type + '"]')) trendTypeMenu.value = type;
+    else trendTypeMenu.selectedIndex = 0;
+  }
+  if(trendHorizonMenu){
+    const h = saved && TREND_HORIZONS.has(Number(saved.horizon)) ? String(saved.horizon) : '12';
+    if(trendHorizonMenu.querySelector('option[value="' + h + '"]')) trendHorizonMenu.value = h;
+    else trendHorizonMenu.value = '12';
+  }
+}
+
+function clearTrendCanvas(){
+  if(!trendBody) return;
+  const kids = Array.from(trendBody.children);
+  for(const node of kids){
+    if(node === trendPlaceholder) continue;
+    node.remove();
+  }
+  trendBody.classList.remove('has-report', 'report-chart-layout');
+  if(trendPlaceholder) trendPlaceholder.hidden = false;
+}
+
+function renderTrendPrognosInUt(){
+  const fromIso = earliestBookDateIso(true);
+  const toIso = latestBookDateIso(true) || todayIsoDate();
+  const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
+  const data = buildTrendForecast(fromIso, toIso, horizon);
+
+  clearTrendCanvas();
+  if(trendPlaceholder) trendPlaceholder.hidden = true;
+  if(trendBody) trendBody.classList.add('has-report');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'report-table-wrap';
+
+  const title = 'PROGNOS IN/UT';
+  let head = '<div class="report-table-head">'
+    + '<p class="report-table-title">' + escapeHtml(title) + '</p>'
+    + '<p class="report-table-updated">' + escapeHtml(reportUpdatedLineHtml()) + '</p>'
+    + '</div>';
+
+  if(!data.ok){
+    wrap.innerHTML = head
+      + '<p class="report-empty-note">' + escapeHtml(data.reason || 'Kunde inte beräkna trend.') + '</p>';
+    trendBody.appendChild(wrap);
+    return;
   }
 
-  const sumNetCls = data.sumNet < 0 ? ' neg' : '';
-  table += '<tr class="report-sum">'
-    + '<td class="report-label-col">Summa 12 mån</td>'
-    + '<td class="num total-amt">' + escapeHtml(formatAmount(Math.round(data.sumIn))) + '</td>'
-    + '<td class="num total-amt">' + escapeHtml(formatAmount(Math.round(data.sumUt))) + '</td>'
-    + '<td class="num total-amt' + sumNetCls + '">'
-    + escapeHtml(formatAmount(Math.round(data.sumNet))) + '</td>'
-    + '</tr></tbody></table>';
+  const note = '<p class="report-empty-note" style="margin:0 0 10px">'
+    + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
+    + ' · ' + data.months.length + ' månader. '
+    + 'Bas: ibockade kategorier i Registervård → Trend'
+    + ' (' + data.includedCats + ' med, ' + data.excludedCats + ' utan). '
+    + 'Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
+    + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))
+    + ' (OLS, lätt IQR-winsorize). '
+    + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
+    + '</p>';
 
-  wrap.innerHTML = head + note + '<div class="report-table-scroll">' + table + '</div>';
-  reportBody.appendChild(wrap);
-  syncReportCopyBtn();
+  const historyRows = data.months.map((mk, i) => {
+    const income = data.incomeSeries[i];
+    const expense = data.expenseSeries[i];
+    return { month: mk, income: income, expense: expense, net: income - expense };
+  });
+
+  const historyBlock = '<p class="trend-section-title">Historik</p>'
+    + '<div class="report-table-scroll">'
+    + trendInUtTableHtml(historyRows)
+    + '</div>';
+
+  const forecastBlock = '<p class="trend-section-title">Prognos ('
+    + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
+    + '<div class="report-table-scroll">'
+    + trendInUtTableHtml(
+      data.forecast.map(p => ({
+        month: p.month,
+        income: p.income,
+        expense: p.expense,
+        net: p.net
+      })),
+      'Summa ' + trendHorizonLabel(horizon),
+      data.sumIn,
+      data.sumUt,
+      data.sumNet
+    )
+    + '</div>';
+
+  wrap.innerHTML = head + note + historyBlock + forecastBlock;
+  trendBody.appendChild(wrap);
+}
+
+function renderTrendPage(){
+  if(bookTransactionCount() < REPORT_MIN_TRANSACTIONS){
+    show('start');
+    return;
+  }
+  if(trendMessages) clear(trendMessages);
+  restoreTrendPrefs();
+  const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
+  if(type === 'prognosInUt'){
+    renderTrendPrognosInUt();
+  } else {
+    clearTrendCanvas();
+    if(trendPlaceholder){
+      trendPlaceholder.hidden = false;
+      trendPlaceholder.innerHTML =
+        '<span class="report-placeholder-title">TREND</span>'
+        + '<span class="report-placeholder-hint">Okänd trendtyp.</span>';
+    }
+  }
+  saveTrendPrefs();
+}
+
+if(trendBackBtn) trendBackBtn.addEventListener('click', () => show('start'));
+if(trendTypeMenu){
+  trendTypeMenu.addEventListener('change', () => {
+    saveTrendPrefs();
+    renderTrendPage();
+  });
+}
+if(trendHorizonMenu){
+  trendHorizonMenu.addEventListener('change', () => {
+    saveTrendPrefs();
+    renderTrendPage();
+  });
 }
 
 function collectPayeeReport(fromIso, toIso){
@@ -10242,8 +10455,7 @@ const REPORT_KINDS = new Set([
   'topKategori',
   'topUnderkategori',
   'topplistor',
-  'nettoOverTid',
-  'trendPrognos'
+  'nettoOverTid'
 ]);
 
 function readReportPrefsStore(){
@@ -10363,10 +10575,6 @@ function runReport(){
   }
   if(kind === 'nettoOverTid'){
     renderNetOverTimeReport(from, to);
-    return;
-  }
-  if(kind === 'trendPrognos'){
-    renderTrendPrognosReport(from, to);
     return;
   }
 
@@ -16726,6 +16934,9 @@ function triggerEscapeBack(){
       closeSubCategoryEdit();
       return true;
     case 'report':
+      show('start');
+      return true;
+    case 'trend':
       show('start');
       return true;
     case 'start':
