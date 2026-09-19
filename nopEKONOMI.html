@@ -452,6 +452,7 @@ input[type=file]{ display:none; }
   margin:0;
 }
 .trend-toolbar #trendTypeMenu,
+.trend-toolbar #trendHistoryMenu,
 .trend-toolbar #trendHorizonMenu{
   width:auto;
   min-width:10em;
@@ -2934,9 +2935,17 @@ td.num.dash .cell-content{
     <div class="report-toolbar trend-toolbar">
       <button class="nav-link nav-back report-back" id="trendBackBtn" type="button">← Start</button>
       <label class="report-col-label" for="trendTypeMenu">Typ</label>
+      <label class="report-col-label" for="trendHistoryMenu">Historik</label>
       <label class="report-col-label" for="trendHorizonMenu">Horisont</label>
       <select id="trendTypeMenu" class="menu-select" aria-label="Trendtyp">
         <option value="prognosInUt">Prognos (In/Ut)</option>
+      </select>
+      <select id="trendHistoryMenu" class="menu-select" aria-label="Historik bakåt">
+        <option value="3">Senaste 3 månader</option>
+        <option value="6">Senaste 6 månader</option>
+        <option value="12" selected>Senaste 12 månader</option>
+        <option value="24">Senaste 24 månader</option>
+        <option value="allt">Allt</option>
       </select>
       <select id="trendHorizonMenu" class="menu-select" aria-label="Prognoshorisont">
         <option value="1">1 månad</option>
@@ -3776,7 +3785,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-19 v03';
+const APP_VERSION = '2026-09-19 v04';
 
 /* =====================================================================
    INNEHÅLL
@@ -9152,8 +9161,10 @@ function trendInUtTableHtml(rows, sumLabel, sumIn, sumUt, sumNet){
 const TREND_PREFS_KEY = 'msmoney_trend_prefs__' + STORAGE_SCOPE;
 const TREND_TYPES = new Set(['prognosInUt']);
 const TREND_HORIZONS = new Set([1, 3, 6, 12]);
+const TREND_HISTORY = new Set(['3', '6', '12', '24', 'allt']);
 
 const trendTypeMenu = el('trendTypeMenu');
+const trendHistoryMenu = el('trendHistoryMenu');
 const trendHorizonMenu = el('trendHorizonMenu');
 const trendMessages = el('trendMessages');
 const trendBody = el('trendBody');
@@ -9179,8 +9190,12 @@ function saveTrendPrefs(){
   if(!bookId || !trendTypeMenu || !trendHorizonMenu) return;
   const all = readTrendPrefsStore();
   const horizon = Number(trendHorizonMenu.value);
+  const history = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
+    ? trendHistoryMenu.value
+    : '12';
   all[bookId] = {
     type: trendTypeMenu.value,
+    history: history,
     horizon: TREND_HORIZONS.has(horizon) ? horizon : 12
   };
   localStorage.setItem(TREND_PREFS_KEY, JSON.stringify(all));
@@ -9192,6 +9207,11 @@ function restoreTrendPrefs(){
     const type = saved && TREND_TYPES.has(saved.type) ? saved.type : 'prognosInUt';
     if(trendTypeMenu.querySelector('option[value="' + type + '"]')) trendTypeMenu.value = type;
     else trendTypeMenu.selectedIndex = 0;
+  }
+  if(trendHistoryMenu){
+    const hist = saved && TREND_HISTORY.has(String(saved.history)) ? String(saved.history) : '12';
+    if(trendHistoryMenu.querySelector('option[value="' + hist + '"]')) trendHistoryMenu.value = hist;
+    else trendHistoryMenu.value = '12';
   }
   if(trendHorizonMenu){
     const h = saved && TREND_HORIZONS.has(Number(saved.horizon)) ? String(saved.horizon) : '12';
@@ -9211,9 +9231,29 @@ function clearTrendCanvas(){
   if(trendPlaceholder) trendPlaceholder.hidden = false;
 }
 
-function renderTrendPrognosInUt(){
-  const fromIso = earliestBookDateIso(true);
+/** Lookback-spann för Trend: N månader bakåt från bokens sista datum, eller allt. */
+function trendHistoryDateRange(historyVal){
   const toIso = latestBookDateIso(true) || todayIsoDate();
+  const earliest = earliestBookDateIso(true);
+  if(historyVal === 'allt'){
+    return { from: earliest, to: toIso };
+  }
+  const n = Number(historyVal) || 12;
+  const y = Number(toIso.slice(0, 4));
+  const m = Number(toIso.slice(5, 7));
+  const p = shiftCalendarMonth(y, m, -(n - 1));
+  let from = startOfMonthIso(p.y, p.m);
+  if(from < earliest) from = earliest;
+  return { from: from, to: toIso };
+}
+
+function renderTrendPrognosInUt(){
+  const historyVal = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
+    ? trendHistoryMenu.value
+    : '12';
+  const range = trendHistoryDateRange(historyVal);
+  const fromIso = range.from;
+  const toIso = range.to;
   const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
   const data = buildTrendForecast(fromIso, toIso, horizon);
 
@@ -9305,6 +9345,12 @@ function renderTrendPage(){
 if(trendBackBtn) trendBackBtn.addEventListener('click', () => show('start'));
 if(trendTypeMenu){
   trendTypeMenu.addEventListener('change', () => {
+    saveTrendPrefs();
+    renderTrendPage();
+  });
+}
+if(trendHistoryMenu){
+  trendHistoryMenu.addEventListener('change', () => {
     saveTrendPrefs();
     renderTrendPage();
   });
