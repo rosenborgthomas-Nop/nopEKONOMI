@@ -698,22 +698,6 @@ input[type=file]{ display:none; }
   font-size:14.5px;
   font-style:italic;
 }
-.ob-account-row{
-  display:flex;
-  align-items:flex-start;
-  gap:10px;
-  padding:8px 0;
-  border-bottom:1px solid var(--paper-line);
-  cursor:pointer;
-  font-size:14px;
-  color:var(--text-on-paper);
-}
-.ob-account-row input{
-  margin-top:3px;
-}
-#obAccountsList{
-  margin:0 0 14px;
-}
 .report-table-wrap{
   display:flex;
   flex-direction:column;
@@ -2971,7 +2955,6 @@ td.num.dash .cell-content{
         <option value="kategori">Kategori</option>
         <option value="underkategori">Underkategori</option>
         <option value="" disabled class="menu-sep" id="careHubBookSep">────────</option>
-        <option value="bankkoppling">Bankkoppling (PSD2)</option>
         <option value="bok">Bok (backup)</option>
       </select>
     </div>
@@ -3039,92 +3022,6 @@ td.num.dash .cell-content{
         </main>
       </div>
     </div>
-
-    <footer>
-      <p class="app-version"></p>
-    </footer>
-
-  </div>
-</div>
-
-<!-- ===================== VY: BANKKOPPLING (PSD2) ===================== -->
-<div class="view" id="viewOpenBanking" hidden>
-  <div class="wrap medium">
-
-    <button class="nav-link nav-back" id="obBackBtn" type="button">← Registervård</button>
-    <p class="eyebrow view-headline" id="obViewHeadline">nopEKONOMI - — - Bankkoppling</p>
-
-    <header>
-      <h1>Bankkoppling (PSD2)</h1>
-      <p class="lede">
-        Hämtar konton och transaktioner via öppen bankdata (AIS) genom en mellanhand.
-        Data sparas bara i din lokala bok — ingen molnbok. Banktoken ligger aldrig i webbläsaren.
-      </p>
-    </header>
-
-    <div class="messages" id="obMessages"></div>
-
-    <main class="panel">
-      <section class="section">
-        <h3>Worker-URL</h3>
-        <p class="sub">Bas-URL till din Cloudflare Worker (utan avslutande snedstreck).</p>
-        <div class="field">
-          <label for="obApiBase">API-bas</label>
-          <input type="url" id="obApiBase" placeholder="https://nop-ekonomi-ob.nop383ekonomi.workers.dev" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="quiet-row">
-          <button class="btn-quiet" id="obSaveApiBtn" type="button">Spara URL</button>
-          <button class="btn-quiet" id="obHealthBtn" type="button">Testa anslutning</button>
-        </div>
-      </section>
-
-      <section class="section">
-        <h3>Koppla bank</h3>
-        <div class="field">
-          <label for="obBank">Bank / provider-hint (valfritt)</label>
-          <input type="text" id="obBank" placeholder="t.ex. swedbank-ob" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="field">
-          <label for="obSsn">Personnummer (valfritt, för BankID-förifyllning)</label>
-          <input type="text" id="obSsn" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="ÅÅÅÅMMDDXXXX">
-        </div>
-        <div class="confirm-buttons new-tx-actions">
-          <button class="btn" id="obDemoBtn" type="button">Demo (utan bank)</button>
-          <button class="btn-ok" id="obConnectBtn" type="button">Koppla med BankID</button>
-        </div>
-        <p class="hint" id="obSessionHint"></p>
-      </section>
-
-      <section class="section" id="obAccountsSection" hidden>
-        <h3>Konton</h3>
-        <p class="sub">Kryssa vilka konton som ska synkas in i boken.</p>
-        <div id="obAccountsList"></div>
-        <div class="field">
-          <label for="obLocalAccount">Spara till konto i boken</label>
-          <select id="obLocalAccount" class="menu-select"></select>
-        </div>
-        <div class="field">
-          <label for="obFrom">Från</label>
-          <input type="date" id="obFrom">
-        </div>
-        <div class="field">
-          <label for="obTo">Till</label>
-          <input type="date" id="obTo">
-        </div>
-        <div class="confirm-buttons new-tx-actions">
-          <button class="btn" id="obFetchBtn" type="button">Hämta &amp; förhandsgranska</button>
-          <button class="btn-ok" id="obImportBtn" type="button" disabled>Importera till boken</button>
-        </div>
-        <p class="hint" id="obPreviewHint"></p>
-      </section>
-
-      <section class="section">
-        <h3>Session</h3>
-        <div class="quiet-row">
-          <button class="btn-quiet danger" id="obDisconnectBtn" type="button">Koppla från</button>
-        </div>
-      </section>
-    </main>
 
     <footer>
       <p class="app-version"></p>
@@ -3796,7 +3693,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-18 v09';
+const APP_VERSION = '2026-09-19 v01';
 
 /* =====================================================================
    INNEHÅLL
@@ -4880,7 +4777,7 @@ function wireViewFormKeys(viewEl, okBtn, cancelBtn, isBlocked){
 
 function el(id){ return document.getElementById(id); }
 
-function clear(node){ if(node) node.innerHTML = ''; }
+function clear(node){ node.innerHTML = ''; }
 
 function addBox(node, className, text){
   const div = document.createElement('div');
@@ -5068,7 +4965,7 @@ function buildRows(transactions){
     const total = typeof tx.total === 'number' ? tx.total : 0;
     const hasSplits = tx.splits.length > 0;
     const splitSum = tx.splits.reduce((s, sp) => s + (typeof sp.total === 'number' ? sp.total : 0), 0);
-    const row = normalizeSplitRow({
+    return normalizeSplitRow({
       date: tx.dateText || '2001-12-24',
       dateOk: dateOk,
       payee: tx.payee,
@@ -5081,8 +4978,6 @@ function buildRows(transactions){
       mismatch: hasSplits && Math.abs(splitSum - total) > 0.005,
       splits: tx.splits
     });
-    if(tx.externalId) row.externalId = String(tx.externalId);
-    return row;
   });
 }
 
@@ -5091,13 +4986,9 @@ function buildRows(transactions){
    Ingenting tas någonsin bort. En transaktion känns igen på sitt
    innehåll, eftersom QIF inte innehåller några id:n — och den räknas,
    så att två äkta identiska köp samma dag båda får plats.
-   Open Banking: externalId (bankens id) har företräde i nyckeln.
    ------------------------------------------------------------------- */
 
 function rowKey(r){
-  if(r && r.externalId){
-    return 'ext\u0003' + String(r.externalId);
-  }
   const splitSig = (r.splits || []).map(s =>
     (s.category || '') + '\u0001' + (s.subCategory || '') + '\u0001' +
     (s.memo || '') + '\u0001' + Number(s.total || 0).toFixed(2)
@@ -5119,104 +5010,31 @@ function finalizeAccount(rows){
 
 function mergeAccount(existing, incomingRows){
   if(!existing || !Array.isArray(existing.rows)){
-    return { data: finalizeAccount(incomingRows.slice()), added: incomingRows.length, skipped: 0, isNew: true, updated: 0, removed: 0 };
+    return { data: finalizeAccount(incomingRows.slice()), added: incomingRows.length, skipped: 0, isNew: true };
   }
 
   const counts = new Map();
-  const byExt = new Map();
-  for(let i = 0; i < existing.rows.length; i++){
-    const r = existing.rows[i];
+  for(const r of existing.rows){
     const k = rowKey(r);
     counts.set(k, (counts.get(k) || 0) + 1);
-    if(r && r.externalId && !byExt.has(String(r.externalId))){
-      byExt.set(String(r.externalId), i);
-    }
   }
 
   const merged = existing.rows.slice();
-  let added = 0, skipped = 0, updated = 0;
+  let added = 0, skipped = 0;
 
   for(const r of incomingRows){
     const k = rowKey(r);
     const left = counts.get(k) || 0;
     if(left > 0){
       counts.set(k, left - 1);
-      // Reparera tidigare OB-import där belopp blev 0 p.g.a. fel Tink-tolkning.
-      if(r.externalId){
-        const idx = byExt.get(String(r.externalId));
-        if(idx != null){
-          const old = merged[idx];
-          const oldTot = Number(old && old.total);
-          const newTot = Number(r.total);
-          if(Number.isFinite(newTot) && newTot !== 0 && (!Number.isFinite(oldTot) || oldTot === 0)){
-            merged[idx] = Object.assign({}, old, {
-              total: newTot,
-              payee: (old.payee && String(old.payee).trim()) ? old.payee : r.payee,
-              memo: (old.memo && String(old.memo).trim()) ? old.memo : r.memo
-            });
-            updated++;
-            skipped--; // räknas som uppdatering, inte hopp
-            continue;
-          }
-        }
-      }
       skipped++;
       continue;
     }
     merged.push(r);
-    if(r.externalId) byExt.set(String(r.externalId), merged.length - 1);
     added++;
   }
 
-  // Städa spök-rader: OB-nollbelopp samma dag+payee när det finns en rad med belopp.
-  let removed = 0;
-  const keep = [];
-  const hasNonZero = new Set();
-  for(const r of merged){
-    const tot = Number(r && r.total);
-    if(Number.isFinite(tot) && tot !== 0){
-      hasNonZero.add(String(r.date || '') + '\u0001' + String(r.payee || '').trim().toLowerCase());
-    }
-  }
-  for(const r of merged){
-    const tot = Number(r && r.total);
-    const isGhostZero = (!Number.isFinite(tot) || tot === 0)
-      && r && r.externalId
-      && hasNonZero.has(String(r.date || '') + '\u0001' + String(r.payee || '').trim().toLowerCase());
-    if(isGhostZero){
-      removed++;
-      continue;
-    }
-    keep.push(r);
-  }
-
-  return { data: finalizeAccount(keep), added: added, skipped: skipped, updated: updated, removed: removed, isNew: false };
-}
-
-/** PSD2/AIS-transaktioner (normaliserade från Worker) → samma format som QIF/CSV-buildRows. */
-function openBankingToRows(txList){
-  const transactions = (txList || []).map(t => {
-    const dateText = String(t.bookedDate || t.valueDate || '').slice(0, 10);
-    let total = null;
-    if(typeof t.amount === 'number') total = t.amount;
-    else if(t.amount != null && t.amount !== '') total = Number(t.amount);
-    return {
-      dateText: /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dateText : '',
-      payee: String(t.payee || '').trim(),
-      total: Number.isFinite(total) ? total : null,
-      category: '',
-      subCategory: '',
-      memo: String(t.memo || '').trim(),
-      splits: [],
-      externalId: t.id ? String(t.id) : ''
-    };
-  }).filter(tx => tx.dateText && tx.total != null && tx.total !== 0);
-  return buildRows(transactions);
-}
-
-function openBankingPreviewMerge(accountName, incomingRows){
-  const existing = (book && book.accounts && book.accounts[accountName]) || null;
-  return mergeAccount(existing, incomingRows);
+  return { data: finalizeAccount(merged), added: added, skipped: skipped, isNew: false };
 }
 
 function describeResult(name, r){
@@ -5798,8 +5616,7 @@ const views = {
   newTransaction: el('viewNewTransaction'),
   settings: el('viewSettings'),
   import: el('viewImport'),
-  backup: el('viewBackup'),
-  openBanking: el('viewOpenBanking')
+  backup: el('viewBackup')
 };
 
 const VIEW_HEADLINES = {
@@ -5813,8 +5630,7 @@ const VIEW_HEADLINES = {
   newTransaction: { id: 'newTxViewHeadline', title: 'Transaktion' },
   settings: { id: 'settingsViewHeadline', title: 'Inställningar' },
   import: { id: 'importViewHeadline', title: 'Import' },
-  backup: { id: 'backupViewHeadline', title: 'Säkerhetskopia' },
-  openBanking: { id: 'obViewHeadline', title: 'Bankkoppling' }
+  backup: { id: 'backupViewHeadline', title: 'Säkerhetskopia' }
 };
 
 function viewHeadlineText(pageTitle, withBook){
@@ -5868,7 +5684,6 @@ async function show(name, opts){
   if(name === 'settings') renderSettings();
   if(name === 'import') renderImport();
   if(name === 'backup') renderBackupPage();
-  if(name === 'openBanking') renderOpenBanking();
   if(name !== 'report' && name !== 'ledger') refreshViewHeadline(name);
   if(!opts.fromHash) syncNavHashToView(name);
 }
@@ -5908,11 +5723,7 @@ async function openBook(id){
       }
     }
     rebuildBookLookup();
-    if(consumeOpenBankingPendingNav() && obGetSessionId()){
-      show('openBanking');
-    } else {
-      show('start');
-    }
+    show('start');
   } catch(e){
     bookId = '';
     book = { order: [], accounts: {} };
@@ -10323,7 +10134,6 @@ const CARE_HUB_SECTIONS = {
   payee: { title: 'Payee', kind: 'list' },
   kategori: { title: 'Kategori', kind: 'list' },
   underkategori: { title: 'Underkategori', kind: 'list' },
-  bankkoppling: { title: 'Bankkoppling (PSD2)', kind: 'openBanking' },
   bok: { title: 'Bok (backup)', kind: 'list' }
 };
 
@@ -10345,13 +10155,6 @@ function showCareHubSection(key){
     if(careHubMenu.value !== key) careHubMenu.value = key;
     if(careHubListArea) careHubListArea.hidden = true;
     openBackupPage();
-    return;
-  }
-
-  if(key === 'bankkoppling' || cfg.kind === 'openBanking'){
-    if(careHubMenu.value !== key) careHubMenu.value = key;
-    if(careHubListArea) careHubListArea.hidden = true;
-    show('openBanking');
     return;
   }
 
@@ -16504,9 +16307,6 @@ function triggerEscapeBack(){
       }
       closeBackupPage();
       return true;
-    case 'openBanking':
-      show('careHub');
-      return true;
     case 'settings':
       if(renameFieldWrap && !renameFieldWrap.hidden){
         hideRenameField();
@@ -16655,553 +16455,7 @@ document.addEventListener('keydown', e => {
   if(triggerEscapeBack()) e.preventDefault();
 });
 
-/* --- Open Banking (PSD2 / AIS via Worker) ----------------------------- */
-
-const OB_API_BASE_KEY = 'nopEKONOMI.openBanking.apiBase';
-const OB_SESSION_KEY = 'nopEKONOMI.openBanking.sessionId';
-const OB_META_KEY = 'nopEKONOMI.openBanking.meta';
-const OB_TOKEN_KEY = 'nopEKONOMI.openBanking.accessToken';
-
-let obPendingRows = null;
-let obPendingAccountName = '';
-let obFetchedAccounts = [];
-
-function obApiBase(){
-  const input = el('obApiBase');
-  const fromInput = input && input.value ? input.value.trim().replace(/\/+$/, '') : '';
-  if(fromInput) return fromInput;
-  try{ return (localStorage.getItem(OB_API_BASE_KEY) || '').trim().replace(/\/+$/, ''); } catch(e){ return ''; }
-}
-
-function obGetAccessToken(){
-  try{ return sessionStorage.getItem(OB_TOKEN_KEY) || ''; } catch(e){ return ''; }
-}
-
-function obSetAccessToken(token){
-  try{
-    if(token) sessionStorage.setItem(OB_TOKEN_KEY, token);
-    else sessionStorage.removeItem(OB_TOKEN_KEY);
-  } catch(e){ /* ignore */ }
-}
-
-function obIsFileProtocol(){
-  return location.protocol === 'file:';
-}
-
-function obValidateApiBase(base){
-  if(!base) return 'Klistra in Worker-URL först (grå text i fältet är bara exempel).';
-  if(!/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i.test(base)){
-    return 'Ogiltig Worker-URL. Exempel: https://nop-ekonomi-ob.nop383ekonomi.workers.dev';
-  }
-  if(obIsFileProtocol()){
-    return 'Bankkoppling fungerar inte från lokal fil (file://). Öppna appen via GitHub Pages och testa där.';
-  }
-  return '';
-}
-
-function obSaveApiBase(){
-  const base = obApiBase();
-  try{ localStorage.setItem(OB_API_BASE_KEY, base); } catch(e){ /* ignore */ }
-  return base;
-}
-
-function obGetSessionId(){
-  try{ return localStorage.getItem(OB_SESSION_KEY) || ''; } catch(e){ return ''; }
-}
-
-function obSetSessionId(id){
-  try{
-    if(id) localStorage.setItem(OB_SESSION_KEY, id);
-    else {
-      localStorage.removeItem(OB_SESSION_KEY);
-      obSetAccessToken('');
-    }
-  } catch(e){ /* ignore */ }
-}
-
-function obReadMeta(){
-  try{ return JSON.parse(localStorage.getItem(OB_META_KEY) || '{}') || {}; } catch(e){ return {}; }
-}
-
-function obWriteMeta(meta){
-  try{ localStorage.setItem(OB_META_KEY, JSON.stringify(meta || {})); } catch(e){ /* ignore */ }
-}
-
-function obMsg(kind, text){
-  const box = el('obMessages');
-  if(!box) return;
-  clear(box);
-  if(text) addBox(box, kind || 'notice', text);
-}
-
-async function consumeOpenBankingReturnQuery(){
-  const u = new URL(location.href);
-  const session = u.searchParams.get('obSession');
-  const token = u.searchParams.get('obToken');
-  const err = u.searchParams.get('obError');
-  const errDesc = u.searchParams.get('obErrorDesc');
-  if(!session && !err) return;
-  if(session){
-    obSetSessionId(session);
-    if(token) obSetAccessToken(token);
-    const meta = obReadMeta();
-    meta.lastConnectAt = new Date().toISOString();
-    meta.sessionMode = 'tink';
-    obWriteMeta(meta);
-    try{ sessionStorage.setItem('nopEKONOMI.obPendingNav', '1'); } catch(e){ /* ignore */ }
-    if(token && obApiBase()){
-      try{
-        await obFetch('/ob/bootstrap', {
-          method: 'POST',
-          body: JSON.stringify({ sessionId: session, accessToken: token })
-        });
-      } catch(bootErr){ /* header-token räcker för efterföljande anrop */ }
-    }
-  }
-  u.searchParams.delete('obSession');
-  u.searchParams.delete('obToken');
-  u.searchParams.delete('obTicket');
-  u.searchParams.delete('obBoot');
-  u.searchParams.delete('obError');
-  u.searchParams.delete('obErrorDesc');
-  history.replaceState({}, '', u.pathname + u.search + u.hash);
-  if(err){
-    const friendly = err === 'CONSENT_EXPIRED' || /consent|expired|unauthorized/i.test(err)
-      ? 'Tink-sessionen har gått ut. Koppla bank igen.'
-      : ('Bankkoppling misslyckades: ' + err + (errDesc ? ' — ' + errDesc : ''));
-    try{ sessionStorage.setItem('nopEKONOMI.obFlash', friendly); } catch(e){ /* ignore */ }
-  } else if(session){
-    try{ sessionStorage.setItem('nopEKONOMI.obFlash', 'Bank kopplad via Tink. Välj konton att synka.'); } catch(e){ /* ignore */ }
-  }
-}
-
-async function obEnsureBootstrapped(){
-  const sid = obGetSessionId();
-  const token = obGetAccessToken();
-  if(!sid || !token || !obApiBase()) return;
-  try{
-    await obFetch('/ob/bootstrap', {
-      method: 'POST',
-      body: JSON.stringify({ sessionId: sid, accessToken: token })
-    });
-  } catch(e){ /* header-token räcker */ }
-}
-
-function consumeOpenBankingPendingNav(){
-  try{
-    if(sessionStorage.getItem('nopEKONOMI.obPendingNav') !== '1') return false;
-    sessionStorage.removeItem('nopEKONOMI.obPendingNav');
-    return true;
-  } catch(e){
-    return false;
-  }
-}
-
-function consumeOpenBankingPendingNav(){
-  try{
-    if(sessionStorage.getItem('nopEKONOMI.obPendingNav') !== '1') return false;
-    sessionStorage.removeItem('nopEKONOMI.obPendingNav');
-    return true;
-  } catch(e){
-    return false;
-  }
-}
-
-async function obFetch(path, opts){
-  opts = opts || {};
-  const base = obApiBase();
-  const invalid = obValidateApiBase(base);
-  if(invalid) throw new Error(invalid);
-  const url = base + path;
-  const headers = Object.assign(
-    { 'Accept': 'application/json' },
-    opts.body ? { 'Content-Type': 'application/json' } : {},
-    opts.headers || {}
-  );
-  const tok = obGetAccessToken();
-  if(tok) headers['X-OB-Access-Token'] = tok;
-  let res;
-  try{
-    res = await fetch(url, Object.assign({}, opts, { headers: headers }));
-  } catch(netErr){
-    throw new Error('Ingen kontakt med Worker (nätverk/CORS). Kontrollera URL och att du kör via https://…github.io — inte lokal fil.');
-  }
-  let data = null;
-  try{ data = await res.json(); } catch(e){ data = null; }
-  if(!res.ok){
-    const code = data && data.error ? String(data.error) : '';
-    if(code === 'SESSION_PENDING' || res.status === 503){
-      const err = new Error((data && data.message) || 'Bankkoppling sparas fortfarande — försök igen.');
-      err.code = 'SESSION_PENDING';
-      throw err;
-    }
-    if(code === 'CONSENT_EXPIRED' || res.status === 401){
-      const err = new Error((data && data.message) || 'Tink-sessionen har gått ut. Koppla bank igen.');
-      err.code = 'CONSENT_EXPIRED';
-      throw err;
-    }
-    throw new Error((data && (data.message || data.error)) || ('HTTP ' + res.status));
-  }
-  return data;
-}
-
-function renderOpenBanking(){
-  const apiInput = el('obApiBase');
-  if(apiInput){
-    try{ apiInput.value = localStorage.getItem(OB_API_BASE_KEY) || apiInput.value || ''; } catch(e){ /* ignore */ }
-  }
-  const sid = obGetSessionId();
-  const hint = el('obSessionHint');
-  if(hint){
-    const meta = obReadMeta();
-    const mode = meta.sessionMode === 'demo' ? ' · demoläge (påhittad data)'
-      : meta.sessionMode === 'tink' ? ' · bankkoppling (Tink)'
-      : '';
-    hint.textContent = sid
-      ? ('Session aktiv' + mode
-        + (meta.lastConnectAt ? ' · kopplad ' + meta.lastConnectAt.slice(0, 16).replace('T', ' ') : '')
-        + (meta.lastSyncAt ? ' · synkad ' + meta.lastSyncAt.slice(0, 16).replace('T', ' ') : ''))
-      : 'Ingen aktiv session.';
-  }
-  fillObLocalAccountSelect();
-  const today = todayIsoDate();
-  const from = el('obFrom');
-  const to = el('obTo');
-  if(to && !to.value) to.value = today;
-  if(from && !from.value){
-    const d = new Date();
-    d.setMonth(d.getMonth() - 1);
-    from.value = isoFromYmd(d.getFullYear(), d.getMonth() + 1, d.getDate());
-  }
-  const sec = el('obAccountsSection');
-  if(sec) sec.hidden = !sid;
-  if(sid && !obFetchedAccounts.length){
-    obLoadAccountsWithRetry().catch(err => {
-      if(err && err.code === 'CONSENT_EXPIRED'){
-        obSetSessionId('');
-        obMsg('notice', err.message || 'Tink-sessionen har gått ut. Koppla bank igen.');
-        if(sec) sec.hidden = true;
-      } else {
-        obMsg('notice', err && err.message ? err.message : 'Kunde inte hämta konton.');
-      }
-    });
-  }
-  try{
-    const flash = sessionStorage.getItem('nopEKONOMI.obFlash');
-    if(flash){
-      sessionStorage.removeItem('nopEKONOMI.obFlash');
-      obMsg('report', flash);
-    } else if(obIsFileProtocol()){
-      obMsg('notice', 'Du kör en lokal fil. Bankkoppling kräver GitHub Pages (https://rosenborgthomas-nop.github.io/nopEKONOMI/nopEKONOMI.html).');
-    } else if(!obApiBase()){
-      obMsg('notice', 'Klistra in Worker-URL: https://nop-ekonomi-ob.nop383ekonomi.workers.dev');
-    }
-  } catch(e){ /* ignore */ }
-  refreshViewHeadline('openBanking', 'Bankkoppling');
-}
-
-function fillObLocalAccountSelect(){
-  const sel = el('obLocalAccount');
-  if(!sel) return;
-  const prev = sel.value;
-  sel.innerHTML = '';
-  const optNew = document.createElement('option');
-  optNew.value = '';
-  optNew.textContent = '— Skapa från bankkontonamn —';
-  sel.appendChild(optNew);
-  if(book && Array.isArray(book.order)){
-    for(const name of book.order){
-      const o = document.createElement('option');
-      o.value = name;
-      o.textContent = name;
-      sel.appendChild(o);
-    }
-  }
-  if(prev) sel.value = prev;
-}
-
-async function obLoadAccounts(){
-  const sid = obGetSessionId();
-  if(!sid) return;
-  const data = await obFetch('/ob/accounts?sessionId=' + encodeURIComponent(sid));
-  obFetchedAccounts = (data && data.accounts) || [];
-  const list = el('obAccountsList');
-  const sec = el('obAccountsSection');
-  if(sec) sec.hidden = false;
-  if(!list) return;
-  list.innerHTML = '';
-  if(!obFetchedAccounts.length){
-    list.innerHTML = '<p class="sub">Inga konton returnerades.</p>';
-    return;
-  }
-  for(const acc of obFetchedAccounts){
-    const id = 'obAcc_' + String(acc.id).replace(/[^\w-]/g, '_');
-    const row = document.createElement('label');
-    row.className = 'ob-account-row';
-    row.htmlFor = id;
-    const bal = acc.balance != null ? (' · ' + formatReportInt(Math.round(acc.balance)) + ' ' + (acc.currency || 'SEK')) : '';
-    row.innerHTML = '<input type="checkbox" id="' + id + '" data-ob-account-id="' + escapeAttr(acc.id) + '" data-ob-account-name="' + escapeAttr(acc.name || acc.id) + '" checked> '
-      + '<span>' + escapeHtml(acc.name || acc.id) + escapeHtml(bal) + '</span>';
-    list.appendChild(row);
-  }
-}
-
-async function obLoadAccountsWithRetry(){
-  await obEnsureBootstrapped();
-  let lastErr = null;
-  for(let attempt = 0; attempt < 5; attempt++){
-    try{
-      if(attempt > 0){
-        obMsg('report', 'Väntar in bankkoppling… (' + (attempt + 1) + '/5)');
-        await new Promise(r => setTimeout(r, 600 * attempt));
-        await obEnsureBootstrapped();
-      }
-      await obLoadAccounts();
-      return;
-    } catch(err){
-      lastErr = err;
-      if(err && err.code === 'SESSION_PENDING') continue;
-      if(err && err.code === 'CONSENT_EXPIRED' && attempt < 3) continue;
-      throw err;
-    }
-  }
-  throw lastErr || new Error('Kunde inte hämta konton.');
-}
-
-function obSelectedBankAccounts(){
-  const list = el('obAccountsList');
-  if(!list) return [];
-  return Array.from(list.querySelectorAll('input[type=checkbox]:checked')).map(cb => ({
-    id: cb.getAttribute('data-ob-account-id'),
-    name: cb.getAttribute('data-ob-account-name') || cb.getAttribute('data-ob-account-id')
-  }));
-}
-
-async function obStartConnect(demo){
-  clear(el('obMessages'));
-  obSaveApiBase();
-  // Rensa ev. död session så vi inte omedelbart visar "förnya" från gammal id.
-  if(!demo){
-    obSetSessionId('');
-    obSetAccessToken('');
-    obFetchedAccounts = [];
-  }
-  try{
-    const data = await obFetch('/ob/start', {
-      method: 'POST',
-      body: JSON.stringify({
-        demo: !!demo,
-        bank: (el('obBank') && el('obBank').value) || '',
-        personalIdentifier: (el('obSsn') && el('obSsn').value) || ''
-      })
-    });
-    if(!demo && data && data.mode === 'demo'){
-      obMsg('notice', 'Workern svarade i demoläge trots BankID. Kontrollera att DEMO_MODE=0 och att Tink-secrets sitter på Workern.');
-      return;
-    }
-    if(data.redirectUrl){
-      const meta = obReadMeta();
-      meta.sessionMode = 'tink';
-      meta.lastConnectAt = new Date().toISOString();
-      obWriteMeta(meta);
-      location.href = data.redirectUrl;
-      return;
-    }
-    if(data.sessionId){
-      obSetSessionId(data.sessionId);
-      const meta = obReadMeta();
-      meta.sessionMode = data.mode === 'demo' ? 'demo' : 'tink';
-      meta.lastConnectAt = new Date().toISOString();
-      obWriteMeta(meta);
-      obMsg('report', demo || data.mode === 'demo'
-        ? 'Demo-session klar (påhittad data — inte din bank).'
-        : 'Session skapad.');
-      renderOpenBanking();
-      await obLoadAccountsWithRetry();
-      return;
-    }
-    obMsg('notice', 'Oväntat svar från Worker.');
-  } catch(err){
-    obMsg('notice', err && err.message ? err.message : 'Kunde inte starta bankkoppling.');
-  }
-}
-
-async function obFetchAndPreview(){
-  clear(el('obMessages'));
-  const sid = obGetSessionId();
-  if(!sid){
-    obMsg('notice', 'Ingen session — koppla bank först.');
-    return;
-  }
-  const selected = obSelectedBankAccounts();
-  if(!selected.length){
-    obMsg('notice', 'Välj minst ett bankkonto.');
-    return;
-  }
-  const from = el('obFrom') && el('obFrom').value;
-  const to = el('obTo') && el('obTo').value;
-  const localSel = el('obLocalAccount');
-  const forceLocal = localSel && localSel.value ? localSel.value : '';
-
-  try{
-    let allRows = [];
-    let defaultName = forceLocal || selected[0].name || 'Bankkonto';
-    for(const acc of selected){
-      let path = '/ob/transactions?sessionId=' + encodeURIComponent(sid)
-        + '&accountId=' + encodeURIComponent(acc.id);
-      if(from) path += '&from=' + encodeURIComponent(from);
-      if(to) path += '&to=' + encodeURIComponent(to);
-      const data = await obFetch(path);
-      const rows = openBankingToRows((data && data.transactions) || []);
-      allRows = allRows.concat(rows);
-      if(!forceLocal) defaultName = acc.name || defaultName;
-    }
-    obPendingRows = allRows;
-    obPendingAccountName = forceLocal || defaultName;
-    const preview = openBankingPreviewMerge(obPendingAccountName, allRows);
-    const hint = el('obPreviewHint');
-    if(hint){
-      hint.textContent = 'Konto "' + obPendingAccountName + '": '
-        + allRows.length + ' hämtade · '
-        + preview.added + ' nya · '
-        + (preview.updated || 0) + ' belopp uppdaterade · '
-        + (preview.removed || 0) + ' noll-dubbletter tas bort · '
-        + preview.skipped + ' dubbletter hoppas över.';
-    }
-    const imp = el('obImportBtn');
-    if(imp) imp.disabled = !allRows.length
-      || (preview.added === 0 && !(preview.updated > 0) && !(preview.removed > 0));
-    obMsg('report', (preview.added || preview.updated || preview.removed)
-      ? ('Redo att importera'
-        + (preview.added ? (' ' + preview.added + ' nya') : '')
-        + (preview.updated ? ((preview.added ? ',' : '') + ' uppdatera ' + preview.updated + ' belopp') : '')
-        + (preview.removed ? (((preview.added || preview.updated) ? ' och' : '') + ' ta bort ' + preview.removed + ' noll-dubbletter') : '')
-        + '.')
-      : 'Inga nya poster att importera (allt fanns redan).');
-  } catch(err){
-    if(err && err.code === 'CONSENT_EXPIRED'){
-      obSetSessionId('');
-      obMsg('notice', err.message || 'Tink-sessionen har gått ut. Koppla bank igen.');
-      const sec = el('obAccountsSection');
-      if(sec) sec.hidden = true;
-      return;
-    }
-    obMsg('notice', err && err.message ? err.message : 'Hämtning misslyckades.');
-  }
-}
-
-async function obImportToBook(){
-  if(!obPendingRows || !obPendingRows.length || !obPendingAccountName){
-    obMsg('notice', 'Gör en förhandsgranskning först.');
-    return;
-  }
-  if(!bookId){
-    obMsg('notice', 'Ingen bok öppen.');
-    return;
-  }
-  let draft;
-  try{
-    draft = bookWorkingCopy();
-  } catch(err){
-    obMsg('notice', err && err.message ? err.message : 'Kunde inte läsa boken.');
-    return;
-  }
-  ensureDraftAccount(draft, obPendingAccountName);
-  const merged = mergeAccount(draft.accounts[obPendingAccountName], obPendingRows);
-  draft.accounts[obPendingAccountName] = Object.assign(
-    { filename: draft.accounts[obPendingAccountName].filename || 'open-banking' },
-    merged.data
-  );
-  try{
-    book = draft;
-    rebuildBookLookup();
-    await writeBookPreferGranted(bookId, book);
-    const meta = obReadMeta();
-    meta.lastSyncAt = new Date().toISOString();
-    meta.lastAccount = obPendingAccountName;
-    obWriteMeta(meta);
-    obMsg('report', 'Importerade ' + merged.added + ' poster till "' + obPendingAccountName + '"'
-      + (merged.updated ? (', uppdaterade ' + merged.updated + ' belopp') : '')
-      + (merged.removed ? (', tog bort ' + merged.removed + ' noll-dubbletter') : '')
-      + (merged.skipped ? (' (' + merged.skipped + ' dubbletter hoppades).') : '.'));
-    const imp = el('obImportBtn');
-    if(imp) imp.disabled = true;
-    obPendingRows = null;
-    renderOpenBanking();
-  } catch(err){
-    obMsg('notice', err && err.message ? err.message : 'Kunde inte spara boken.');
-  }
-}
-
-async function obDisconnect(){
-  const sid = obGetSessionId();
-  try{
-    if(sid && obApiBase()){
-      await obFetch('/ob/disconnect', {
-        method: 'POST',
-        body: JSON.stringify({ sessionId: sid })
-      });
-    }
-  } catch(e){ /* ignore */ }
-  obSetSessionId('');
-  obFetchedAccounts = [];
-  obPendingRows = null;
-  const meta = obReadMeta();
-  delete meta.sessionMode;
-  obWriteMeta(meta);
-  const sec = el('obAccountsSection');
-  if(sec) sec.hidden = true;
-  const list = el('obAccountsList');
-  if(list) list.innerHTML = '';
-  obMsg('report', 'Frånkopplad.');
-  renderOpenBanking();
-}
-
-(function bindOpenBankingUi(){
-  const back = el('obBackBtn');
-  if(back) back.addEventListener('click', () => show('careHub'));
-  const save = el('obSaveApiBtn');
-  if(save) save.addEventListener('click', () => {
-    const base = obSaveApiBase();
-    const invalid = obValidateApiBase(base);
-    if(invalid){
-      obMsg('notice', invalid);
-      return;
-    }
-    obMsg('report', 'Worker-URL sparad: ' + base);
-  });
-  const health = el('obHealthBtn');
-  if(health) health.addEventListener('click', async () => {
-    clear(el('obMessages'));
-    obSaveApiBase();
-    obMsg('report', 'Testar anslutning…');
-    try{
-      const data = await obFetch('/ob/health');
-      obMsg('report', 'Worker OK' + (data.demo ? ' (demo-läge)' : '') + '.');
-    } catch(err){
-      obMsg('notice', err && err.message ? err.message : 'Ingen kontakt med Worker.');
-    }
-  });
-  const demo = el('obDemoBtn');
-  if(demo) demo.addEventListener('click', () => {
-    obMsg('report', 'Startar demo…');
-    obStartConnect(true);
-  });
-  const connect = el('obConnectBtn');
-  if(connect) connect.addEventListener('click', () => {
-    obMsg('report', 'Startar BankID-koppling…');
-    obStartConnect(false);
-  });
-  const fetchBtn = el('obFetchBtn');
-  if(fetchBtn) fetchBtn.addEventListener('click', () => obFetchAndPreview());
-  const importBtn = el('obImportBtn');
-  if(importBtn) importBtn.addEventListener('click', () => obImportToBook());
-  const disc = el('obDisconnectBtn');
-  if(disc) disc.addEventListener('click', () => obDisconnect());
-})();
-
 async function initApp(){
-  await consumeOpenBankingReturnQuery();
   applyAppVersionLabels();
   await openIdb();
   try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
