@@ -3824,7 +3824,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-19 v10';
+const APP_VERSION = '2026-09-20 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7293,7 +7293,60 @@ function rowMatchesReportDrillPeriod(row, periodKey){
   return reportPeriodKeyFromIso(d) === periodKey;
 }
 
+/** Transaktioner bakom Trend In/Ut för en månad (ibockade kategorier). */
+function collectTrendDrillItems(meta){
+  const fromIso = meta.from;
+  const toIso = meta.to;
+  const wantIn = meta.side === 'in';
+  const out = [];
+  syncTrendIncludeMap(book);
+
+  for(const accountName of book.order){
+    const acc = book.accounts[accountName];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const row of acc.rows){
+      if(isReportExcludedRow(row)) continue;
+      const d = (row.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(d < fromIso || d > toIso) continue;
+      if(meta.periodKey && monthKeyFromIso(d) !== meta.periodKey) continue;
+      if(rowIsPureTransfer(row) && !rowHasSplits(row)) continue;
+
+      let displayTotal = 0;
+      let hit = false;
+      const labelCats = [];
+      for(const piece of reportPiecesFromRow(row)){
+        const cat = (piece.category || '').trim();
+        const sub = (piece.subCategory || '').trim();
+        if(!isTrendPieceIncluded(cat, sub)) continue;
+        const amount = piece.amount;
+        if(!Number.isFinite(amount) || !amount) continue;
+        if(wantIn){
+          if(amount <= 0) continue;
+        } else if(amount >= 0){
+          continue;
+        }
+        displayTotal += amount;
+        hit = true;
+        if(cat && !labelCats.includes(cat)) labelCats.push(cat);
+      }
+      if(!hit) continue;
+      out.push({
+        account: accountName,
+        row: row,
+        displayTotal: displayTotal,
+        displayLabel: labelCats.length === 1
+          ? labelCats[0]
+          : (labelCats.length ? labelCats.length + ' kategorier' : '')
+      });
+    }
+  }
+  return out;
+}
+
 function collectReportDrillItems(meta){
+  if(meta && meta.t === 'trend') return collectTrendDrillItems(meta);
+
   const fromIso = meta.from;
   const toIso = meta.to;
   const out = [];
@@ -7369,6 +7422,7 @@ function collectReportDrillItems(meta){
 function reportDrillHeadline(meta){
   const parts = [];
   if(meta.t === 'payee') parts.push(meta.payee || '');
+  else if(meta.t === 'trend') parts.push(meta.side === 'in' ? 'Inkomst' : 'Utgift');
   else if(meta.t === 'cat') parts.push(meta.category || meta.sub || '');
   else if(meta.t === 'sub') parts.push(meta.sub || '');
   else if(meta.sub) parts.push(meta.sub);
@@ -9354,20 +9408,36 @@ function trendHorizonLabel(n){
   return n + ' månader';
 }
 
+function trendInUtDrillCellHtml(amount, month, side, amtCls){
+  const drill = { t: 'trend', side: side, periodKey: month, returnView: 'trend' };
+  return '<td class="num report-drillable' + amtCls + '"'
+    + ' data-drill="' + escapeAttr(JSON.stringify(drill)) + '"'
+    + ' title="Dubbelklicka för transaktionslista">'
+    + escapeHtml(formatAmount(Math.round(amount)))
+    + '</td>';
+}
+
 function trendInUtRowHtml(month, income, expense, net, opts){
   opts = opts || {};
   const netCls = net < 0 ? ' neg' : '';
   const rowCls = opts.sum ? ' class="report-sum"' : '';
   const amtCls = opts.sum ? ' total-amt' : '';
+  const inTd = opts.drillable
+    ? trendInUtDrillCellHtml(income, month, 'in', amtCls)
+    : '<td class="num' + amtCls + '">' + escapeHtml(formatAmount(Math.round(income))) + '</td>';
+  const utTd = opts.drillable
+    ? trendInUtDrillCellHtml(expense, month, 'ut', amtCls)
+    : '<td class="num' + amtCls + '">' + escapeHtml(formatAmount(Math.round(expense))) + '</td>';
   return '<tr' + rowCls + '>'
     + '<td class="report-label-col">' + escapeHtml(month) + '</td>'
-    + '<td class="num' + amtCls + '">' + escapeHtml(formatAmount(Math.round(income))) + '</td>'
-    + '<td class="num' + amtCls + '">' + escapeHtml(formatAmount(Math.round(expense))) + '</td>'
+    + inTd
+    + utTd
     + '<td class="num' + amtCls + netCls + '">' + escapeHtml(formatAmount(Math.round(net))) + '</td>'
     + '</tr>';
 }
 
-function trendInUtTableHtml(rows, sumLabel, sumIn, sumUt, sumNet){
+function trendInUtTableHtml(rows, sumLabel, sumIn, sumUt, sumNet, opts){
+  opts = opts || {};
   let html = '<table class="report-table trend-forecast-table"><thead><tr>'
     + '<th class="report-label-col">Månad</th>'
     + '<th class="num">In</th>'
@@ -9375,7 +9445,9 @@ function trendInUtTableHtml(rows, sumLabel, sumIn, sumUt, sumNet){
     + '<th class="num">Netto</th>'
     + '</tr></thead><tbody>';
   for(const r of rows){
-    html += trendInUtRowHtml(r.month, r.income, r.expense, r.net);
+    html += trendInUtRowHtml(r.month, r.income, r.expense, r.net, {
+      drillable: !!opts.drillable
+    });
   }
   if(sumLabel != null){
     html += trendInUtRowHtml(sumLabel, sumIn, sumUt, sumNet, { sum: true });
@@ -9525,7 +9597,7 @@ function renderTrendPrognosInUt(){
 
   const historyBlock = '<p class="trend-section-title">Historik</p>'
     + '<div class="report-table-scroll">'
-    + trendInUtTableHtml(historyRows)
+    + trendInUtTableHtml(historyRows, null, null, null, null, { drillable: true })
     + '</div>';
 
   const forecastBlock = '<p class="trend-section-title">Prognos ('
@@ -9572,6 +9644,21 @@ function renderTrendPage(){
 }
 
 if(trendBackBtn) trendBackBtn.addEventListener('click', () => show('start'));
+if(trendBody){
+  trendBody.addEventListener('dblclick', e => {
+    const numTd = e.target && e.target.closest && e.target.closest('td.num[data-drill]');
+    if(!numTd) return;
+    let drill;
+    try{
+      drill = JSON.parse(numTd.getAttribute('data-drill'));
+    } catch(err){
+      return;
+    }
+    if(!drill || drill.t !== 'trend') return;
+    e.preventDefault();
+    openReportDrill(drill);
+  });
+}
 if(trendTypeMenu){
   trendTypeMenu.addEventListener('change', () => {
     saveTrendPrefs();
@@ -16160,6 +16247,7 @@ const ledgerBackBtn = el('ledgerBackBtn');
 
 let ledgerMode = 'account';        // 'account' | 'reportDrill'
 let reportDrillMeta = null;        // aktiv rapportfilter
+let reportDrillReturnView = 'report'; // vy att återgå till från drill ('report' | 'trend')
 let ledgerAccount = '';            // kontot vi tittar på
 const ledgerSort = {};             // visuell sortering, per bok och konto
 let ledgerHighlight = null;        // belyst rad — objektreferens, sparas inte
@@ -16235,6 +16323,12 @@ function drillColumnsFor(meta){
       { key: 'mid', label: 'Kategori' },
       { key: 'sub', label: 'Underkategori' }
     ]
+    : meta.t === 'trend'
+      ? [
+        { key: 'date', label: 'Datum' },
+        { key: 'mid', label: 'Payee' },
+        { key: 'sub', label: 'Kategori' }
+      ]
     : meta.t === 'cat'
       ? [
         { key: 'date', label: 'Datum' },
@@ -16276,12 +16370,16 @@ function sortedDrillItems(items, sort, meta){
       }
     }
     switch(sort.sortKey){
-      case 'mid': return drillMidCellText(row, meta).toLowerCase();
-      case 'sub': return drillSubCellText(row, meta).toLowerCase();
+      case 'mid': return (meta.t === 'trend'
+        ? (row.payee || '')
+        : drillMidCellText(row, meta)).toLowerCase();
+      case 'sub': return (meta.t === 'trend'
+        ? (item.displayLabel || '')
+        : drillSubCellText(row, meta)).toLowerCase();
       case 'inout':
       case 'in':
       case 'ut':
-        return row.total;
+        return Number.isFinite(item.displayTotal) ? item.displayTotal : row.total;
       default: return row.date || '';
     }
   };
@@ -16308,7 +16406,9 @@ function syncLedgerChrome(){
     ledgerDrillTitle.textContent = reportDrillHeadline(reportDrillMeta);
   }
   if(ledgerBackBtn){
-    ledgerBackBtn.textContent = drill ? '← Rapport' : '← Start';
+    if(!drill) ledgerBackBtn.textContent = '← Start';
+    else if(reportDrillReturnView === 'trend') ledgerBackBtn.textContent = '← Trend';
+    else ledgerBackBtn.textContent = '← Rapport';
   }
 }
 
@@ -16321,11 +16421,17 @@ function refreshLedgerHeadline(){
 }
 
 function openReportDrill(drill){
-  if(!activeReportRange.from || !activeReportRange.to) return;
-  reportDrillMeta = Object.assign({}, drill, {
-    from: activeReportRange.from,
-    to: activeReportRange.to
-  });
+  let from = drill.from || (activeReportRange && activeReportRange.from) || '';
+  let to = drill.to || (activeReportRange && activeReportRange.to) || '';
+  if(drill.t === 'trend' && drill.periodKey && /^\d{4}-\d{2}$/.test(drill.periodKey)){
+    const y = Number(drill.periodKey.slice(0, 4));
+    const m = Number(drill.periodKey.slice(5, 7));
+    from = startOfMonthIso(y, m);
+    to = endOfCalendarMonthIso(y, m);
+  }
+  if(!from || !to) return;
+  reportDrillMeta = Object.assign({}, drill, { from: from, to: to });
+  reportDrillReturnView = drill.returnView === 'trend' ? 'trend' : 'report';
   ledgerMode = 'reportDrill';
   ledgerHighlight = null;
   ledgerPendingHighlightKey = '';
@@ -16886,18 +16992,24 @@ function drillRowHtml(item, meta, idx){
       + '</tr>';
   }
 
-  let midCell = escapeHtml(drillMidCellText(r, meta));
+  let midCell = escapeHtml(
+    meta.t === 'trend' ? (r.payee || '') : drillMidCellText(r, meta)
+  );
   if(r.hasSplits){
     midCell += ' <span class="badge split">' + r.splitCount + ' delar</span>';
   }
+  const subCell = meta.t === 'trend'
+    ? escapeHtml(item.displayLabel || '')
+    : escapeHtml(drillSubCellText(r, meta));
+  const amt = Number.isFinite(item.displayTotal) ? item.displayTotal : r.total;
 
   return '<tr data-idx="' + idx + '" data-account="' + escapeAttr(item.account) + '"'
     + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + '>'
     + '<td>' + escapeHtml(r.date)
     + (r.dateOk ? '' : ' <span class="badge mismatch">⚠</span>') + '</td>'
     + '<td>' + midCell + '</td>'
-    + '<td>' + escapeHtml(drillSubCellText(r, meta)) + '</td>'
-    + ledgerInOutCellHtml(r.total)
+    + '<td>' + subCell + '</td>'
+    + ledgerInOutCellHtml(amt)
     + '</tr>';
 }
 
@@ -17190,9 +17302,11 @@ function positionTooltip(e){
 el('ledgerBackBtn').addEventListener('click', () => {
   hideLedgerDeleteConfirm();
   if(ledgerMode === 'reportDrill'){
+    const ret = reportDrillReturnView === 'trend' ? 'trend' : 'report';
     ledgerMode = 'account';
     reportDrillMeta = null;
-    show('report');
+    reportDrillReturnView = 'report';
+    show(ret);
     return;
   }
   show('start');
