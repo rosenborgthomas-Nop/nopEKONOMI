@@ -2455,9 +2455,19 @@ footer p{
 .care-list-table tr.trend-off td.cl-name{
   opacity:0.55;
 }
+.care-list-table tr.trend-partial td.cl-name{
+  opacity:0.78;
+}
+.care-list-table tr.trend-partial td.cl-trend input[type="checkbox"]{
+  opacity:0.85;
+}
 .care-list-table tr.trend-sub td.cl-name{
   padding-left:1.6rem;
   font-weight:400;
+}
+.care-list-table tr.trend-empty-sub td.cl-name .trend-empty-label{
+  font-style:italic;
+  opacity:0.9;
 }
 .care-list-table .trend-expand-btn{
   display:inline-flex;
@@ -3814,10 +3824,12 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-19 v07';
+const APP_VERSION = '2026-09-19 v08';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
+/** Visningsnamn för poster utan underkategori. */
+const TREND_EMPTY_SUB_LABEL = '(utan underkategori)';
 
 /* =====================================================================
    INNEHÅLL
@@ -5204,14 +5216,22 @@ function trendIncludeSubKey(cat, sub){
   return String(cat || '').trim() + TREND_SUB_SEP + String(sub || '').trim();
 }
 
+function trendEmptySubKey(cat){
+  return trendIncludeSubKey(cat, '');
+}
+
 function parseTrendIncludeKey(key){
   const raw = String(key || '');
   const i = raw.indexOf(TREND_SUB_SEP);
-  if(i < 0) return { cat: raw.trim(), sub: '' };
-  return { cat: raw.slice(0, i).trim(), sub: raw.slice(i + 1).trim() };
+  if(i < 0) return { cat: raw.trim(), sub: '', kind: 'cat' };
+  return {
+    cat: raw.slice(0, i).trim(),
+    sub: raw.slice(i + 1).trim(),
+    kind: raw.slice(i + 1).trim() ? 'sub' : 'empty'
+  };
 }
 
-/** cat → sorterad lista underkategorier som förekommer i boken under den kategorin. */
+/** Namngivna underkategorier per kategori (tom underkategori ingår inte). */
 function buildTrendCategorySubsMap(bookData){
   const map = Object.create(null);
   if(!bookData || !bookData.accounts) return map;
@@ -5248,7 +5268,7 @@ function buildTrendCategorySubsMap(bookData){
 function countCategorySubUsage(cat, sub){
   const catKey = (cat || '').trim().toLowerCase();
   const subKey = (sub || '').trim().toLowerCase();
-  if(!catKey || !subKey) return 0;
+  if(!catKey) return 0;
   let n = 0;
   for(const accName of book.order){
     const acc = book.accounts[accName];
@@ -5258,20 +5278,43 @@ function countCategorySubUsage(cat, sub){
         for(const s of r.splits){
           const c = (s.category || r.category || '').trim().toLowerCase();
           const u = (s.subCategory || '').trim().toLowerCase();
-          if(c === catKey && u === subKey) n += 1;
+          if(c !== catKey) continue;
+          if(u === subKey) n += 1;
         }
-      } else if(
-        (r.category || '').trim().toLowerCase() === catKey
-        && (r.subCategory || '').trim().toLowerCase() === subKey
-      ){
-        n += 1;
+      } else if((r.category || '').trim().toLowerCase() === catKey){
+        if((r.subCategory || '').trim().toLowerCase() === subKey) n += 1;
       }
     }
   }
   return n;
 }
 
-/** Trend-inkluderingsregister: kategorier och underkategorier. Sparat i boken. */
+function countCategoryEmptySubUsage(cat){
+  return countCategorySubUsage(cat, '');
+}
+
+/** Leaf-nycklar för en kategori: tom underkategori + namngivna. */
+function trendCategoryLeafKeys(cat, catSubs){
+  const keys = [trendEmptySubKey(cat)];
+  const subs = (catSubs && catSubs[cat]) || [];
+  for(const sub of subs) keys.push(trendIncludeSubKey(cat, sub));
+  return keys;
+}
+
+/** 'all' | 'none' | 'some' utifrån leaf-kryss. */
+function trendCategoryCheckState(cat, map, catSubs){
+  const keys = trendCategoryLeafKeys(cat, catSubs);
+  let on = 0;
+  for(const k of keys){
+    const v = Object.prototype.hasOwnProperty.call(map, k) ? !!map[k] : !!map[cat];
+    if(v) on += 1;
+  }
+  if(on === 0) return 'none';
+  if(on === keys.length) return 'all';
+  return 'some';
+}
+
+/** Trend-inkluderingsregister: kategorier, tom underkategori och namngivna. */
 function syncTrendIncludeMap(bookData){
   if(!bookData || typeof bookData !== 'object') return false;
   if(!bookData.trendInclude || typeof bookData.trendInclude !== 'object'){
@@ -5288,11 +5331,15 @@ function syncTrendIncludeMap(bookData){
       map[cat] = true;
       changed = true;
     }
+    const emptyKey = trendEmptySubKey(cat);
+    if(!Object.prototype.hasOwnProperty.call(map, emptyKey)){
+      map[emptyKey] = !!map[cat];
+      changed = true;
+    }
     const subs = catSubs[cat] || [];
     for(const sub of subs){
       const sk = trendIncludeSubKey(cat, sub);
       if(!Object.prototype.hasOwnProperty.call(map, sk)){
-        // Nya underkategorier ärver kategorins aktuella värde.
         map[sk] = !!map[cat];
         changed = true;
       }
@@ -5306,13 +5353,14 @@ function syncTrendIncludeMap(bookData){
       changed = true;
       continue;
     }
-    if(parsed.sub){
+    if(parsed.kind === 'sub'){
       const subs = catSubs[parsed.cat] || [];
       if(subs.indexOf(parsed.sub) < 0){
         delete map[key];
         changed = true;
       }
     }
+    // kind 'empty' och 'cat' behålls så länge kategorin finns.
   }
   return changed;
 }
@@ -5321,23 +5369,29 @@ function isCategoryIncludedInTrend(cat){
   const name = (cat || '').trim();
   if(!name || isTransferCategory(name)) return false;
   if(!book || !book.trendInclude || typeof book.trendInclude !== 'object') return true;
-  if(!Object.prototype.hasOwnProperty.call(book.trendInclude, name)) return true;
-  return !!book.trendInclude[name];
+  const state = trendCategoryCheckState(name, book.trendInclude, buildTrendCategorySubsMap(book));
+  return state !== 'none';
 }
 
-/** Om underkategori anges: explicit nyckel, annars arv från kategori. Tom underkategori = kategorinivå. */
+function isTrendLeafIncluded(cat, subName){
+  const c = (cat || '').trim();
+  if(!c || isTransferCategory(c)) return false;
+  if(!book || !book.trendInclude || typeof book.trendInclude !== 'object') return true;
+  const map = book.trendInclude;
+  const sk = subName === '' || subName == null
+    ? trendEmptySubKey(c)
+    : trendIncludeSubKey(c, subName);
+  if(Object.prototype.hasOwnProperty.call(map, sk)) return !!map[sk];
+  if(Object.prototype.hasOwnProperty.call(map, c)) return !!map[c];
+  return true;
+}
+
+/** Poster med underkategori → leaf; utan → tom-underkategori-leaf. */
 function isTrendPieceIncluded(cat, sub){
   const c = (cat || '').trim();
   const s = (sub || '').trim();
   if(!c || isTransferCategory(c)) return false;
-  if(!book || !book.trendInclude || typeof book.trendInclude !== 'object') return true;
-  if(s){
-    const sk = trendIncludeSubKey(c, s);
-    if(Object.prototype.hasOwnProperty.call(book.trendInclude, sk)){
-      return !!book.trendInclude[sk];
-    }
-  }
-  return isCategoryIncludedInTrend(c);
+  return isTrendLeafIncluded(c, s);
 }
 
 async function persistTrendInclude(){
@@ -11245,6 +11299,7 @@ function buildCareListItems(){
   if(careListKind === 'trend'){
     syncTrendIncludeMap(book);
     const catSubs = buildTrendCategorySubsMap(book);
+    const map = book.trendInclude || {};
     const items = [];
     const cats = bookLookup.categories
       .slice()
@@ -11252,23 +11307,36 @@ function buildCareListItems(){
     for(const name of cats){
       const subs = catSubs[name] || [];
       const expanded = trendExpandedCats.has(name);
+      const checkState = trendCategoryCheckState(name, map, catSubs);
       items.push({
         rowKind: 'cat',
         name,
         parent: '',
         count: countCategoryUsage(name),
-        included: isCategoryIncludedInTrend(name),
-        hasSubs: subs.length > 0,
+        included: checkState !== 'none',
+        checkState: checkState,
+        hasSubs: true,
         expanded: expanded
       });
       if(expanded){
+        items.push({
+          rowKind: 'sub',
+          name: '',
+          emptySub: true,
+          parent: name,
+          count: countCategoryEmptySubUsage(name),
+          included: isTrendLeafIncluded(name, ''),
+          hasSubs: false,
+          expanded: false
+        });
         for(const sub of subs){
           items.push({
             rowKind: 'sub',
             name: sub,
+            emptySub: false,
             parent: name,
             count: countCategorySubUsage(name, sub),
-            included: isTrendPieceIncluded(name, sub),
+            included: isTrendLeafIncluded(name, sub),
             hasSubs: false,
             expanded: false
           });
@@ -11447,33 +11515,44 @@ function careListRowHtml(item, idx){
       + '</tr>';
   }
   if(careListKind === 'trend'){
-    const on = !!item.included;
     const isSub = item.rowKind === 'sub';
-    const rowCls = (on ? '' : ' trend-off') + (isSub ? ' trend-sub' : '');
+    const isEmptySub = !!(isSub && item.emptySub);
+    const checkState = item.checkState || (item.included ? 'all' : 'none');
+    const on = isSub ? !!item.included : checkState !== 'none';
+    const dim = !isSub && checkState === 'some';
+    const rowCls = (on && !dim ? '' : ' trend-off')
+      + (dim ? ' trend-partial' : '')
+      + (isSub ? ' trend-sub' : '')
+      + (isEmptySub ? ' trend-empty-sub' : '');
     const tip = isSub
-      ? 'Använd bockrutan för att inkludera underkategorin i trend'
-      : (item.hasSubs
-        ? 'Pilen fäller ut underkategorier. Bockrutan styr om kategorin räknas i trend'
-        : 'Använd bockrutan för att inkludera kategorin i trend');
+      ? (isEmptySub
+        ? 'Poster i kategorin utan underkategori'
+        : 'Använd bockrutan för att inkludera underkategorin i trend')
+      : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga (delvis = vissa valda)';
+    const labelText = isEmptySub ? TREND_EMPTY_SUB_LABEL : item.name;
+    const esc = escapeHtml(labelText);
     let nameHtml = '';
     if(isSub){
-      nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span>' + esc;
-    } else if(item.hasSubs){
+      nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span>'
+        + (isEmptySub ? '<em class="trend-empty-label">' + esc + '</em>' : esc);
+    } else {
       const chev = item.expanded ? '▼' : '▶';
       nameHtml = '<button type="button" class="trend-expand-btn" data-trend-expand="'
         + idx + '" aria-expanded="' + (item.expanded ? 'true' : 'false')
         + '" title="Fäll ut/in underkategorier">' + chev + '</button>' + esc;
-    } else {
-      nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span>' + esc;
     }
     const aria = isSub
-      ? 'Räkna underkategori ' + esc + ' under ' + escapeHtml(item.parent) + ' i trend'
-      : 'Räkna ' + esc + ' i trend';
+      ? (isEmptySub
+        ? 'Räkna poster utan underkategori under ' + escapeHtml(item.parent) + ' i trend'
+        : 'Räkna underkategori ' + esc + ' under ' + escapeHtml(item.parent) + ' i trend')
+      : 'Räkna ' + esc + ' i trend'
+        + (checkState === 'some' ? ' (vissa underkategorier valda)' : '');
+    const checkedAttr = (!isSub && checkState === 'all') || (isSub && on) ? ' checked' : '';
     return '<tr data-idx="' + idx + '" class="' + rowCls.trim() + '" title="' + tip + '">'
       + '<td class="cl-name">' + nameHtml + '</td>'
       + '<td class="cl-count">' + formatCount(item.count) + '</td>'
       + '<td class="cl-trend"><input type="checkbox" data-trend-toggle="' + idx + '"'
-      + (on ? ' checked' : '') + ' aria-label="' + aria + '"></td>'
+      + checkedAttr + ' aria-label="' + aria + '"></td>'
       + '</tr>';
   }
   return '<tr data-idx="' + idx + '" title="Dubbelklicka för att ändra namn">'
@@ -11543,6 +11622,7 @@ function renderCareList(){
     }
     careListBody.innerHTML = html;
     updateCareListHighlight();
+    applyTrendCheckboxIndeterminate();
   }
 }
 
@@ -11562,49 +11642,45 @@ async function setTrendIncludeForItem(idx, included){
   const item = careListItems[idx];
   if(!item || !book) return;
   if(!book.trendInclude || typeof book.trendInclude !== 'object') book.trendInclude = {};
+  const catSubs = buildTrendCategorySubsMap(book);
+  const next = !!included;
+
   if(item.rowKind === 'sub'){
-    book.trendInclude[trendIncludeSubKey(item.parent, item.name)] = !!included;
+    const key = item.emptySub
+      ? trendEmptySubKey(item.parent)
+      : trendIncludeSubKey(item.parent, item.name);
+    book.trendInclude[key] = next;
+    const st = trendCategoryCheckState(item.parent, book.trendInclude, catSubs);
+    book.trendInclude[item.parent] = st !== 'none';
   } else {
-    book.trendInclude[item.name] = !!included;
-    // Kategoriväxling sätter också underkategorier som saknar egen nyckel —
-    // explicita undernycklar behålls; synka synliga underrader i UI.
-    const catSubs = buildTrendCategorySubsMap(book);
-    const subs = catSubs[item.name] || [];
-    for(const sub of subs){
-      const sk = trendIncludeSubKey(item.name, sub);
-      // Uppdatera undernycklar till samma värde när användaren byter kategori —
-      // annars blir arv vs explicit förvirrande i expand-listan.
-      book.trendInclude[sk] = !!included;
+    book.trendInclude[item.name] = next;
+    for(const k of trendCategoryLeafKeys(item.name, catSubs)){
+      book.trendInclude[k] = next;
     }
   }
-  item.included = !!included;
-  const tr = careListBody.querySelector('tr[data-idx="' + idx + '"]');
-  if(tr) tr.classList.toggle('trend-off', !included);
-  // Om kategori växlas: uppdatera synliga underraders kryss utan full omritning.
-  if(item.rowKind === 'cat' && item.expanded){
-    for(let i = idx + 1; i < careListItems.length; i++){
-      const child = careListItems[i];
-      if(!child || child.rowKind !== 'sub' || child.parent !== item.name) break;
-      child.included = !!included;
-      const ctr = careListBody.querySelector('tr[data-idx="' + i + '"]');
-      if(ctr){
-        ctr.classList.toggle('trend-off', !included);
-        const box = ctr.querySelector('input[data-trend-toggle]');
-        if(box) box.checked = !!included;
-      }
-    }
-  }
+
   clear(careListMessages);
   try{
     await persistTrendInclude();
   } catch(e){
     addBox(careListMessages, 'notice', 'Kunde inte spara trendvalet.');
   }
+  const keepIdx = idx;
+  const keepName = item.rowKind === 'cat' ? item.name : item.parent;
+  const wasExpanded = item.rowKind === 'cat'
+    ? item.expanded
+    : trendExpandedCats.has(item.parent);
+  if(wasExpanded && keepName) trendExpandedCats.add(keepName);
+  renderCareList();
+  if(keepIdx >= 0 && keepIdx < careListItems.length){
+    careListHighlightIdx = keepIdx;
+    updateCareListHighlight();
+  }
 }
 
 function toggleTrendCategoryExpand(idx){
   const item = careListItems[idx];
-  if(!item || item.rowKind !== 'cat' || !item.hasSubs) return;
+  if(!item || item.rowKind !== 'cat') return;
   if(trendExpandedCats.has(item.name)) trendExpandedCats.delete(item.name);
   else trendExpandedCats.add(item.name);
   const keep = item.name;
@@ -11613,6 +11689,21 @@ function toggleTrendCategoryExpand(idx){
   if(nextIdx >= 0){
     careListHighlightIdx = nextIdx;
     updateCareListHighlight();
+  }
+}
+
+function applyTrendCheckboxIndeterminate(){
+  if(careListKind !== 'trend' || !careListBody) return;
+  const boxes = careListBody.querySelectorAll('input[data-trend-toggle]');
+  for(const box of boxes){
+    const idx = +box.getAttribute('data-trend-toggle');
+    const item = careListItems[idx];
+    if(!item || item.rowKind !== 'cat'){
+      box.indeterminate = false;
+      continue;
+    }
+    box.indeterminate = item.checkState === 'some';
+    if(item.checkState === 'some') box.checked = false;
   }
 }
 
@@ -12062,7 +12153,13 @@ careListBody.addEventListener('click', e => {
     const idx = +toggle.getAttribute('data-trend-toggle');
     careListHighlightIdx = idx;
     updateCareListHighlight();
-    setTrendIncludeForItem(idx, toggle.checked);
+    const item = careListItems[idx];
+    if(!item) return;
+    // Kategori: delvis/alla → av; inga → på. Underkategori: browserns checked.
+    const next = item.rowKind === 'cat'
+      ? item.checkState !== 'all'
+      : toggle.checked;
+    setTrendIncludeForItem(idx, next);
     return;
   }
   const tr = e.target.closest('tr[data-idx]');
@@ -12672,7 +12769,8 @@ function rewriteCategoryInBook(draft, fromName, toName){
         continue;
       }
       if(!to) continue;
-      if(parsed.sub) next[trendIncludeSubKey(to, parsed.sub)] = draft.trendInclude[key];
+      if(parsed.kind === 'sub') next[trendIncludeSubKey(to, parsed.sub)] = draft.trendInclude[key];
+      else if(parsed.kind === 'empty') next[trendEmptySubKey(to)] = draft.trendInclude[key];
       else next[to] = draft.trendInclude[key];
     }
     draft.trendInclude = next;
