@@ -440,22 +440,113 @@ input[type=file]{ display:none; }
   max-width:19.8em;
 }
 .trend-toolbar{
-  display:flex;
-  flex-wrap:wrap;
-  align-items:center;
-  gap:8px 12px;
+  display:grid;
+  grid-template-columns:auto repeat(4, minmax(0, 1fr));
+  column-gap:8px;
+  row-gap:4px;
+  align-items:end;
+  width:100%;
+  max-width:100%;
+  margin-bottom:14px;
 }
 .trend-toolbar .report-back{
+  grid-column:1;
+  grid-row:1 / span 2;
+  align-self:center;
+  margin:0;
   margin-right:4px;
+  padding:0;
+  font-size:12px;
+  line-height:1.2;
+  justify-self:start;
 }
 .trend-toolbar .report-col-label{
   margin:0;
+  justify-self:start;
 }
+.trend-toolbar label[for="trendTypeMenu"]{ grid-column:2; grid-row:1; }
+.trend-toolbar label[for="trendHistoryMenu"]{ grid-column:3; grid-row:1; }
+.trend-toolbar label[for="trendHorizonMenu"]{ grid-column:4; grid-row:1; }
+.trend-toolbar label[for="trendCatMenu"]{ grid-column:5; grid-row:1; }
 .trend-toolbar #trendTypeMenu,
 .trend-toolbar #trendHistoryMenu,
-.trend-toolbar #trendHorizonMenu{
-  width:auto;
-  min-width:10em;
+.trend-toolbar #trendHorizonMenu,
+.trend-toolbar #trendCatMenu{
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  justify-self:stretch;
+}
+.trend-toolbar #trendTypeMenu{ grid-column:2; grid-row:2; }
+.trend-toolbar #trendHistoryMenu{ grid-column:3; grid-row:2; }
+.trend-toolbar #trendHorizonMenu{ grid-column:4; grid-row:2; }
+.trend-toolbar #trendCatMenu{ grid-column:5; grid-row:2; }
+#viewTrend > .report-wrap{
+  display:flex;
+  flex-direction:column;
+  width:100%;
+  max-width:min(1100px, 100%);
+  box-sizing:border-box;
+  min-height:calc(100dvh - 48px);
+  padding-left:max(12px, env(safe-area-inset-left, 0px));
+  padding-right:max(12px, env(safe-area-inset-right, 0px));
+}
+#viewTrend .eyebrow.view-headline{
+  display:block;
+  width:100%;
+  flex:0 0 auto;
+  margin:0 0 14px;
+}
+#viewTrend .report-toolbar-scroll{
+  display:block;
+  width:100%;
+  flex:0 0 auto;
+}
+#viewTrend #trendMessages{
+  flex:0 0 auto;
+}
+#viewTrend .report-canvas.has-report{
+  flex:1 1 auto;
+  min-height:0;
+  max-height:none;
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+}
+#viewTrend.report-mobile .trend-toolbar{
+  grid-template-columns:max-content minmax(0, 1fr);
+  align-items:center;
+}
+#viewTrend.report-mobile .trend-toolbar .report-back{
+  grid-column:1 / -1;
+  grid-row:auto;
+  margin-bottom:4px;
+}
+#viewTrend.report-mobile .trend-toolbar label[for="trendTypeMenu"],
+#viewTrend.report-mobile .trend-toolbar label[for="trendHistoryMenu"],
+#viewTrend.report-mobile .trend-toolbar label[for="trendHorizonMenu"],
+#viewTrend.report-mobile .trend-toolbar label[for="trendCatMenu"]{
+  grid-column:1;
+  grid-row:auto;
+}
+#viewTrend.report-mobile .trend-toolbar #trendTypeMenu,
+#viewTrend.report-mobile .trend-toolbar #trendHistoryMenu,
+#viewTrend.report-mobile .trend-toolbar #trendHorizonMenu,
+#viewTrend.report-mobile .trend-toolbar #trendCatMenu{
+  grid-column:2;
+  grid-row:auto;
+}
+#viewTrend.report-mobile .report-wrap{
+  min-height:calc(100dvh - 36px);
+  padding-left:12px;
+  padding-right:12px;
+}
+#viewTrend.report-mobile .report-canvas.has-report{
+  width:100%;
+  max-width:100%;
+  margin:0;
+  padding:12px 10px 14px;
+  min-height:0;
 }
 .trend-section-title{
   margin:14px 0 6px;
@@ -3079,14 +3170,14 @@ td.num.dash .cell-content{
     <p class="eyebrow view-headline" id="trendViewHeadline">nopEKONOMI - — - Trendhantering</p>
 
     <div class="report-toolbar-scroll">
-    <div class="report-toolbar trend-toolbar">
+    <div class="trend-toolbar">
       <button class="nav-link nav-back report-back" id="trendBackBtn" type="button">← Start</button>
       <label class="report-col-label" for="trendTypeMenu">Typ</label>
-      <label class="report-col-label" for="trendHistoryMenu">Historik</label>
-      <label class="report-col-label" for="trendHorizonMenu">Horisont</label>
       <select id="trendTypeMenu" class="menu-select" aria-label="Trendtyp">
         <option value="prognosInUt">Prognos (In/Ut)</option>
+        <option value="nettoOverTid">Netto över tid</option>
       </select>
+      <label class="report-col-label" for="trendHistoryMenu">Historik</label>
       <select id="trendHistoryMenu" class="menu-select" aria-label="Historik bakåt">
         <option value="3">Senaste 3 månader</option>
         <option value="6">Senaste 6 månader</option>
@@ -3094,11 +3185,17 @@ td.num.dash .cell-content{
         <option value="24">Senaste 24 månader</option>
         <option value="allt">Allt</option>
       </select>
+      <label class="report-col-label" for="trendHorizonMenu">Horisont</label>
       <select id="trendHorizonMenu" class="menu-select" aria-label="Prognoshorisont">
         <option value="1">1 månad</option>
         <option value="3">3 månader</option>
         <option value="6">6 Månader</option>
         <option value="12" selected>1 år</option>
+      </select>
+      <label class="report-col-label" for="trendCatMenu">Kategorialternativ</label>
+      <select id="trendCatMenu" class="menu-select" aria-label="Kategorialternativ">
+        <option value="bocklista" selected>Bocklista</option>
+        <option value="alla">Alla</option>
       </select>
     </div>
     </div>
@@ -3932,7 +4029,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v07';
+const APP_VERSION = '2026-09-20 v08';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5500,6 +5597,19 @@ function isTrendPieceIncluded(cat, sub){
   const s = (sub || '').trim();
   if(!c || isTransferCategory(c)) return false;
   return isTrendLeafIncluded(c, s);
+}
+
+/** Trend Kategorialternativ: bocklista (register) eller alla icke-överföringar. */
+function trendCategoryMode(){
+  const menu = el('trendCatMenu');
+  return (menu && menu.value === 'alla') ? 'alla' : 'bocklista';
+}
+
+function trendPieceAllowed(cat, sub){
+  const c = (cat || '').trim();
+  if(!c || isTransferCategory(c)) return false;
+  if(trendCategoryMode() === 'alla') return true;
+  return isTrendPieceIncluded(c, sub);
 }
 
 async function persistTrendInclude(){
@@ -7432,7 +7542,7 @@ function collectTrendDrillItems(meta){
       for(const piece of reportPiecesFromRow(row)){
         const cat = (piece.category || '').trim();
         const sub = (piece.subCategory || '').trim();
-        if(!isTrendPieceIncluded(cat, sub)) continue;
+        if(!trendPieceAllowed(cat, sub)) continue;
         const amount = piece.amount;
         if(!Number.isFinite(amount) || !amount) continue;
         if(wantIn){
@@ -9491,7 +9601,7 @@ function collectTrendInUtSeries(fromIso, toIso){
       for(const piece of reportPiecesFromRow(r)){
         const cat = (piece.category || '').trim();
         const sub = (piece.subCategory || '').trim();
-        if(!isTrendPieceIncluded(cat, sub)) continue;
+        if(!trendPieceAllowed(cat, sub)) continue;
         const amount = piece.amount;
         if(!Number.isFinite(amount) || !amount) continue;
         const mk = monthKeyFromIso(d);
@@ -9575,7 +9685,9 @@ function trendHorizonLabel(n){
 }
 
 /** Linjediagram: historik In/Ut/Netto + OLS-trendlinjer (historik + prognos). */
-function buildTrendInUtLineChart(data){
+function buildTrendInUtLineChart(data, opts){
+  opts = opts || {};
+  const onlyNet = !!opts.onlyNet;
   const histN = data.months.length;
   const forecast = data.forecast || [];
   const allMonths = data.months.concat(forecast.map(p => p.month));
@@ -9610,13 +9722,17 @@ function buildTrendInUtLineChart(data){
     if(v > ymax) ymax = v;
   };
   for(let i = 0; i < histN; i++){
-    bump(data.incomeSeries[i]);
-    bump(data.expenseSeries[i]);
+    if(!onlyNet){
+      bump(data.incomeSeries[i]);
+      bump(data.expenseSeries[i]);
+    }
     bump(histNet[i]);
   }
   for(let i = 0; i < total; i++){
-    bump(fitInAll[i]);
-    bump(fitUtAll[i]);
+    if(!onlyNet){
+      bump(fitInAll[i]);
+      bump(fitUtAll[i]);
+    }
     bump(fitNetAll[i]);
   }
   if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){
@@ -9674,30 +9790,36 @@ function buildTrendInUtLineChart(data){
       + ' points="' + pts + '"/>';
   };
 
-  svg += poly(fitInAll, colIn, '5 4', 2);
-  svg += poly(fitUtAll, colUt, '5 4', 2);
+  if(!onlyNet){
+    svg += poly(fitInAll, colIn, '5 4', 2);
+    svg += poly(fitUtAll, colUt, '5 4', 2);
+  }
   svg += poly(fitNetAll, colNet, '5 4', 2);
 
-  const histInPts = data.incomeSeries.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
-  const histUtPts = data.expenseSeries.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+  if(!onlyNet){
+    const histInPts = data.incomeSeries.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+    const histUtPts = data.expenseSeries.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+    svg += '<polyline fill="none" stroke="' + colIn + '" stroke-width="2.2" stroke-linejoin="round"'
+      + ' stroke-linecap="round" points="' + histInPts + '"/>';
+    svg += '<polyline fill="none" stroke="' + colUt + '" stroke-width="2.2" stroke-linejoin="round"'
+      + ' stroke-linecap="round" points="' + histUtPts + '"/>';
+  }
   const histNetPts = histNet.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
-  svg += '<polyline fill="none" stroke="' + colIn + '" stroke-width="2.2" stroke-linejoin="round"'
-    + ' stroke-linecap="round" points="' + histInPts + '"/>';
-  svg += '<polyline fill="none" stroke="' + colUt + '" stroke-width="2.2" stroke-linejoin="round"'
-    + ' stroke-linecap="round" points="' + histUtPts + '"/>';
   svg += '<polyline fill="none" stroke="' + colNet + '" stroke-width="2.2" stroke-linejoin="round"'
     + ' stroke-linecap="round" points="' + histNetPts + '"/>';
 
   for(let i = 0; i < histN; i++){
     const mk = monthKeyYyMm(data.months[i]);
-    svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(data.incomeSeries[i]).toFixed(1)
-      + '" r="3" fill="' + colIn + '">'
-      + '<title>' + escapeHtml(mk + ' In ' + formatAmount(Math.round(data.incomeSeries[i]))) + '</title>'
-      + '</circle>';
-    svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(data.expenseSeries[i]).toFixed(1)
-      + '" r="3" fill="' + colUt + '">'
-      + '<title>' + escapeHtml(mk + ' Ut ' + formatAmount(Math.round(data.expenseSeries[i]))) + '</title>'
-      + '</circle>';
+    if(!onlyNet){
+      svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(data.incomeSeries[i]).toFixed(1)
+        + '" r="3" fill="' + colIn + '">'
+        + '<title>' + escapeHtml(mk + ' In ' + formatAmount(Math.round(data.incomeSeries[i]))) + '</title>'
+        + '</circle>';
+      svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(data.expenseSeries[i]).toFixed(1)
+        + '" r="3" fill="' + colUt + '">'
+        + '<title>' + escapeHtml(mk + ' Ut ' + formatAmount(Math.round(data.expenseSeries[i]))) + '</title>'
+        + '</circle>';
+    }
     svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(histNet[i]).toFixed(1)
       + '" r="3" fill="' + colNet + '">'
       + '<title>' + escapeHtml(mk + ' Netto ' + formatAmount(Math.round(histNet[i]))) + '</title>'
@@ -9722,18 +9844,16 @@ function buildTrendInUtLineChart(data){
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
-  const legend = '<p class="trend-line-chart-legend">'
-    + '<span><i class="trend-line-chart-swatch is-in" aria-hidden="true"></i>In</span>'
-    + '<span><i class="trend-line-chart-swatch is-ut" aria-hidden="true"></i>Ut</span>'
-    + '<span><i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>Netto</span>'
-    + '<span><i class="trend-line-chart-swatch is-in is-dash" aria-hidden="true"></i>Trend In</span>'
-    + '<span><i class="trend-line-chart-swatch is-ut is-dash" aria-hidden="true"></i>Trend Ut</span>'
-    + '<span><i class="trend-line-chart-swatch is-net is-dash" aria-hidden="true"></i>Trend Netto</span>'
-    + '</p>';
+  let legend = '<p class="trend-line-chart-legend">';
+  if(!onlyNet){
+    legend += '<span><i class="trend-line-chart-swatch is-in" aria-hidden="true"></i>In</span>'
+      + '<span><i class="trend-line-chart-swatch is-ut" aria-hidden="true"></i>Ut</span>';
+  }
+  legend += '<span><i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>Netto</span></p>';
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
-    + ' aria-label="Trendlinjer In, Ut och Netto">'
+    + ' aria-label="' + (onlyNet ? 'Netto över tid' : 'Trendlinjer In, Ut och Netto') + '">'
     + svg
     + '</svg>'
     + legend
@@ -9789,13 +9909,15 @@ function trendInUtTableHtml(rows, sumLabel, sumIn, sumUt, sumNet, opts){
 }
 
 const TREND_PREFS_KEY = 'msmoney_trend_prefs__' + STORAGE_SCOPE;
-const TREND_TYPES = new Set(['prognosInUt']);
+const TREND_TYPES = new Set(['prognosInUt', 'nettoOverTid']);
 const TREND_HORIZONS = new Set([1, 3, 6, 12]);
 const TREND_HISTORY = new Set(['3', '6', '12', '24', 'allt']);
+const TREND_CAT_MODES = new Set(['bocklista', 'alla']);
 
 const trendTypeMenu = el('trendTypeMenu');
 const trendHistoryMenu = el('trendHistoryMenu');
 const trendHorizonMenu = el('trendHorizonMenu');
+const trendCatMenu = el('trendCatMenu');
 const trendMessages = el('trendMessages');
 const trendBody = el('trendBody');
 const trendPlaceholder = el('trendPlaceholder');
@@ -9823,10 +9945,14 @@ function saveTrendPrefs(){
   const history = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
     ? trendHistoryMenu.value
     : '12';
+  const catMode = trendCatMenu && TREND_CAT_MODES.has(trendCatMenu.value)
+    ? trendCatMenu.value
+    : 'bocklista';
   all[bookId] = {
     type: trendTypeMenu.value,
     history: history,
-    horizon: TREND_HORIZONS.has(horizon) ? horizon : 12
+    horizon: TREND_HORIZONS.has(horizon) ? horizon : 12,
+    catMode: catMode
   };
   localStorage.setItem(TREND_PREFS_KEY, JSON.stringify(all));
 }
@@ -9847,6 +9973,11 @@ function restoreTrendPrefs(){
     const h = saved && TREND_HORIZONS.has(Number(saved.horizon)) ? String(saved.horizon) : '12';
     if(trendHorizonMenu.querySelector('option[value="' + h + '"]')) trendHorizonMenu.value = h;
     else trendHorizonMenu.value = '12';
+  }
+  if(trendCatMenu){
+    const cat = saved && TREND_CAT_MODES.has(saved.catMode) ? saved.catMode : 'bocklista';
+    if(trendCatMenu.querySelector('option[value="' + cat + '"]')) trendCatMenu.value = cat;
+    else trendCatMenu.value = 'bocklista';
   }
 }
 
@@ -9879,7 +10010,9 @@ function trendHistoryDateRange(historyVal){
   return { from: from, to: toIso };
 }
 
-function renderTrendPrognosInUt(){
+function renderTrendPrognosInUt(viewKind){
+  viewKind = viewKind || 'prognosInUt';
+  const onlyNet = viewKind === 'nettoOverTid';
   const historyVal = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
     ? trendHistoryMenu.value
     : '12';
@@ -9896,7 +10029,7 @@ function renderTrendPrognosInUt(){
   const wrap = document.createElement('div');
   wrap.className = 'report-table-wrap';
 
-  const title = 'PROGNOS IN/UT';
+  const title = onlyNet ? 'NETTO ÖVER TID' : 'PROGNOS IN/UT';
   const updatedHtml = '<p class="report-table-updated">'
     + escapeHtml(reportUpdatedLineHtml()) + '</p>';
   let head = '<div class="report-table-head">'
@@ -9919,14 +10052,21 @@ function renderTrendPrognosInUt(){
     + updatedHtml
     + '</div></div>';
 
+  const catMode = trendCategoryMode();
+  const basText = catMode === 'alla'
+    ? 'Bas: alla kategorier (ej överföringar). '
+    : ('Bas: ibockade kategorier i Registervård → Trend'
+      + ' (' + data.includedCats + ' med, ' + data.excludedCats + ' utan). ');
+
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
     + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
     + ' · ' + data.months.length + ' fulländade månader'
     + ' (pågående månad ingår inte). '
-    + 'Bas: ibockade kategorier i Registervård → Trend'
-    + ' (' + data.includedCats + ' med, ' + data.excludedCats + ' utan). '
-    + 'Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
-    + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))
+    + basText
+    + (onlyNet
+      ? ('Lutning Netto ' + escapeHtml(formatTrendSlope(data.fitIn.b - data.fitUt.b)))
+      : ('Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
+        + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))))
     + ' (OLS, lätt IQR-winsorize). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
@@ -9953,7 +10093,7 @@ function renderTrendPrognosInUt(){
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
-    + buildTrendInUtLineChart(data)
+    + buildTrendInUtLineChart(data, { onlyNet: onlyNet })
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
     + historyBlock + forecastBlock
@@ -9981,9 +10121,10 @@ function renderTrendPage(){
   }
   if(trendMessages) clear(trendMessages);
   restoreTrendPrefs();
+  syncReportMobileLayout();
   const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
-  if(type === 'prognosInUt'){
-    renderTrendPrognosInUt();
+  if(type === 'prognosInUt' || type === 'nettoOverTid'){
+    renderTrendPrognosInUt(type);
   } else {
     clearTrendCanvas();
     if(trendPlaceholder){
@@ -10026,6 +10167,12 @@ if(trendHistoryMenu){
 }
 if(trendHorizonMenu){
   trendHorizonMenu.addEventListener('change', () => {
+    saveTrendPrefs();
+    renderTrendPage();
+  });
+}
+if(trendCatMenu){
+  trendCatMenu.addEventListener('change', () => {
     saveTrendPrefs();
     renderTrendPage();
   });
