@@ -596,7 +596,15 @@ body.trend-view-active{
   flex:1 1 100%;
   text-align:right;
   white-space:normal;
-  font-size:11px;
+  font-size:12px;
+}
+#viewTrend.report-mobile .trend-line-chart-legend{
+  font-size:12px;
+  font-weight:500;
+  gap:8px 12px;
+}
+#viewTrend.report-mobile .trend-line-chart-legend .trend-delta{
+  font-weight:400;
 }
 #viewTrend.report-mobile .trend-forecast-table{
   width:100%;
@@ -4094,7 +4102,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v14';
+const APP_VERSION = '2026-09-20 v15';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9751,6 +9759,11 @@ function trendHorizonLabel(n){
   return n + ' månader';
 }
 
+/** Axelfont i trenddiagram: dator = legenden (14), mobil = Uppdaterad (12). */
+function trendChartAxisFontSize(){
+  return isReportMobileLayout() ? 12 : 14;
+}
+
 /** Linjediagram: historik In/Ut/Netto + OLS-trendlinjer (historik + prognos). */
 function buildTrendInUtLineChart(data, opts){
   opts = opts || {};
@@ -9815,10 +9828,11 @@ function buildTrendInUtLineChart(data, opts){
 
   const W = 560;
   const H = 220;
-  const padL = 48;
+  const axisFs = trendChartAxisFontSize();
+  const padL = axisFs >= 14 ? 64 : 54;
   const padR = 12;
   const padT = 14;
-  const padB = 28;
+  const padB = axisFs >= 14 ? 32 : 30;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const xAt = i => padL + (total === 1 ? plotW / 2 : (i / (total - 1)) * plotW);
@@ -9897,7 +9911,7 @@ function buildTrendInUtLineChart(data, opts){
     const val = ymax - ((ymax - ymin) * g) / 3;
     const gy = padT + (plotH * g) / 3;
     svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
-      + ' font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + ' font-family="JetBrains Mono, monospace" font-size="' + axisFs + '" fill="' + axis + '">'
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
 
@@ -9907,7 +9921,7 @@ function buildTrendInUtLineChart(data, opts){
   for(const i of labelIdx){
     if(i < 0 || i >= total) continue;
     svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
-      + ' font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + ' font-family="JetBrains Mono, monospace" font-size="' + axisFs + '" fill="' + axis + '">'
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
@@ -10347,10 +10361,11 @@ function buildTrendNettoLineChart(data){
 
   const W = 560;
   const H = 220;
-  const padL = 52;
+  const axisFs = trendChartAxisFontSize();
+  const padL = axisFs >= 14 ? 64 : 54;
   const padR = 12;
   const padT = 14;
-  const padB = 28;
+  const padB = axisFs >= 14 ? 32 : 30;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const xAt = i => padL + (total === 1 ? plotW / 2 : (i / (total - 1)) * plotW);
@@ -10402,7 +10417,7 @@ function buildTrendNettoLineChart(data){
     const val = ymax - ((ymax - ymin) * g) / 3;
     const gy = padT + (plotH * g) / 3;
     svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
-      + ' font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + ' font-family="JetBrains Mono, monospace" font-size="' + axisFs + '" fill="' + axis + '">'
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
 
@@ -10412,7 +10427,7 @@ function buildTrendNettoLineChart(data){
   for(const i of labelIdx){
     if(i < 0 || i >= total) continue;
     svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
-      + ' font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + ' font-family="JetBrains Mono, monospace" font-size="' + axisFs + '" fill="' + axis + '">'
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
