@@ -481,21 +481,31 @@ input[type=file]{ display:none; }
 .trend-toolbar #trendHistoryMenu{ grid-column:3; grid-row:2; }
 .trend-toolbar #trendHorizonMenu{ grid-column:4; grid-row:2; }
 .trend-toolbar #trendCatMenu{ grid-column:5; grid-row:2; }
+#viewTrend{
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  overflow-x:hidden;
+}
+#viewTrend > .eyebrow.view-headline{
+  display:block;
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  margin:0 0 16px;
+  padding:0;
+  flex:none;
+}
 #viewTrend > .report-wrap{
   display:flex;
   flex-direction:column;
   width:100%;
   max-width:min(1100px, 100%);
   box-sizing:border-box;
-  min-height:calc(100dvh - 48px);
-  padding-left:max(12px, env(safe-area-inset-left, 0px));
-  padding-right:max(12px, env(safe-area-inset-right, 0px));
-}
-#viewTrend .eyebrow.view-headline{
-  display:block;
-  width:100%;
-  flex:0 0 auto;
-  margin:0 0 14px;
+  min-height:calc(100dvh - 72px);
+  padding-left:0;
+  padding-right:0;
+  overflow-x:hidden;
 }
 #viewTrend .report-toolbar-scroll{
   display:block;
@@ -512,6 +522,14 @@ input[type=file]{ display:none; }
   width:100%;
   max-width:100%;
   box-sizing:border-box;
+  overflow:hidden;
+}
+#viewTrend.report-mobile{
+  padding:0 10px;
+  box-sizing:border-box;
+}
+#viewTrend.report-mobile > .eyebrow.view-headline{
+  margin:0 0 12px;
 }
 #viewTrend.report-mobile .trend-toolbar{
   grid-template-columns:max-content minmax(0, 1fr);
@@ -536,17 +554,44 @@ input[type=file]{ display:none; }
   grid-column:2;
   grid-row:auto;
 }
-#viewTrend.report-mobile .report-wrap{
-  min-height:calc(100dvh - 36px);
-  padding-left:12px;
-  padding-right:12px;
+#viewTrend.report-mobile > .report-wrap{
+  min-height:calc(100dvh - 56px);
+  max-width:100%;
+  overflow-x:hidden;
 }
 #viewTrend.report-mobile .report-canvas.has-report{
   width:100%;
   max-width:100%;
   margin:0;
-  padding:12px 10px 14px;
+  padding:10px 8px 12px;
   min-height:0;
+  overflow:hidden;
+}
+#viewTrend.report-mobile .report-table-wrap,
+#viewTrend.report-mobile .trend-body-scroll,
+#viewTrend.report-mobile .trend-line-chart-wrap{
+  max-width:100%;
+  overflow-x:hidden;
+}
+#viewTrend.report-mobile .report-table-title-row{
+  flex-wrap:wrap;
+  gap:6px 8px;
+}
+#viewTrend.report-mobile .report-table-title-row .report-table-updated{
+  margin-left:0;
+  flex:1 1 100%;
+  text-align:right;
+  white-space:normal;
+  font-size:11px;
+}
+#viewTrend.report-mobile .trend-forecast-table{
+  width:100%;
+  min-width:0 !important;
+  max-width:100%;
+}
+#viewTrend.report-mobile .trend-forecast-table th,
+#viewTrend.report-mobile .trend-forecast-table td{
+  white-space:nowrap;
 }
 .trend-section-title{
   margin:14px 0 6px;
@@ -637,15 +682,22 @@ input[type=file]{ display:none; }
 .trend-line-chart-legend{
   display:flex;
   flex-wrap:wrap;
-  gap:8px 14px;
-  margin:6px 2px 2px;
-  font-size:11px;
-  color:var(--text-on-paper-soft);
+  gap:10px 18px;
+  margin:8px 2px 2px;
+  font-size:14px;
+  font-weight:600;
+  color:var(--text-on-paper);
+  letter-spacing:0.02em;
 }
 .trend-line-chart-legend span{
   display:inline-flex;
   align-items:center;
-  gap:5px;
+  gap:6px;
+}
+.trend-line-chart-legend .trend-delta{
+  font-family:'JetBrains Mono', monospace;
+  font-weight:500;
+  color:var(--text-on-paper-soft);
 }
 .trend-line-chart-swatch{
   display:inline-block;
@@ -3165,9 +3217,8 @@ td.num.dash .cell-content{
 
 <!-- ===================== VY: TRENDHANTERING ===================== -->
 <div class="view" id="viewTrend" hidden>
+  <p class="eyebrow view-headline" id="trendViewHeadline">nopEKONOMI - — - Trendhantering</p>
   <div class="wrap wide report-wrap">
-
-    <p class="eyebrow view-headline" id="trendViewHeadline">nopEKONOMI - — - Trendhantering</p>
 
     <div class="report-toolbar-scroll">
     <div class="trend-toolbar">
@@ -4029,7 +4080,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v08';
+const APP_VERSION = '2026-09-20 v09';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9845,11 +9896,19 @@ function buildTrendInUtLineChart(data, opts){
   }
 
   let legend = '<p class="trend-line-chart-legend">';
+  const deltaLabel = (name, delta, swatchClass) =>
+    '<span><i class="trend-line-chart-swatch ' + swatchClass + '" aria-hidden="true"></i>'
+    + '--- ' + escapeHtml(name) + ' <span class="trend-delta">('
+    + escapeHtml(formatReportInt(delta)) + ')</span></span>';
+  const lastT = total - 1;
+  const dIn = Math.round(fitInAll[lastT] - fitInAll[0]);
+  const dUt = Math.round(fitUtAll[lastT] - fitUtAll[0]);
+  const dNet = Math.round(fitNetAll[lastT] - fitNetAll[0]);
   if(!onlyNet){
-    legend += '<span><i class="trend-line-chart-swatch is-in" aria-hidden="true"></i>In</span>'
-      + '<span><i class="trend-line-chart-swatch is-ut" aria-hidden="true"></i>Ut</span>';
+    legend += deltaLabel('In', dIn, 'is-in')
+      + deltaLabel('Ut', dUt, 'is-ut');
   }
-  legend += '<span><i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>Netto</span></p>';
+  legend += deltaLabel('Netto', dNet, 'is-net') + '</p>';
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
@@ -9865,7 +9924,7 @@ function trendInUtDrillCellHtml(amount, month, side, amtCls){
   return '<td class="num report-drillable' + amtCls + '"'
     + ' data-drill="' + escapeAttr(JSON.stringify(drill)) + '"'
     + ' title="Dubbelklicka för transaktionslista">'
-    + escapeHtml(formatAmount(Math.round(amount)))
+    + escapeHtml(formatReportInt(Math.round(amount)))
     + '</td>';
 }
 
@@ -9876,15 +9935,15 @@ function trendInUtRowHtml(month, income, expense, net, opts){
   const amtCls = opts.sum ? ' total-amt' : '';
   const inTd = opts.drillable
     ? trendInUtDrillCellHtml(income, month, 'in', amtCls)
-    : '<td class="num' + amtCls + '">' + escapeHtml(formatAmount(Math.round(income))) + '</td>';
+    : '<td class="num' + amtCls + '">' + escapeHtml(formatReportInt(Math.round(income))) + '</td>';
   const utTd = opts.drillable
     ? trendInUtDrillCellHtml(expense, month, 'ut', amtCls)
-    : '<td class="num' + amtCls + '">' + escapeHtml(formatAmount(Math.round(expense))) + '</td>';
+    : '<td class="num' + amtCls + '">' + escapeHtml(formatReportInt(Math.round(expense))) + '</td>';
   return '<tr' + rowCls + '>'
     + '<td class="report-label-col">' + escapeHtml(month) + '</td>'
     + inTd
     + utTd
-    + '<td class="num' + amtCls + netCls + '">' + escapeHtml(formatAmount(Math.round(net))) + '</td>'
+    + '<td class="num' + amtCls + netCls + '">' + escapeHtml(formatReportInt(Math.round(net))) + '</td>'
     + '</tr>';
 }
 
