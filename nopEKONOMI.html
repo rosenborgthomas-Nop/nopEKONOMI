@@ -4083,7 +4083,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v12';
+const APP_VERSION = '2026-09-20 v13';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10222,33 +10222,202 @@ function collectTrendNetOverTime(fromIso, toIso){
   const points = [];
   let cumulative = opening;
   for(const mk of months){
-    cumulative += monthlyDelta[mk] || 0;
-    points.push({ month: mk, value: cumulative });
+    const delta = monthlyDelta[mk] || 0;
+    cumulative += delta;
+    points.push({ month: mk, value: cumulative, delta: delta });
   }
 
   return { months: months, points: points, opening: opening };
 }
 
-function trendNettoTableHtml(points, opening){
+/** OLS-prognos på kumulativt netto (samma mönster som Prognos In/Ut). */
+function buildTrendNettoForecast(fromIso, toIso, horizon){
+  horizon = horizon || 12;
+  const series = collectTrendNetOverTime(fromIso, toIso);
+  const { months, points, opening } = series;
+  if(months.length < 2){
+    return {
+      ok: false,
+      reason: 'Behöver minst två månader i intervallet.',
+      months, points, opening
+    };
+  }
+
+  const values = points.map(p => p.value);
+  const fit = olsFitSeries(winsorizeSeries(values));
+  const n = months.length;
+  const lastMk = months[n - 1];
+  const forecast = [];
+  for(let h = 1; h <= horizon; h++){
+    const t = n - 1 + h;
+    const value = fit.a + fit.b * t;
+    const prev = h === 1
+      ? (fit.a + fit.b * (n - 1))
+      : (fit.a + fit.b * (t - 1));
+    forecast.push({
+      month: addMonthKey(lastMk, h),
+      value: value,
+      delta: value - prev
+    });
+  }
+
+  return {
+    ok: true,
+    months,
+    points,
+    opening,
+    values,
+    fit,
+    forecast,
+    historyFrom: months[0],
+    historyTo: lastMk
+  };
+}
+
+function trendNettoTableHtml(rows, opts){
+  opts = opts || {};
+  const showDelta = opts.showDelta !== false;
   let html = '<table class="report-table trend-forecast-table"><thead><tr>'
-    + '<th class="report-label-col">Månad</th>'
-    + '<th class="num">Ändring</th>'
-    + '<th class="num">Kumulativt</th>'
-    + '</tr></thead><tbody>';
-  for(let i = 0; i < points.length; i++){
-    const p = points[i];
-    const prev = netOverTimePrevValue(points, i, opening);
-    const delta = p.value - (prev == null ? 0 : prev);
-    const deltaCls = delta < 0 ? ' neg' : '';
-    const cumCls = p.value < 0 ? ' neg' : '';
+    + '<th class="report-label-col">Månad</th>';
+  if(showDelta) html += '<th class="num">Ändring</th>';
+  html += '<th class="num">Kumulativt</th></tr></thead><tbody>';
+  for(const r of rows){
+    const deltaCls = (r.delta || 0) < 0 ? ' neg' : '';
+    const cumCls = r.value < 0 ? ' neg' : '';
     html += '<tr>'
-      + '<td class="report-label-col">' + escapeHtml(p.month) + '</td>'
-      + '<td class="num' + deltaCls + '">' + escapeHtml(formatReportInt(Math.round(delta))) + '</td>'
-      + '<td class="num' + cumCls + '">' + escapeHtml(formatReportInt(Math.round(p.value))) + '</td>'
+      + '<td class="report-label-col">' + escapeHtml(r.month) + '</td>';
+    if(showDelta){
+      html += '<td class="num' + deltaCls + '">'
+        + escapeHtml(formatReportInt(Math.round(r.delta || 0))) + '</td>';
+    }
+    html += '<td class="num' + cumCls + '">'
+      + escapeHtml(formatReportInt(Math.round(r.value))) + '</td>'
       + '</tr>';
   }
   html += '</tbody></table>';
   return html;
+}
+
+/** Linjediagram: kumulativt netto + OLS-trend (historik + prognos). */
+function buildTrendNettoLineChart(data){
+  const histN = data.months.length;
+  const forecast = data.forecast || [];
+  const allMonths = data.months.concat(forecast.map(p => p.month));
+  const total = allMonths.length;
+  if(total < 2){
+    return '<div class="trend-line-chart-wrap">'
+      + '<p class="payee-chart-empty">För få månader för diagram.</p>'
+      + '</div>';
+  }
+
+  const histVals = data.values || data.points.map(p => p.value);
+  const fitAll = [];
+  for(let i = 0; i < total; i++){
+    fitAll.push(data.fit.a + data.fit.b * i);
+  }
+
+  let ymin = Infinity;
+  let ymax = -Infinity;
+  const bump = v => {
+    if(!Number.isFinite(v)) return;
+    if(v < ymin) ymin = v;
+    if(v > ymax) ymax = v;
+  };
+  for(let i = 0; i < histN; i++) bump(histVals[i]);
+  for(let i = 0; i < total; i++) bump(fitAll[i]);
+  if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){
+    ymin = 0;
+    ymax = 1;
+  }
+  if(ymax <= ymin) ymax = ymin + 1;
+  const padY = (ymax - ymin) * 0.08 || 1;
+  ymin -= padY;
+  ymax += padY;
+
+  const W = 560;
+  const H = 220;
+  const padL = 52;
+  const padR = 12;
+  const padT = 14;
+  const padB = 28;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const xAt = i => padL + (total === 1 ? plotW / 2 : (i / (total - 1)) * plotW);
+  const yAt = v => padT + plotH - ((v - ymin) / (ymax - ymin)) * plotH;
+
+  const colNet = '#2B579A';
+  const grid = '#A8BDD4';
+  const axis = '#5A6F88';
+
+  let svg = '';
+  for(let g = 0; g <= 3; g++){
+    const gy = padT + (plotH * g) / 3;
+    svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '"'
+      + ' stroke="' + grid + '" stroke-width="0.6" opacity="0.55"/>';
+  }
+  if(ymin < 0 && ymax > 0){
+    const zy = yAt(0);
+    svg += '<line x1="' + padL + '" y1="' + zy + '" x2="' + (W - padR) + '" y2="' + zy + '"'
+      + ' stroke="' + axis + '" stroke-width="1" opacity="0.45"/>';
+  }
+  if(forecast.length && histN > 0){
+    const bx = (xAt(histN - 1) + xAt(histN)) / 2;
+    svg += '<line x1="' + bx + '" y1="' + padT + '" x2="' + bx + '" y2="' + (padT + plotH) + '"'
+      + ' stroke="' + axis + '" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>';
+  }
+
+  const poly = (vals, color, dash, width) => {
+    const pts = vals.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+    return '<polyline fill="none" stroke="' + color + '" stroke-width="' + width + '"'
+      + ' stroke-linejoin="round" stroke-linecap="round"'
+      + (dash ? ' stroke-dasharray="' + dash + '"' : '')
+      + ' points="' + pts + '"/>';
+  };
+
+  svg += poly(fitAll, colNet, '5 4', 2);
+  const histPts = histVals.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+  svg += '<polyline fill="none" stroke="' + colNet + '" stroke-width="2.2" stroke-linejoin="round"'
+    + ' stroke-linecap="round" points="' + histPts + '"/>';
+
+  for(let i = 0; i < histN; i++){
+    svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(histVals[i]).toFixed(1)
+      + '" r="3" fill="' + colNet + '">'
+      + '<title>' + escapeHtml(monthKeyYyMm(data.months[i]) + ' '
+        + formatReportInt(Math.round(histVals[i]))) + '</title>'
+      + '</circle>';
+  }
+
+  for(let g = 0; g <= 3; g++){
+    const val = ymax - ((ymax - ymin) * g) / 3;
+    const gy = padT + (plotH * g) / 3;
+    svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
+      + ' font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
+  }
+
+  const labelIdx = new Set([0, histN - 1, total - 1]);
+  const step = Math.max(1, Math.ceil(total / 6));
+  for(let i = 0; i < total; i += step) labelIdx.add(i);
+  for(const i of labelIdx){
+    if(i < 0 || i >= total) continue;
+    svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
+      + ' font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
+  }
+
+  const dNet = Math.round(fitAll[total - 1] - fitAll[0]);
+  const legend = '<p class="trend-line-chart-legend">'
+    + '<span><i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
+    + '--- Netto <span class="trend-delta">('
+    + escapeHtml(formatReportInt(dNet)) + ')</span></span></p>';
+
+  return '<div class="trend-line-chart-wrap">'
+    + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
+    + ' aria-label="Kumulativt netto med prognos">'
+    + svg
+    + '</svg>'
+    + legend
+    + '</div>';
 }
 
 function renderTrendNettoOverTid(){
@@ -10258,35 +10427,37 @@ function renderTrendNettoOverTid(){
   const range = trendHistoryDateRange(historyVal);
   const fromIso = range.from;
   const toIso = range.to;
-  const data = collectTrendNetOverTime(fromIso, toIso);
-  const { months, points, opening } = data;
+  const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
+  const data = buildTrendNettoForecast(fromIso, toIso, horizon);
 
   clearTrendCanvas();
   if(trendPlaceholder) trendPlaceholder.hidden = true;
-  if(trendBody) trendBody.classList.add('has-report', 'report-chart-layout');
+  if(trendBody) trendBody.classList.add('has-report');
 
   const wrap = document.createElement('div');
   wrap.className = 'report-table-wrap';
 
   const updatedHtml = '<p class="report-table-updated">'
     + escapeHtml(reportUpdatedLineHtml()) + '</p>';
-  const detailsId = 'trendPrognosDetails';
   let head = '<div class="report-table-head">'
     + '<div class="report-table-title-row">'
-    + '<p class="report-table-title">NETTO ÖVER TID</p>'
-    + '<button type="button" class="help-tip-btn trend-details-btn"'
+    + '<p class="report-table-title">NETTO ÖVER TID</p>';
+
+  if(!data.ok){
+    head += updatedHtml + '</div></div>';
+    wrap.innerHTML = head
+      + '<p class="report-empty-note">' + escapeHtml(data.reason || 'Kunde inte beräkna trend.') + '</p>';
+    trendBody.appendChild(wrap);
+    return;
+  }
+
+  const detailsId = 'trendPrognosDetails';
+  head += '<button type="button" class="help-tip-btn trend-details-btn"'
     + ' aria-label="Visa förklaring och tabeller"'
     + ' aria-expanded="false"'
     + ' aria-controls="' + detailsId + '">?</button>'
     + updatedHtml
     + '</div></div>';
-
-  if(!months.length){
-    wrap.innerHTML = head
-      + '<p class="report-empty-note">Inga månader i valt historikintervall.</p>';
-    trendBody.appendChild(wrap);
-    return;
-  }
 
   const catMode = trendCategoryMode();
   const basText = catMode === 'alla'
@@ -10294,21 +10465,29 @@ function renderTrendNettoOverTid(){
     : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Trend. ';
 
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
-    + 'Historik: ' + escapeHtml(fromIso) + ' – ' + escapeHtml(toIso)
-    + ' · ' + months.length + ' månader. '
+    + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
+    + ' · ' + data.months.length + ' fulländade månader'
+    + ' (pågående månad ingår inte). '
     + basText
-    + 'Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(opening))) + '.'
+    + 'Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(data.opening))) + '. '
+    + 'Lutning ' + escapeHtml(formatTrendSlope(data.fit.b))
+    + ' (OLS, lätt IQR-winsorize). '
+    + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
 
   const historyBlock = '<p class="trend-section-title">Historik</p>'
-    + trendNettoTableHtml(points, opening);
+    + trendNettoTableHtml(data.points);
+
+  const forecastBlock = '<p class="trend-section-title">Prognos ('
+    + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
+    + trendNettoTableHtml(data.forecast);
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
-    + buildNetOverTimeChart(points, opening)
+    + buildTrendNettoLineChart(data)
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
-    + historyBlock
+    + historyBlock + forecastBlock
     + '</div>'
     + '</div>';
   trendBody.appendChild(wrap);
@@ -10327,12 +10506,10 @@ function renderTrendNettoOverTid(){
 }
 
 function syncTrendControlsForType(){
-  const isNetto = !!(trendTypeMenu && trendTypeMenu.value === 'nettoOverTid');
-  if(trendHorizonMenu){
-    trendHorizonMenu.disabled = isNetto;
-  }
+  // Horisont används av både Prognos In/Ut och Netto över tid.
+  if(trendHorizonMenu) trendHorizonMenu.disabled = false;
   const lab = document.querySelector('label[for="trendHorizonMenu"]');
-  if(lab) lab.classList.toggle('is-muted', isNetto);
+  if(lab) lab.classList.remove('is-muted');
 }
 
 function renderTrendPage(){
