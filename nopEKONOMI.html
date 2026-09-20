@@ -465,6 +465,24 @@ input[type=file]{ display:none; }
   text-transform:uppercase;
   color:var(--ink, #1a3050);
 }
+.report-table-title-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.report-table-title-row .report-table-title{
+  margin:0;
+}
+.trend-details-btn{
+  position:relative;
+}
+.trend-prognos-details{
+  margin-top:10px;
+}
+.trend-prognos-details[hidden]{
+  display:none !important;
+}
 .trend-section-title:first-of-type{ margin-top:0; }
 .report-toolbar input[type=date]{
   width:7.2rem;
@@ -2866,7 +2884,7 @@ td.num.dash .cell-content{
       <select id="startMenu" class="menu-select">
         <option value="newTransaction">Ny transaktion</option>
         <option value="report">Rapport</option>
-        <option value="trend">Trend</option>
+        <option value="trend" id="startMenuTrendOpt">Trend</option>
         <option value="" disabled class="menu-sep">────────</option>
         <option value="registervard">Registervård</option>
         <option value="settings">Inställningar</option>
@@ -3084,7 +3102,7 @@ td.num.dash .cell-content{
         <option value="payee">Payee</option>
         <option value="kategori">Kategori</option>
         <option value="underkategori">Underkategori</option>
-        <option value="trend">Trend</option>
+        <option value="trend" id="careHubTrendOpt">Trend</option>
         <option value="" disabled class="menu-sep" id="careHubBookSep">────────</option>
         <option value="bok">Bok (backup)</option>
       </select>
@@ -3824,7 +3842,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v01';
+const APP_VERSION = '2026-09-20 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6495,6 +6513,7 @@ async function refreshStartBackupHintFromDisk(){
 
 function renderStart(){
   startMenu.selectedIndex = 0;
+  syncTrendMenuGates();
 
   const rec = lastBackupRecord(bookId);
   paintStartBackupHint(rec && rec.at, rec && rec.posts);
@@ -6583,10 +6602,8 @@ function runStartMenu(){
       show('report');
       break;
     case 'trend':
-      if(bookTransactionCount() < REPORT_MIN_TRANSACTIONS){
-        addBox(startMessages, 'notice',
-          'Trend kräver minst ' + REPORT_MIN_TRANSACTIONS
-          + ' transaktioner i boken (nu: ' + bookTransactionCount() + ').');
+      if(!bookMeetsTrendMonthGate()){
+        addBox(startMessages, 'notice', trendMonthGateNotice());
         break;
       }
       show('trend');
@@ -9296,6 +9313,58 @@ function endOfLastCompleteTrendMonthIso(){
   return endOfCalendarMonthIso(prev.y, prev.m);
 }
 
+/** Minsta antal fulländade månader med bokdata för Trend (meny + register). */
+const TREND_MIN_COMPLETE_MONTHS = 3;
+
+/** Fulländade månader (YYYY-MM) som har minst en rapportberättigad post. */
+function completeTrendMonthKeysWithData(){
+  if(!book || !book.order) return [];
+  const toIso = endOfLastCompleteTrendMonthIso();
+  const lastMk = monthKeyFromIso(toIso);
+  const seen = Object.create(null);
+  for(const name of book.order){
+    const acc = book.accounts[name];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(isReportExcludedRow(r)) continue;
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(d > toIso) continue;
+      const mk = monthKeyFromIso(d);
+      if(mk > lastMk) continue;
+      seen[mk] = true;
+    }
+  }
+  return Object.keys(seen).sort();
+}
+
+function bookMeetsTrendMonthGate(){
+  return completeTrendMonthKeysWithData().length >= TREND_MIN_COMPLETE_MONTHS;
+}
+
+function trendMonthGateNotice(){
+  const n = completeTrendMonthKeysWithData().length;
+  return 'Trend kräver minst ' + TREND_MIN_COMPLETE_MONTHS
+    + ' fulländade månader med data (nu: ' + n + ').';
+}
+
+function syncTrendMenuGates(){
+  const ok = bookMeetsTrendMonthGate();
+  const tip = ok ? '' : trendMonthGateNotice();
+  const startOpt = el('startMenuTrendOpt');
+  if(startOpt){
+    startOpt.disabled = !ok;
+    if(tip) startOpt.title = tip;
+    else startOpt.removeAttribute('title');
+  }
+  const careOpt = el('careHubTrendOpt');
+  if(careOpt){
+    careOpt.disabled = !ok;
+    if(tip) careOpt.title = tip;
+    else careOpt.removeAttribute('title');
+  }
+}
+
 /**
  * Månadsserie In/Ut från Trend-registret (ibockade kategorier / underkategorier).
  * Bara fulländade månader — ingen skattning av pågående månad.
@@ -9566,16 +9635,27 @@ function renderTrendPrognosInUt(){
 
   const title = 'PROGNOS IN/UT';
   let head = '<div class="report-table-head">'
-    + '<p class="report-table-title">' + escapeHtml(title) + '</p>'
-    + '<p class="report-table-updated">' + escapeHtml(reportUpdatedLineHtml()) + '</p>'
-    + '</div>';
+    + '<div class="report-table-title-row">'
+    + '<p class="report-table-title">' + escapeHtml(title) + '</p>';
 
   if(!data.ok){
+    head += '</div>'
+      + '<p class="report-table-updated">' + escapeHtml(reportUpdatedLineHtml()) + '</p>'
+      + '</div>';
     wrap.innerHTML = head
       + '<p class="report-empty-note">' + escapeHtml(data.reason || 'Kunde inte beräkna trend.') + '</p>';
     trendBody.appendChild(wrap);
     return;
   }
+
+  const detailsId = 'trendPrognosDetails';
+  head += '<button type="button" class="help-tip-btn trend-details-btn"'
+    + ' aria-label="Visa historik och prognos"'
+    + ' aria-expanded="false"'
+    + ' aria-controls="' + detailsId + '">?</button>'
+    + '</div>'
+    + '<p class="report-table-updated">' + escapeHtml(reportUpdatedLineHtml()) + '</p>'
+    + '</div>';
 
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
     + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
@@ -9617,12 +9697,27 @@ function renderTrendPrognosInUt(){
     )
     + '</div>';
 
-  wrap.innerHTML = head + note + historyBlock + forecastBlock;
+  wrap.innerHTML = head
+    + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
+    + note + historyBlock + forecastBlock
+    + '</div>';
   trendBody.appendChild(wrap);
+
+  const detailsBtn = wrap.querySelector('.trend-details-btn');
+  const detailsPanel = wrap.querySelector('#' + detailsId);
+  if(detailsBtn && detailsPanel){
+    detailsBtn.addEventListener('click', () => {
+      const open = detailsPanel.hidden;
+      detailsPanel.hidden = !open;
+      detailsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      detailsBtn.setAttribute('aria-label',
+        open ? 'Dölj historik och prognos' : 'Visa historik och prognos');
+    });
+  }
 }
 
 function renderTrendPage(){
-  if(bookTransactionCount() < REPORT_MIN_TRANSACTIONS){
+  if(!bookMeetsTrendMonthGate()){
     show('start');
     return;
   }
@@ -10991,6 +11086,7 @@ document.addEventListener('keydown', e => {
 
 function renderCareHub(){
   careHubMenu.selectedIndex = 0;
+  syncTrendMenuGates();
   hideCareHubSection();
 }
 
@@ -11021,6 +11117,13 @@ function hideCareHubSection(){
 function showCareHubSection(key){
   const cfg = CARE_HUB_SECTIONS[key];
   if(!cfg) return;
+
+  if(key === 'trend' && !bookMeetsTrendMonthGate()){
+    syncTrendMenuGates();
+    if(careHubMenu) careHubMenu.value = '';
+    hideCareHubSection();
+    return;
+  }
 
   if(key === 'bok'){
     if(careHubMenu.value !== key) careHubMenu.value = key;
