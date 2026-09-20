@@ -546,6 +546,11 @@ input[type=file]{ display:none; }
 }
 .trend-line-chart-swatch.is-in{ color:var(--chart-positive); }
 .trend-line-chart-swatch.is-ut{ color:var(--wine); }
+.trend-line-chart-swatch.is-net{ color:var(--teal); }
+#viewTrend .trend-line-chart-wrap{
+  flex:0 0 auto;
+  margin-top:8px;
+}
 .report-toolbar input[type=date]{
   width:7.2rem;
   box-sizing:border-box;
@@ -3904,7 +3909,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v05';
+const APP_VERSION = '2026-09-20 v06';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9546,7 +9551,7 @@ function trendHorizonLabel(n){
   return n + ' månader';
 }
 
-/** Linjediagram: historik In/Ut + OLS-trendlinjer (historik + prognos). */
+/** Linjediagram: historik In/Ut/Netto + OLS-trendlinjer (historik + prognos). */
 function buildTrendInUtLineChart(data){
   const histN = data.months.length;
   const forecast = data.forecast || [];
@@ -9558,11 +9563,20 @@ function buildTrendInUtLineChart(data){
       + '</div>';
   }
 
+  const histNet = [];
+  for(let i = 0; i < histN; i++){
+    histNet.push(data.incomeSeries[i] - data.expenseSeries[i]);
+  }
+
   const fitInAll = [];
   const fitUtAll = [];
+  const fitNetAll = [];
   for(let i = 0; i < total; i++){
-    fitInAll.push(data.fitIn.a + data.fitIn.b * i);
-    fitUtAll.push(data.fitUt.a + data.fitUt.b * i);
+    const fi = data.fitIn.a + data.fitIn.b * i;
+    const fu = data.fitUt.a + data.fitUt.b * i;
+    fitInAll.push(fi);
+    fitUtAll.push(fu);
+    fitNetAll.push(fi - fu);
   }
 
   let ymin = Infinity;
@@ -9575,10 +9589,12 @@ function buildTrendInUtLineChart(data){
   for(let i = 0; i < histN; i++){
     bump(data.incomeSeries[i]);
     bump(data.expenseSeries[i]);
+    bump(histNet[i]);
   }
   for(let i = 0; i < total; i++){
     bump(fitInAll[i]);
     bump(fitUtAll[i]);
+    bump(fitNetAll[i]);
   }
   if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){
     ymin = 0;
@@ -9588,11 +9604,11 @@ function buildTrendInUtLineChart(data){
     ymax = ymin + 1;
   }
   const padY = (ymax - ymin) * 0.08 || 1;
-  ymin = Math.max(0, ymin - padY);
-  ymax = ymax + padY;
+  ymin -= padY;
+  ymax += padY;
 
   const W = 560;
-  const H = 210;
+  const H = 220;
   const padL = 48;
   const padR = 12;
   const padT = 14;
@@ -9604,18 +9620,23 @@ function buildTrendInUtLineChart(data){
 
   const colIn = '#3A8F5C';
   const colUt = '#A33B3B';
+  const colNet = '#2B579A';
   const grid = '#A8BDD4';
   const axis = '#5A6F88';
 
   let svg = '';
-  // Horisontella hjälplinjer
   for(let g = 0; g <= 3; g++){
     const gy = padT + (plotH * g) / 3;
     svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '"'
       + ' stroke="' + grid + '" stroke-width="0.6" opacity="0.55"/>';
   }
 
-  // Gräns historik | prognos
+  if(ymin < 0 && ymax > 0){
+    const zy = yAt(0);
+    svg += '<line x1="' + padL + '" y1="' + zy + '" x2="' + (W - padR) + '" y2="' + zy + '"'
+      + ' stroke="' + axis + '" stroke-width="1" opacity="0.45"/>';
+  }
+
   if(forecast.length && histN > 0){
     const bx = (xAt(histN - 1) + xAt(histN)) / 2;
     svg += '<line x1="' + bx + '" y1="' + padT + '" x2="' + bx + '" y2="' + (padT + plotH) + '"'
@@ -9630,30 +9651,36 @@ function buildTrendInUtLineChart(data){
       + ' points="' + pts + '"/>';
   };
 
-  // OLS-trendlinjer (hela spannet) — streckade i prognosdelen ritas som en heldragen trendlinje
   svg += poly(fitInAll, colIn, '5 4', 2);
   svg += poly(fitUtAll, colUt, '5 4', 2);
+  svg += poly(fitNetAll, colNet, '5 4', 2);
 
-  // Faktisk historik
   const histInPts = data.incomeSeries.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
   const histUtPts = data.expenseSeries.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+  const histNetPts = histNet.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
   svg += '<polyline fill="none" stroke="' + colIn + '" stroke-width="2.2" stroke-linejoin="round"'
     + ' stroke-linecap="round" points="' + histInPts + '"/>';
   svg += '<polyline fill="none" stroke="' + colUt + '" stroke-width="2.2" stroke-linejoin="round"'
     + ' stroke-linecap="round" points="' + histUtPts + '"/>';
+  svg += '<polyline fill="none" stroke="' + colNet + '" stroke-width="2.2" stroke-linejoin="round"'
+    + ' stroke-linecap="round" points="' + histNetPts + '"/>';
 
   for(let i = 0; i < histN; i++){
+    const mk = monthKeyYyMm(data.months[i]);
     svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(data.incomeSeries[i]).toFixed(1)
       + '" r="3" fill="' + colIn + '">'
-      + '<title>' + escapeHtml(monthKeyYyMm(data.months[i]) + ' In ' + formatAmount(Math.round(data.incomeSeries[i]))) + '</title>'
+      + '<title>' + escapeHtml(mk + ' In ' + formatAmount(Math.round(data.incomeSeries[i]))) + '</title>'
       + '</circle>';
     svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(data.expenseSeries[i]).toFixed(1)
       + '" r="3" fill="' + colUt + '">'
-      + '<title>' + escapeHtml(monthKeyYyMm(data.months[i]) + ' Ut ' + formatAmount(Math.round(data.expenseSeries[i]))) + '</title>'
+      + '<title>' + escapeHtml(mk + ' Ut ' + formatAmount(Math.round(data.expenseSeries[i]))) + '</title>'
+      + '</circle>';
+    svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(histNet[i]).toFixed(1)
+      + '" r="3" fill="' + colNet + '">'
+      + '<title>' + escapeHtml(mk + ' Netto ' + formatAmount(Math.round(histNet[i]))) + '</title>'
       + '</circle>';
   }
 
-  // Y-etiketter
   for(let g = 0; g <= 3; g++){
     const val = ymax - ((ymax - ymin) * g) / 3;
     const gy = padT + (plotH * g) / 3;
@@ -9662,7 +9689,6 @@ function buildTrendInUtLineChart(data){
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
 
-  // X-etiketter: första, sista historik, sista prognos (+ glesa)
   const labelIdx = new Set([0, histN - 1, total - 1]);
   const step = Math.max(1, Math.ceil(total / 6));
   for(let i = 0; i < total; i += step) labelIdx.add(i);
@@ -9676,13 +9702,15 @@ function buildTrendInUtLineChart(data){
   const legend = '<p class="trend-line-chart-legend">'
     + '<span><i class="trend-line-chart-swatch is-in" aria-hidden="true"></i>In</span>'
     + '<span><i class="trend-line-chart-swatch is-ut" aria-hidden="true"></i>Ut</span>'
+    + '<span><i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>Netto</span>'
     + '<span><i class="trend-line-chart-swatch is-in is-dash" aria-hidden="true"></i>Trend In</span>'
     + '<span><i class="trend-line-chart-swatch is-ut is-dash" aria-hidden="true"></i>Trend Ut</span>'
+    + '<span><i class="trend-line-chart-swatch is-net is-dash" aria-hidden="true"></i>Trend Netto</span>'
     + '</p>';
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
-    + ' aria-label="Trendlinjer In och Ut">'
+    + ' aria-label="Trendlinjer In, Ut och Netto">'
     + svg
     + '</svg>'
     + legend
@@ -9862,7 +9890,7 @@ function renderTrendPrognosInUt(){
 
   const detailsId = 'trendPrognosDetails';
   head += '<button type="button" class="help-tip-btn trend-details-btn"'
-    + ' aria-label="Visa historik och prognos"'
+    + ' aria-label="Visa förklaring och tabeller"'
     + ' aria-expanded="false"'
     + ' aria-controls="' + detailsId + '">?</button>'
     + '</div>'
@@ -9906,9 +9934,9 @@ function renderTrendPrognosInUt(){
     );
 
   wrap.innerHTML = head
+    + buildTrendInUtLineChart(data)
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
-    + buildTrendInUtLineChart(data)
     + historyBlock + forecastBlock
     + '</div>';
   trendBody.appendChild(wrap);
@@ -9921,7 +9949,7 @@ function renderTrendPrognosInUt(){
       detailsPanel.hidden = !open;
       detailsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
       detailsBtn.setAttribute('aria-label',
-        open ? 'Dölj historik och prognos' : 'Visa historik och prognos');
+        open ? 'Dölj förklaring och tabeller' : 'Visa förklaring och tabeller');
     });
   }
 }
