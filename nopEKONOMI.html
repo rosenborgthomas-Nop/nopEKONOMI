@@ -4083,7 +4083,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v11';
+const APP_VERSION = '2026-09-20 v12';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10074,9 +10074,7 @@ function trendHistoryDateRange(historyVal){
   return { from: from, to: toIso };
 }
 
-function renderTrendPrognosInUt(viewKind){
-  viewKind = viewKind || 'prognosInUt';
-  const onlyNet = viewKind === 'nettoOverTid';
+function renderTrendPrognosInUt(){
   const historyVal = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
     ? trendHistoryMenu.value
     : '12';
@@ -10093,7 +10091,7 @@ function renderTrendPrognosInUt(viewKind){
   const wrap = document.createElement('div');
   wrap.className = 'report-table-wrap';
 
-  const title = onlyNet ? 'NETTO ÖVER TID' : 'PROGNOS IN/UT';
+  const title = 'PROGNOS IN/UT';
   const updatedHtml = '<p class="report-table-updated">'
     + escapeHtml(reportUpdatedLineHtml()) + '</p>';
   let head = '<div class="report-table-head">'
@@ -10127,10 +10125,8 @@ function renderTrendPrognosInUt(viewKind){
     + ' · ' + data.months.length + ' fulländade månader'
     + ' (pågående månad ingår inte). '
     + basText
-    + (onlyNet
-      ? ('Lutning Netto ' + escapeHtml(formatTrendSlope(data.fitIn.b - data.fitUt.b)))
-      : ('Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
-        + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))))
+    + 'Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
+    + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))
     + ' (OLS, lätt IQR-winsorize). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
@@ -10157,7 +10153,7 @@ function renderTrendPrognosInUt(viewKind){
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
-    + buildTrendInUtLineChart(data, { onlyNet: onlyNet })
+    + buildTrendInUtLineChart(data)
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
     + historyBlock + forecastBlock
@@ -10178,6 +10174,167 @@ function renderTrendPrognosInUt(viewKind){
   }
 }
 
+/**
+ * Kumulativt netto som i Rapport → Netto över tid.
+ * Alla = samma som rapporten (hela radbelopp inkl. öppningsbalans).
+ * Bocklista = bara ibockade Trend-kategorier (poster, ej öppningsbalans).
+ */
+function collectTrendNetOverTime(fromIso, toIso){
+  const monthlyDelta = Object.create(null);
+  const catMode = trendCategoryMode();
+
+  for(const name of book.order){
+    const acc = book.accounts[name];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+
+      if(catMode === 'alla'){
+        const amount = typeof r.total === 'number' ? r.total : Number(r.total);
+        if(!Number.isFinite(amount)) continue;
+        const mk = monthKeyFromIso(d);
+        monthlyDelta[mk] = (monthlyDelta[mk] || 0) + amount;
+        continue;
+      }
+
+      if(isReportExcludedRow(r)) continue;
+      if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
+      for(const piece of reportPiecesFromRow(r)){
+        if(!trendPieceAllowed(piece.category, piece.subCategory)) continue;
+        const amount = piece.amount;
+        if(!Number.isFinite(amount) || !amount) continue;
+        const mk = monthKeyFromIso(d);
+        monthlyDelta[mk] = (monthlyDelta[mk] || 0) + amount;
+      }
+    }
+  }
+
+  const months = monthKeysInRange(fromIso, toIso);
+  const firstMk = months.length ? months[0] : '';
+  let opening = 0;
+  if(firstMk){
+    for(const mk of Object.keys(monthlyDelta)){
+      if(mk < firstMk) opening += monthlyDelta[mk];
+    }
+  }
+
+  const points = [];
+  let cumulative = opening;
+  for(const mk of months){
+    cumulative += monthlyDelta[mk] || 0;
+    points.push({ month: mk, value: cumulative });
+  }
+
+  return { months: months, points: points, opening: opening };
+}
+
+function trendNettoTableHtml(points, opening){
+  let html = '<table class="report-table trend-forecast-table"><thead><tr>'
+    + '<th class="report-label-col">Månad</th>'
+    + '<th class="num">Ändring</th>'
+    + '<th class="num">Kumulativt</th>'
+    + '</tr></thead><tbody>';
+  for(let i = 0; i < points.length; i++){
+    const p = points[i];
+    const prev = netOverTimePrevValue(points, i, opening);
+    const delta = p.value - (prev == null ? 0 : prev);
+    const deltaCls = delta < 0 ? ' neg' : '';
+    const cumCls = p.value < 0 ? ' neg' : '';
+    html += '<tr>'
+      + '<td class="report-label-col">' + escapeHtml(p.month) + '</td>'
+      + '<td class="num' + deltaCls + '">' + escapeHtml(formatReportInt(Math.round(delta))) + '</td>'
+      + '<td class="num' + cumCls + '">' + escapeHtml(formatReportInt(Math.round(p.value))) + '</td>'
+      + '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+function renderTrendNettoOverTid(){
+  const historyVal = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
+    ? trendHistoryMenu.value
+    : '12';
+  const range = trendHistoryDateRange(historyVal);
+  const fromIso = range.from;
+  const toIso = range.to;
+  const data = collectTrendNetOverTime(fromIso, toIso);
+  const { months, points, opening } = data;
+
+  clearTrendCanvas();
+  if(trendPlaceholder) trendPlaceholder.hidden = true;
+  if(trendBody) trendBody.classList.add('has-report', 'report-chart-layout');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'report-table-wrap';
+
+  const updatedHtml = '<p class="report-table-updated">'
+    + escapeHtml(reportUpdatedLineHtml()) + '</p>';
+  const detailsId = 'trendPrognosDetails';
+  let head = '<div class="report-table-head">'
+    + '<div class="report-table-title-row">'
+    + '<p class="report-table-title">NETTO ÖVER TID</p>'
+    + '<button type="button" class="help-tip-btn trend-details-btn"'
+    + ' aria-label="Visa förklaring och tabeller"'
+    + ' aria-expanded="false"'
+    + ' aria-controls="' + detailsId + '">?</button>'
+    + updatedHtml
+    + '</div></div>';
+
+  if(!months.length){
+    wrap.innerHTML = head
+      + '<p class="report-empty-note">Inga månader i valt historikintervall.</p>';
+    trendBody.appendChild(wrap);
+    return;
+  }
+
+  const catMode = trendCategoryMode();
+  const basText = catMode === 'alla'
+    ? 'Bas: kumulativt netto som i Rapport (alla belopp inkl. öppningsbalans). '
+    : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Trend. ';
+
+  const note = '<p class="report-empty-note" style="margin:0 0 10px">'
+    + 'Historik: ' + escapeHtml(fromIso) + ' – ' + escapeHtml(toIso)
+    + ' · ' + months.length + ' månader. '
+    + basText
+    + 'Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(opening))) + '.'
+    + '</p>';
+
+  const historyBlock = '<p class="trend-section-title">Historik</p>'
+    + trendNettoTableHtml(points, opening);
+
+  wrap.innerHTML = head
+    + '<div class="trend-body-scroll">'
+    + buildNetOverTimeChart(points, opening)
+    + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
+    + note
+    + historyBlock
+    + '</div>'
+    + '</div>';
+  trendBody.appendChild(wrap);
+
+  const detailsBtn = wrap.querySelector('.trend-details-btn');
+  const detailsPanel = wrap.querySelector('#' + detailsId);
+  if(detailsBtn && detailsPanel){
+    detailsBtn.addEventListener('click', () => {
+      const open = detailsPanel.hidden;
+      detailsPanel.hidden = !open;
+      detailsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      detailsBtn.setAttribute('aria-label',
+        open ? 'Dölj förklaring och tabeller' : 'Visa förklaring och tabeller');
+    });
+  }
+}
+
+function syncTrendControlsForType(){
+  const isNetto = !!(trendTypeMenu && trendTypeMenu.value === 'nettoOverTid');
+  if(trendHorizonMenu){
+    trendHorizonMenu.disabled = isNetto;
+  }
+  const lab = document.querySelector('label[for="trendHorizonMenu"]');
+  if(lab) lab.classList.toggle('is-muted', isNetto);
+}
+
 function renderTrendPage(){
   if(!bookMeetsTrendMonthGate()){
     show('start');
@@ -10185,10 +10342,13 @@ function renderTrendPage(){
   }
   if(trendMessages) clear(trendMessages);
   restoreTrendPrefs();
+  syncTrendControlsForType();
   syncReportMobileLayout();
   const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
-  if(type === 'prognosInUt' || type === 'nettoOverTid'){
-    renderTrendPrognosInUt(type);
+  if(type === 'nettoOverTid'){
+    renderTrendNettoOverTid();
+  } else if(type === 'prognosInUt'){
+    renderTrendPrognosInUt();
   } else {
     clearTrendCanvas();
     if(trendPlaceholder){
