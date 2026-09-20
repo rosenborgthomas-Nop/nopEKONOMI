@@ -509,6 +509,43 @@ input[type=file]{ display:none; }
   width:5.6rem;
 }
 .trend-section-title:first-of-type{ margin-top:0; }
+.trend-line-chart-wrap{
+  margin:0 0 14px;
+  padding:10px 8px 6px;
+  background:var(--paper-surface);
+  border:1px solid var(--paper-line);
+  border-radius:8px;
+}
+.trend-line-chart-wrap .payee-chart-svg{
+  width:100%;
+  max-width:560px;
+  height:auto;
+  margin:0 auto;
+}
+.trend-line-chart-legend{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px 14px;
+  margin:6px 2px 2px;
+  font-size:11px;
+  color:var(--text-on-paper-soft);
+}
+.trend-line-chart-legend span{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+}
+.trend-line-chart-swatch{
+  display:inline-block;
+  width:14px;
+  height:0;
+  border-top:2.5px solid currentColor;
+}
+.trend-line-chart-swatch.is-dash{
+  border-top-style:dashed;
+}
+.trend-line-chart-swatch.is-in{ color:var(--chart-positive); }
+.trend-line-chart-swatch.is-ut{ color:var(--wine); }
 .report-toolbar input[type=date]{
   width:7.2rem;
   box-sizing:border-box;
@@ -3867,7 +3904,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v04';
+const APP_VERSION = '2026-09-20 v05';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9509,6 +9546,149 @@ function trendHorizonLabel(n){
   return n + ' månader';
 }
 
+/** Linjediagram: historik In/Ut + OLS-trendlinjer (historik + prognos). */
+function buildTrendInUtLineChart(data){
+  const histN = data.months.length;
+  const forecast = data.forecast || [];
+  const allMonths = data.months.concat(forecast.map(p => p.month));
+  const total = allMonths.length;
+  if(total < 2){
+    return '<div class="trend-line-chart-wrap">'
+      + '<p class="payee-chart-empty">För få månader för diagram.</p>'
+      + '</div>';
+  }
+
+  const fitInAll = [];
+  const fitUtAll = [];
+  for(let i = 0; i < total; i++){
+    fitInAll.push(data.fitIn.a + data.fitIn.b * i);
+    fitUtAll.push(data.fitUt.a + data.fitUt.b * i);
+  }
+
+  let ymin = Infinity;
+  let ymax = -Infinity;
+  const bump = v => {
+    if(!Number.isFinite(v)) return;
+    if(v < ymin) ymin = v;
+    if(v > ymax) ymax = v;
+  };
+  for(let i = 0; i < histN; i++){
+    bump(data.incomeSeries[i]);
+    bump(data.expenseSeries[i]);
+  }
+  for(let i = 0; i < total; i++){
+    bump(fitInAll[i]);
+    bump(fitUtAll[i]);
+  }
+  if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){
+    ymin = 0;
+    ymax = 1;
+  }
+  if(ymax <= ymin){
+    ymax = ymin + 1;
+  }
+  const padY = (ymax - ymin) * 0.08 || 1;
+  ymin = Math.max(0, ymin - padY);
+  ymax = ymax + padY;
+
+  const W = 560;
+  const H = 210;
+  const padL = 48;
+  const padR = 12;
+  const padT = 14;
+  const padB = 28;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const xAt = i => padL + (total === 1 ? plotW / 2 : (i / (total - 1)) * plotW);
+  const yAt = v => padT + plotH - ((v - ymin) / (ymax - ymin)) * plotH;
+
+  const colIn = '#3A8F5C';
+  const colUt = '#A33B3B';
+  const grid = '#A8BDD4';
+  const axis = '#5A6F88';
+
+  let svg = '';
+  // Horisontella hjälplinjer
+  for(let g = 0; g <= 3; g++){
+    const gy = padT + (plotH * g) / 3;
+    svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '"'
+      + ' stroke="' + grid + '" stroke-width="0.6" opacity="0.55"/>';
+  }
+
+  // Gräns historik | prognos
+  if(forecast.length && histN > 0){
+    const bx = (xAt(histN - 1) + xAt(histN)) / 2;
+    svg += '<line x1="' + bx + '" y1="' + padT + '" x2="' + bx + '" y2="' + (padT + plotH) + '"'
+      + ' stroke="' + axis + '" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>';
+  }
+
+  const poly = (vals, color, dash, width) => {
+    const pts = vals.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+    return '<polyline fill="none" stroke="' + color + '" stroke-width="' + width + '"'
+      + ' stroke-linejoin="round" stroke-linecap="round"'
+      + (dash ? ' stroke-dasharray="' + dash + '"' : '')
+      + ' points="' + pts + '"/>';
+  };
+
+  // OLS-trendlinjer (hela spannet) — streckade i prognosdelen ritas som en heldragen trendlinje
+  svg += poly(fitInAll, colIn, '5 4', 2);
+  svg += poly(fitUtAll, colUt, '5 4', 2);
+
+  // Faktisk historik
+  const histInPts = data.incomeSeries.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+  const histUtPts = data.expenseSeries.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+  svg += '<polyline fill="none" stroke="' + colIn + '" stroke-width="2.2" stroke-linejoin="round"'
+    + ' stroke-linecap="round" points="' + histInPts + '"/>';
+  svg += '<polyline fill="none" stroke="' + colUt + '" stroke-width="2.2" stroke-linejoin="round"'
+    + ' stroke-linecap="round" points="' + histUtPts + '"/>';
+
+  for(let i = 0; i < histN; i++){
+    svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(data.incomeSeries[i]).toFixed(1)
+      + '" r="3" fill="' + colIn + '">'
+      + '<title>' + escapeHtml(monthKeyYyMm(data.months[i]) + ' In ' + formatAmount(Math.round(data.incomeSeries[i]))) + '</title>'
+      + '</circle>';
+    svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(data.expenseSeries[i]).toFixed(1)
+      + '" r="3" fill="' + colUt + '">'
+      + '<title>' + escapeHtml(monthKeyYyMm(data.months[i]) + ' Ut ' + formatAmount(Math.round(data.expenseSeries[i]))) + '</title>'
+      + '</circle>';
+  }
+
+  // Y-etiketter
+  for(let g = 0; g <= 3; g++){
+    const val = ymax - ((ymax - ymin) * g) / 3;
+    const gy = padT + (plotH * g) / 3;
+    svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
+      + ' font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
+  }
+
+  // X-etiketter: första, sista historik, sista prognos (+ glesa)
+  const labelIdx = new Set([0, histN - 1, total - 1]);
+  const step = Math.max(1, Math.ceil(total / 6));
+  for(let i = 0; i < total; i += step) labelIdx.add(i);
+  for(const i of labelIdx){
+    if(i < 0 || i >= total) continue;
+    svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
+      + ' font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
+  }
+
+  const legend = '<p class="trend-line-chart-legend">'
+    + '<span><i class="trend-line-chart-swatch is-in" aria-hidden="true"></i>In</span>'
+    + '<span><i class="trend-line-chart-swatch is-ut" aria-hidden="true"></i>Ut</span>'
+    + '<span><i class="trend-line-chart-swatch is-in is-dash" aria-hidden="true"></i>Trend In</span>'
+    + '<span><i class="trend-line-chart-swatch is-ut is-dash" aria-hidden="true"></i>Trend Ut</span>'
+    + '</p>';
+
+  return '<div class="trend-line-chart-wrap">'
+    + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
+    + ' aria-label="Trendlinjer In och Ut">'
+    + svg
+    + '</svg>'
+    + legend
+    + '</div>';
+}
+
 function trendInUtDrillCellHtml(amount, month, side, amtCls){
   const drill = { t: 'trend', side: side, periodKey: month, returnView: 'trend' };
   return '<td class="num report-drillable' + amtCls + '"'
@@ -9727,7 +9907,9 @@ function renderTrendPrognosInUt(){
 
   wrap.innerHTML = head
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
-    + note + historyBlock + forecastBlock
+    + note
+    + buildTrendInUtLineChart(data)
+    + historyBlock + forecastBlock
     + '</div>';
   trendBody.appendChild(wrap);
 
