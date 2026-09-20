@@ -596,15 +596,7 @@ body.trend-view-active{
   flex:1 1 100%;
   text-align:right;
   white-space:normal;
-  font-size:12px;
-}
-#viewTrend.report-mobile .trend-line-chart-legend{
-  font-size:12px;
-  font-weight:500;
-  gap:8px 12px;
-}
-#viewTrend.report-mobile .trend-line-chart-legend .trend-delta{
-  font-weight:400;
+  font-size:11px;
 }
 #viewTrend.report-mobile .trend-forecast-table{
   width:100%;
@@ -9759,11 +9751,6 @@ function trendHorizonLabel(n){
   return n + ' månader';
 }
 
-/** Axelfont i trenddiagram: dator = legenden (14), mobil = Uppdaterad (12). */
-function trendChartAxisFontSize(){
-  return isReportMobileLayout() ? 12 : 14;
-}
-
 /** Linjediagram: historik In/Ut/Netto + OLS-trendlinjer (historik + prognos). */
 function buildTrendInUtLineChart(data, opts){
   opts = opts || {};
@@ -9828,11 +9815,10 @@ function buildTrendInUtLineChart(data, opts){
 
   const W = 560;
   const H = 220;
-  const axisFs = trendChartAxisFontSize();
-  const padL = axisFs >= 14 ? 64 : 54;
+  const padL = 48;
   const padR = 12;
   const padT = 14;
-  const padB = axisFs >= 14 ? 32 : 30;
+  const padB = 28;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const xAt = i => padL + (total === 1 ? plotW / 2 : (i / (total - 1)) * plotW);
@@ -9911,7 +9897,7 @@ function buildTrendInUtLineChart(data, opts){
     const val = ymax - ((ymax - ymin) * g) / 3;
     const gy = padT + (plotH * g) / 3;
     svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
-      + ' font-family="JetBrains Mono, monospace" font-size="' + axisFs + '" fill="' + axis + '">'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
 
@@ -9921,7 +9907,7 @@ function buildTrendInUtLineChart(data, opts){
   for(const i of labelIdx){
     if(i < 0 || i >= total) continue;
     svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
-      + ' font-family="JetBrains Mono, monospace" font-size="' + axisFs + '" fill="' + axis + '">'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
@@ -10099,6 +10085,54 @@ function trendHistoryDateRange(historyVal){
   return { from: from, to: toIso };
 }
 
+/**
+ * Matcha diagrammets axeltext (x/y) mot rätt referens-textstorlek.
+ * Dator: förklaringstexten (legenden). Mobil: "Uppdaterad…"-raden.
+ * SVG-text skalas med viewBox, så vi räknar om till önskad rendererad px.
+ */
+function sizeTrendChartText(wrap){
+  if(!wrap) return;
+  const svg = wrap.querySelector('.payee-chart-svg');
+  if(!svg) return;
+  const legend = wrap.querySelector('.trend-line-chart-legend');
+  const updated = wrap.querySelector('.report-table-updated');
+  const mobile = isReportMobileLayout();
+
+  let targetPx = 13;
+  if(mobile && updated){
+    targetPx = parseFloat(getComputedStyle(updated).fontSize) || 11;
+  } else if(legend){
+    targetPx = parseFloat(getComputedStyle(legend).fontSize) || 14;
+  }
+
+  // På mobilen ska även legenden följa "Uppdaterad…"-storleken.
+  if(legend && mobile){
+    legend.style.fontSize = targetPx + 'px';
+  } else if(legend){
+    legend.style.fontSize = '';
+  }
+
+  const rect = svg.getBoundingClientRect();
+  const vbWidth = 560;
+  if(rect.width <= 0){
+    // Layout ej klar ännu – försök igen nästa frame.
+    requestAnimationFrame(() => sizeTrendChartText(wrap));
+    return;
+  }
+  const scale = rect.width / vbWidth;
+  const vbFont = Math.max(4, targetPx / scale);
+  const texts = svg.querySelectorAll('text.tl-axis');
+  for(const t of texts){
+    t.setAttribute('font-size', vbFont.toFixed(2));
+  }
+}
+
+function resizeTrendChartText(){
+  if(!views.trend || views.trend.hidden) return;
+  const wrap = trendBody && trendBody.querySelector('.report-table-wrap');
+  if(wrap) sizeTrendChartText(wrap);
+}
+
 function renderTrendPrognosInUt(){
   const historyVal = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
     ? trendHistoryMenu.value
@@ -10185,6 +10219,7 @@ function renderTrendPrognosInUt(){
     + '</div>'
     + '</div>';
   trendBody.appendChild(wrap);
+  sizeTrendChartText(wrap);
 
   const detailsBtn = wrap.querySelector('.trend-details-btn');
   const detailsPanel = wrap.querySelector('#' + detailsId);
@@ -10361,11 +10396,10 @@ function buildTrendNettoLineChart(data){
 
   const W = 560;
   const H = 220;
-  const axisFs = trendChartAxisFontSize();
-  const padL = axisFs >= 14 ? 64 : 54;
+  const padL = 52;
   const padR = 12;
   const padT = 14;
-  const padB = axisFs >= 14 ? 32 : 30;
+  const padB = 28;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const xAt = i => padL + (total === 1 ? plotW / 2 : (i / (total - 1)) * plotW);
@@ -10417,7 +10451,7 @@ function buildTrendNettoLineChart(data){
     const val = ymax - ((ymax - ymin) * g) / 3;
     const gy = padT + (plotH * g) / 3;
     svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
-      + ' font-family="JetBrains Mono, monospace" font-size="' + axisFs + '" fill="' + axis + '">'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
 
@@ -10427,7 +10461,7 @@ function buildTrendNettoLineChart(data){
   for(const i of labelIdx){
     if(i < 0 || i >= total) continue;
     svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
-      + ' font-family="JetBrains Mono, monospace" font-size="' + axisFs + '" fill="' + axis + '">'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
@@ -10517,6 +10551,7 @@ function renderTrendNettoOverTid(){
     + '</div>'
     + '</div>';
   trendBody.appendChild(wrap);
+  sizeTrendChartText(wrap);
 
   const detailsBtn = wrap.querySelector('.trend-details-btn');
   const detailsPanel = wrap.querySelector('#' + detailsId);
@@ -18538,6 +18573,8 @@ async function initApp(){
   bindAppBackNavigation();
   window.addEventListener('resize', syncReportMobileLayout, { passive: true });
   window.addEventListener('orientationchange', syncReportMobileLayout, { passive: true });
+  window.addEventListener('resize', resizeTrendChartText, { passive: true });
+  window.addEventListener('orientationchange', resizeTrendChartText, { passive: true });
 }
 
 initApp();
