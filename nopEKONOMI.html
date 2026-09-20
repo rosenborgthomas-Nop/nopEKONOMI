@@ -3355,7 +3355,7 @@ td.num.dash .cell-content{
         <option value="kategori">Kategori</option>
         <option value="underkategori">Underkategori</option>
         <option value="trend" id="careHubTrendOpt">Trend</option>
-        <option value="" disabled class="menu-sep menu-sep-title" id="careHubBudgetSep">──── Budget ────</option>
+        <option value="budget" id="careHubBudgetOpt">Budget</option>
         <option value="" disabled class="menu-sep" id="careHubBookSep">────────</option>
         <option value="bok">Bok (backup)</option>
       </select>
@@ -4095,7 +4095,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v17';
+const APP_VERSION = '2026-09-20 v18';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11974,6 +11974,7 @@ const CARE_HUB_SECTIONS = {
   kategori: { title: 'Kategori', kind: 'list' },
   underkategori: { title: 'Underkategori', kind: 'list' },
   trend: { title: 'Trend', kind: 'list' },
+  budget: { title: 'Budget', kind: 'list' },
   bok: { title: 'Bok (backup)', kind: 'list' }
 };
 
@@ -12072,6 +12073,13 @@ const CARE_LIST_KINDS = {
     title: 'Trend',
     newLabel: '',
     nameLabel: 'Kategori',
+    deleteLabel: '',
+    maxLen: 60
+  },
+  budget: {
+    title: 'Budget',
+    newLabel: '',
+    nameLabel: 'Budget',
     deleteLabel: '',
     maxLen: 60
   },
@@ -12200,6 +12208,7 @@ function rewriteSubCategoryToCategoryInBook(draft, fromSubName, toCategoryName){
 }
 
 function buildCareListItems(){
+  if(careListKind === 'budget') return [];
   if(careListKind === 'bok'){
     if(!bookId) return [];
     const rec = lastBackupRecord(bookId);
@@ -12322,6 +12331,7 @@ function careListKindLabel(){
   if(careListKind === 'payee') return 'Payee';
   if(careListKind === 'konto') return 'Konto';
   if(careListKind === 'trend') return 'Trend';
+  if(careListKind === 'budget') return 'Budget';
   if(careListKind === 'bok') return 'Bok';
   return '';
 }
@@ -12528,8 +12538,9 @@ function renderCareListHead(){
 function renderCareList(){
   const meta = careListMeta();
   careListNewBtn.textContent = meta.newLabel;
-  careListNewBtn.hidden = careListKind === 'bok' || careListKind === 'trend' || !meta.newLabel;
-  if(careListOkBtn) careListOkBtn.hidden = careListKind === 'trend';
+  careListNewBtn.hidden = careListKind === 'bok' || careListKind === 'trend'
+    || careListKind === 'budget' || !meta.newLabel;
+  if(careListOkBtn) careListOkBtn.hidden = careListKind === 'trend' || careListKind === 'budget';
   if(careListBackupBtn) careListBackupBtn.hidden = careListKind !== 'bok';
   clear(careListMessages);
   closeCareListEdit();
@@ -12562,7 +12573,7 @@ function renderCareList(){
 }
 
 function careListOpenHighlighted(){
-  if(careListKind === 'trend') return;
+  if(careListKind === 'trend' || careListKind === 'budget') return;
   const item = careListHighlightedItem();
   if(!item) return;
   if(careListKind === 'bok' && !item.isCurrent){
