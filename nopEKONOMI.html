@@ -540,23 +540,34 @@ body.trend-view-active{
   padding-right:10px;
 }
 #viewTrend.report-mobile .trend-toolbar{
-  grid-template-columns:max-content minmax(0, 1fr);
-  align-items:center;
+  grid-template-columns:minmax(0, 1fr) minmax(0, 1fr);
+  column-gap:8px;
+  row-gap:2px;
+  align-items:end;
 }
-#viewTrend.report-mobile .trend-toolbar label[for="trendTypeMenu"],
-#viewTrend.report-mobile .trend-toolbar label[for="trendHistoryMenu"],
-#viewTrend.report-mobile .trend-toolbar label[for="trendHorizonMenu"],
-#viewTrend.report-mobile .trend-toolbar label[for="trendCatMenu"]{
-  grid-column:1;
-  grid-row:auto;
+#viewTrend.report-mobile .trend-toolbar .report-col-label{
+  font-size:11px;
+  letter-spacing:0.04em;
+  line-height:1.2;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:100%;
 }
-#viewTrend.report-mobile .trend-toolbar #trendTypeMenu,
-#viewTrend.report-mobile .trend-toolbar #trendHistoryMenu,
-#viewTrend.report-mobile .trend-toolbar #trendHorizonMenu,
-#viewTrend.report-mobile .trend-toolbar #trendCatMenu{
-  grid-column:2;
-  grid-row:auto;
+#viewTrend.report-mobile .trend-toolbar .menu-select{
+  padding:7px 1.6em 7px 7px;
+  font-size:12px;
+  width:100%;
+  min-width:0;
 }
+#viewTrend.report-mobile .trend-toolbar label[for="trendTypeMenu"]{ grid-column:1; grid-row:1; }
+#viewTrend.report-mobile .trend-toolbar #trendTypeMenu{ grid-column:1; grid-row:2; }
+#viewTrend.report-mobile .trend-toolbar label[for="trendHistoryMenu"]{ grid-column:2; grid-row:1; }
+#viewTrend.report-mobile .trend-toolbar #trendHistoryMenu{ grid-column:2; grid-row:2; }
+#viewTrend.report-mobile .trend-toolbar label[for="trendHorizonMenu"]{ grid-column:1; grid-row:3; }
+#viewTrend.report-mobile .trend-toolbar #trendHorizonMenu{ grid-column:1; grid-row:4; }
+#viewTrend.report-mobile .trend-toolbar label[for="trendCatMenu"]{ grid-column:2; grid-row:3; }
+#viewTrend.report-mobile .trend-toolbar #trendCatMenu{ grid-column:2; grid-row:4; }
 #viewTrend.report-mobile > .report-wrap{
   min-height:calc(100dvh - 56px);
   max-width:100%;
@@ -4083,7 +4094,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v13';
+const APP_VERSION = '2026-09-20 v14';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
