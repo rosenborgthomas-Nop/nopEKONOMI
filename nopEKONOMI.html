@@ -489,17 +489,36 @@ input[type=file]{ display:none; }
   display:flex;
   flex-direction:column;
   min-height:0;
+  flex:1 1 auto;
+  width:100%;
+  max-width:100%;
 }
-.trend-prognos-details{
+#viewTrend .report-table-head{
+  flex:0 0 auto;
+  padding-right:0;
+  width:100%;
+}
+#viewTrend .report-table-title-row{
+  width:100%;
+  align-items:center;
+  gap:8px 12px;
+}
+#viewTrend .report-table-title-row .report-table-updated{
+  margin-left:auto;
+  background:transparent;
+}
+.trend-body-scroll{
   flex:1 1 auto;
   min-height:0;
-  margin-top:10px;
   overflow:auto;
   -webkit-overflow-scrolling:touch;
+  width:100%;
+}
+.trend-prognos-details{
+  margin-top:10px;
 }
 .trend-prognos-details[hidden]{
   display:none !important;
-  flex:0;
 }
 /* Trend: månadskolumn smalare på telefon — rymmer YYYY-MM utan kapning. */
 #viewTrend.report-mobile .trend-forecast-table th.report-label-col,
@@ -515,12 +534,14 @@ input[type=file]{ display:none; }
   background:var(--paper-surface);
   border:1px solid var(--paper-line);
   border-radius:8px;
+  width:100%;
+  box-sizing:border-box;
 }
 .trend-line-chart-wrap .payee-chart-svg{
+  display:block;
   width:100%;
-  max-width:560px;
+  max-width:none;
   height:auto;
-  margin:0 auto;
 }
 .trend-line-chart-legend{
   display:flex;
@@ -547,9 +568,11 @@ input[type=file]{ display:none; }
 .trend-line-chart-swatch.is-in{ color:var(--chart-positive); }
 .trend-line-chart-swatch.is-ut{ color:var(--wine); }
 .trend-line-chart-swatch.is-net{ color:var(--teal); }
-#viewTrend .trend-line-chart-wrap{
-  flex:0 0 auto;
-  margin-top:8px;
+#viewTrend .report-canvas.has-report,
+#viewTrend.report-mobile .report-canvas.has-report{
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
 }
 .report-toolbar input[type=date]{
   width:7.2rem;
@@ -3909,7 +3932,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v06';
+const APP_VERSION = '2026-09-20 v07';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9874,14 +9897,14 @@ function renderTrendPrognosInUt(){
   wrap.className = 'report-table-wrap';
 
   const title = 'PROGNOS IN/UT';
+  const updatedHtml = '<p class="report-table-updated">'
+    + escapeHtml(reportUpdatedLineHtml()) + '</p>';
   let head = '<div class="report-table-head">'
     + '<div class="report-table-title-row">'
     + '<p class="report-table-title">' + escapeHtml(title) + '</p>';
 
   if(!data.ok){
-    head += '</div>'
-      + '<p class="report-table-updated">' + escapeHtml(reportUpdatedLineHtml()) + '</p>'
-      + '</div>';
+    head += updatedHtml + '</div></div>';
     wrap.innerHTML = head
       + '<p class="report-empty-note">' + escapeHtml(data.reason || 'Kunde inte beräkna trend.') + '</p>';
     trendBody.appendChild(wrap);
@@ -9893,9 +9916,8 @@ function renderTrendPrognosInUt(){
     + ' aria-label="Visa förklaring och tabeller"'
     + ' aria-expanded="false"'
     + ' aria-controls="' + detailsId + '">?</button>'
-    + '</div>'
-    + '<p class="report-table-updated">' + escapeHtml(reportUpdatedLineHtml()) + '</p>'
-    + '</div>';
+    + updatedHtml
+    + '</div></div>';
 
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
     + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
@@ -9926,18 +9948,16 @@ function renderTrendPrognosInUt(){
         income: p.income,
         expense: p.expense,
         net: p.net
-      })),
-      'Summa ' + trendHorizonLabel(horizon),
-      data.sumIn,
-      data.sumUt,
-      data.sumNet
+      }))
     );
 
   wrap.innerHTML = head
+    + '<div class="trend-body-scroll">'
     + buildTrendInUtLineChart(data)
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
     + historyBlock + forecastBlock
+    + '</div>'
     + '</div>';
   trendBody.appendChild(wrap);
 
