@@ -474,14 +474,32 @@ input[type=file]{ display:none; }
 .report-table-title-row .report-table-title{
   margin:0;
 }
-.trend-details-btn{
+.trend-details-btn.help-tip-btn{
   position:relative;
+  border-color:var(--ink);
+  color:var(--ink);
+}
+.trend-details-btn.help-tip-btn:hover,
+.trend-details-btn.help-tip-btn[aria-expanded="true"]{
+  background:rgba(26,52,104,0.14);
+  border-color:var(--ink);
+  color:var(--ink);
+}
+#viewTrend .report-table-wrap{
+  display:flex;
+  flex-direction:column;
+  min-height:0;
 }
 .trend-prognos-details{
+  flex:1 1 auto;
+  min-height:0;
   margin-top:10px;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
 }
 .trend-prognos-details[hidden]{
   display:none !important;
+  flex:0;
 }
 .trend-section-title:first-of-type{ margin-top:0; }
 .report-toolbar input[type=date]{
@@ -3842,7 +3860,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v02';
+const APP_VERSION = '2026-09-20 v03';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9676,13 +9694,10 @@ function renderTrendPrognosInUt(){
   });
 
   const historyBlock = '<p class="trend-section-title">Historik</p>'
-    + '<div class="report-table-scroll">'
-    + trendInUtTableHtml(historyRows, null, null, null, null, { drillable: true })
-    + '</div>';
+    + trendInUtTableHtml(historyRows, null, null, null, null, { drillable: true });
 
   const forecastBlock = '<p class="trend-section-title">Prognos ('
     + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
-    + '<div class="report-table-scroll">'
     + trendInUtTableHtml(
       data.forecast.map(p => ({
         month: p.month,
@@ -9694,8 +9709,7 @@ function renderTrendPrognosInUt(){
       data.sumIn,
       data.sumUt,
       data.sumNet
-    )
-    + '</div>';
+    );
 
   wrap.innerHTML = head
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
