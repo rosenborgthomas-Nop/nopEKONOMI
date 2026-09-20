@@ -481,19 +481,35 @@ input[type=file]{ display:none; }
 .trend-toolbar #trendHistoryMenu{ grid-column:3; grid-row:2; }
 .trend-toolbar #trendHorizonMenu{ grid-column:4; grid-row:2; }
 .trend-toolbar #trendCatMenu{ grid-column:5; grid-row:2; }
+body.trend-view-active{
+  padding-top:0;
+}
 #viewTrend{
   width:100%;
   max-width:100%;
   box-sizing:border-box;
   overflow-x:hidden;
 }
-#viewTrend > .eyebrow.view-headline{
+#viewTrend > .eyebrow{
   display:block;
   width:100%;
   max-width:100%;
   box-sizing:border-box;
-  margin:0 0 16px;
-  padding:0;
+  margin:0;
+  padding:max(10px, env(safe-area-inset-top, 0px)) 20px 4px;
+  flex:none;
+}
+#viewTrend > .view-headline{
+  display:block;
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+  margin:0 0 14px;
+  padding:0 20px 0;
+  color:var(--headline-accent);
+  font-family:'JetBrains Mono', monospace;
+  font-size:12px;
+  letter-spacing:0.06em;
   flex:none;
 }
 #viewTrend > .report-wrap{
@@ -503,8 +519,8 @@ input[type=file]{ display:none; }
   max-width:min(1100px, 100%);
   box-sizing:border-box;
   min-height:calc(100dvh - 72px);
-  padding-left:0;
-  padding-right:0;
+  padding-left:20px;
+  padding-right:20px;
   overflow-x:hidden;
 }
 #viewTrend .report-toolbar-scroll{
@@ -525,11 +541,21 @@ input[type=file]{ display:none; }
   overflow:hidden;
 }
 #viewTrend.report-mobile{
-  padding:0 10px;
+  padding:0;
   box-sizing:border-box;
 }
-#viewTrend.report-mobile > .eyebrow.view-headline{
-  margin:0 0 12px;
+#viewTrend.report-mobile > .eyebrow{
+  padding-left:10px;
+  padding-right:10px;
+}
+#viewTrend.report-mobile > .view-headline{
+  margin-bottom:12px;
+  padding-left:10px;
+  padding-right:10px;
+}
+#viewTrend.report-mobile > .report-wrap{
+  padding-left:10px;
+  padding-right:10px;
 }
 #viewTrend.report-mobile .trend-toolbar{
   grid-template-columns:max-content minmax(0, 1fr);
@@ -3217,7 +3243,8 @@ td.num.dash .cell-content{
 
 <!-- ===================== VY: TRENDHANTERING ===================== -->
 <div class="view" id="viewTrend" hidden>
-  <p class="eyebrow view-headline" id="trendViewHeadline">nopEKONOMI - — - Trendhantering</p>
+  <p class="eyebrow" id="trendPageEyebrow">Trendhantering</p>
+  <p class="view-headline" id="trendViewHeadline">nopEKONOMI - — - Trendhantering</p>
   <div class="wrap wide report-wrap">
 
     <div class="report-toolbar-scroll">
@@ -4080,7 +4107,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v09';
+const APP_VERSION = '2026-09-20 v10';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6275,6 +6302,8 @@ async function show(name, opts){
   if(name === 'login') await renderLogin();
 
   for(const key in views) views[key].hidden = (key !== name);
+
+  document.body.classList.toggle('trend-view-active', name === 'trend');
 
   if(name === 'start') renderStart();
   if(name === 'report'){
