@@ -3347,7 +3347,7 @@ td.num.dash .cell-content{
     <p class="eyebrow view-headline" id="careHubViewHeadline">nopEKONOMI - — - Registervård</p>
 
     <p class="care-section-title">Registervård</p>
-    <div class="menu-row">
+    <div class="menu-row" id="careHubMenuRow">
       <select id="careHubMenu" class="menu-select" aria-label="Registervård">
         <option value="">Välj...</option>
         <option value="konto">Konto</option>
@@ -4095,7 +4095,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v18';
+const APP_VERSION = '2026-09-20 v19';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11958,15 +11958,59 @@ document.addEventListener('keydown', e => {
 /* --- 7a. Skapa / Redigera Konto -------------------------------------- */
 
 function renderCareHub(){
+  if(careListKind === 'trend' && careHubListArea && !careHubListArea.hidden){
+    discardTrendIncludeEdit();
+  }
   careHubMenu.selectedIndex = 0;
   syncTrendMenuGates();
   hideCareHubSection();
 }
 
 const careHubMenu = el('careHubMenu');
+const careHubMenuRow = el('careHubMenuRow');
 const careHubListArea = el('careHubListArea');
 const careHubListStage = el('careHubListStage');
 const careHubListEditStage = el('careHubListEditStage');
+
+/** Snapshot av trendInclude medan Trend-listan är öppen (OK sparar, Avbryt återställer). */
+let trendIncludeEditSnapshot = null;
+
+function syncCareHubMenuVisibility(){
+  if(!careHubMenuRow) return;
+  // I Trend-läge: dölj rullgardinen — bara listan + OK/Avbryt.
+  const inTrend = !!(careHubListArea && !careHubListArea.hidden && careListKind === 'trend');
+  careHubMenuRow.hidden = inTrend;
+}
+
+function cloneTrendIncludeMap(src){
+  const out = {};
+  if(!src || typeof src !== 'object') return out;
+  for(const k of Object.keys(src)) out[k] = !!src[k];
+  return out;
+}
+
+function beginTrendIncludeEdit(){
+  if(!book){
+    trendIncludeEditSnapshot = {};
+    return;
+  }
+  syncTrendIncludeMap(book);
+  trendIncludeEditSnapshot = cloneTrendIncludeMap(book.trendInclude);
+}
+
+function discardTrendIncludeEdit(){
+  if(!book || trendIncludeEditSnapshot == null){
+    trendIncludeEditSnapshot = null;
+    return;
+  }
+  book.trendInclude = cloneTrendIncludeMap(trendIncludeEditSnapshot);
+  trendIncludeEditSnapshot = null;
+}
+
+async function commitTrendIncludeEdit(){
+  trendIncludeEditSnapshot = null;
+  await persistTrendInclude();
+}
 
 const CARE_HUB_SECTIONS = {
   konto: { title: 'Konto', kind: 'accountEdit' },
@@ -11985,6 +12029,7 @@ function hideCareHubSection(){
   careListEditMode = '';
   careListEditOriginal = '';
   hideCareListDeleteConfirm();
+  syncCareHubMenuVisibility();
   refreshViewHeadline('careHub', 'Registervård');
 }
 
@@ -12019,10 +12064,12 @@ function showCareHubSection(key){
   // show('careHub') nollställer menyn — sätt om efteråt.
   if(careHubMenu.value !== key) careHubMenu.value = key;
   careListKind = key;
+  if(key === 'trend') beginTrendIncludeEdit();
   if(careHubListArea) careHubListArea.hidden = false;
   if(careHubListEditStage) careHubListEditStage.hidden = true;
   if(careHubListStage) careHubListStage.hidden = false;
   renderCareList();
+  syncCareHubMenuVisibility();
   refreshViewHeadline('careHub', 'Registervård');
 }
 
@@ -12035,7 +12082,12 @@ function runCareHubMenu(){
   showCareHubSection(val);
 }
 
-el('careHubBackBtn').addEventListener('click', () => show('start'));
+el('careHubBackBtn').addEventListener('click', () => {
+  if(careListKind === 'trend' && careHubListArea && !careHubListArea.hidden){
+    discardTrendIncludeEdit();
+  }
+  show('start');
+});
 careHubMenu.addEventListener('change', runCareHubMenu);
 
 /* --- Konto / Kategori / Underkategori (listvy) ----------------------- */
@@ -12135,6 +12187,19 @@ function careListMeta(){
 }
 
 function closeCareList(){
+  if(careListKind === 'trend') discardTrendIncludeEdit();
+  careHubMenu.selectedIndex = 0;
+  hideCareHubSection();
+}
+
+async function confirmCareListTrend(){
+  clear(careListMessages);
+  try{
+    await commitTrendIncludeEdit();
+  } catch(e){
+    addBox(careListMessages, 'notice', 'Kunde inte spara trendvalet.');
+    return;
+  }
   careHubMenu.selectedIndex = 0;
   hideCareHubSection();
 }
@@ -12540,8 +12605,9 @@ function renderCareList(){
   careListNewBtn.textContent = meta.newLabel;
   careListNewBtn.hidden = careListKind === 'bok' || careListKind === 'trend'
     || careListKind === 'budget' || !meta.newLabel;
-  if(careListOkBtn) careListOkBtn.hidden = careListKind === 'trend' || careListKind === 'budget';
+  if(careListOkBtn) careListOkBtn.hidden = careListKind === 'budget';
   if(careListBackupBtn) careListBackupBtn.hidden = careListKind !== 'bok';
+  syncCareHubMenuVisibility();
   clear(careListMessages);
   closeCareListEdit();
 
@@ -12606,11 +12672,7 @@ async function setTrendIncludeForItem(idx, included){
   }
 
   clear(careListMessages);
-  try{
-    await persistTrendInclude();
-  } catch(e){
-    addBox(careListMessages, 'notice', 'Kunde inte spara trendvalet.');
-  }
+  // Sparning sker vid OK — Avbryt återställer snapshot.
   const keepIdx = idx;
   const keepName = item.rowKind === 'cat' ? item.name : item.parent;
   const wasExpanded = item.rowKind === 'cat'
@@ -13136,7 +13198,13 @@ careListBody.addEventListener('dblclick', e => {
 });
 
 careListCancelBtn.addEventListener('click', closeCareList);
-careListOkBtn.addEventListener('click', careListOpenHighlighted);
+careListOkBtn.addEventListener('click', () => {
+  if(careListKind === 'trend'){
+    confirmCareListTrend();
+    return;
+  }
+  careListOpenHighlighted();
+});
 careListNewBtn.addEventListener('click', () => openCareListEdit(''));
 careListEditCancelBtn.addEventListener('click', closeCareListEdit);
 careListEditOkBtn.addEventListener('click', saveCareListEdit);
@@ -18415,8 +18483,7 @@ function triggerEscapeBack(){
           hideCareListDeleteConfirm();
           return true;
         }
-        careHubMenu.selectedIndex = 0;
-        hideCareHubSection();
+        careListCancelBtn.click();
         return true;
       }
       show('start');
