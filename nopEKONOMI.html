@@ -3355,6 +3355,7 @@ td.num.dash .cell-content{
         <option value="kategori">Kategori</option>
         <option value="underkategori">Underkategori</option>
         <option value="trend" id="careHubTrendOpt">Trend</option>
+        <option value="" disabled class="menu-sep menu-sep-title" id="careHubBudgetSep">──── Budget ────</option>
         <option value="" disabled class="menu-sep" id="careHubBookSep">────────</option>
         <option value="bok">Bok (backup)</option>
       </select>
@@ -4094,7 +4095,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v16';
+const APP_VERSION = '2026-09-20 v17';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
