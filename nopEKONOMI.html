@@ -441,7 +441,7 @@ input[type=file]{ display:none; }
 }
 .trend-toolbar{
   display:grid;
-  grid-template-columns:auto repeat(4, minmax(0, 1fr));
+  grid-template-columns:repeat(4, minmax(0, 1fr));
   column-gap:8px;
   row-gap:4px;
   align-items:end;
@@ -449,25 +449,14 @@ input[type=file]{ display:none; }
   max-width:100%;
   margin-bottom:14px;
 }
-.trend-toolbar .report-back{
-  grid-column:1;
-  grid-row:1 / span 2;
-  align-self:center;
-  margin:0;
-  margin-right:4px;
-  padding:0;
-  font-size:12px;
-  line-height:1.2;
-  justify-self:start;
-}
 .trend-toolbar .report-col-label{
   margin:0;
   justify-self:start;
 }
-.trend-toolbar label[for="trendTypeMenu"]{ grid-column:2; grid-row:1; }
-.trend-toolbar label[for="trendHistoryMenu"]{ grid-column:3; grid-row:1; }
-.trend-toolbar label[for="trendHorizonMenu"]{ grid-column:4; grid-row:1; }
-.trend-toolbar label[for="trendCatMenu"]{ grid-column:5; grid-row:1; }
+.trend-toolbar label[for="trendTypeMenu"]{ grid-column:1; grid-row:1; }
+.trend-toolbar label[for="trendHistoryMenu"]{ grid-column:2; grid-row:1; }
+.trend-toolbar label[for="trendHorizonMenu"]{ grid-column:3; grid-row:1; }
+.trend-toolbar label[for="trendCatMenu"]{ grid-column:4; grid-row:1; }
 .trend-toolbar #trendTypeMenu,
 .trend-toolbar #trendHistoryMenu,
 .trend-toolbar #trendHorizonMenu,
@@ -477,10 +466,10 @@ input[type=file]{ display:none; }
   max-width:100%;
   justify-self:stretch;
 }
-.trend-toolbar #trendTypeMenu{ grid-column:2; grid-row:2; }
-.trend-toolbar #trendHistoryMenu{ grid-column:3; grid-row:2; }
-.trend-toolbar #trendHorizonMenu{ grid-column:4; grid-row:2; }
-.trend-toolbar #trendCatMenu{ grid-column:5; grid-row:2; }
+.trend-toolbar #trendTypeMenu{ grid-column:1; grid-row:2; }
+.trend-toolbar #trendHistoryMenu{ grid-column:2; grid-row:2; }
+.trend-toolbar #trendHorizonMenu{ grid-column:3; grid-row:2; }
+.trend-toolbar #trendCatMenu{ grid-column:4; grid-row:2; }
 body.trend-view-active{
   padding-top:0;
 }
@@ -490,26 +479,19 @@ body.trend-view-active{
   box-sizing:border-box;
   overflow-x:hidden;
 }
-#viewTrend > .eyebrow{
-  display:block;
-  width:100%;
-  max-width:100%;
-  box-sizing:border-box;
+#viewTrend > .nav-back{
+  display:inline-block;
   margin:0;
-  padding:max(10px, env(safe-area-inset-top, 0px)) 20px 4px;
-  flex:none;
+  padding:max(10px, env(safe-area-inset-top, 0px)) 20px 6px;
+  box-sizing:border-box;
 }
-#viewTrend > .view-headline{
+#viewTrend > .eyebrow.view-headline{
   display:block;
   width:100%;
   max-width:100%;
   box-sizing:border-box;
   margin:0 0 14px;
-  padding:0 20px 0;
-  color:var(--headline-accent);
-  font-family:'JetBrains Mono', monospace;
-  font-size:12px;
-  letter-spacing:0.06em;
+  padding:0 20px;
   flex:none;
 }
 #viewTrend > .report-wrap{
@@ -544,11 +526,11 @@ body.trend-view-active{
   padding:0;
   box-sizing:border-box;
 }
-#viewTrend.report-mobile > .eyebrow{
+#viewTrend.report-mobile > .nav-back{
   padding-left:10px;
   padding-right:10px;
 }
-#viewTrend.report-mobile > .view-headline{
+#viewTrend.report-mobile > .eyebrow.view-headline{
   margin-bottom:12px;
   padding-left:10px;
   padding-right:10px;
@@ -560,11 +542,6 @@ body.trend-view-active{
 #viewTrend.report-mobile .trend-toolbar{
   grid-template-columns:max-content minmax(0, 1fr);
   align-items:center;
-}
-#viewTrend.report-mobile .trend-toolbar .report-back{
-  grid-column:1 / -1;
-  grid-row:auto;
-  margin-bottom:4px;
 }
 #viewTrend.report-mobile .trend-toolbar label[for="trendTypeMenu"],
 #viewTrend.report-mobile .trend-toolbar label[for="trendHistoryMenu"],
@@ -3243,13 +3220,12 @@ td.num.dash .cell-content{
 
 <!-- ===================== VY: TRENDHANTERING ===================== -->
 <div class="view" id="viewTrend" hidden>
-  <p class="eyebrow" id="trendPageEyebrow">Trendhantering</p>
-  <p class="view-headline" id="trendViewHeadline">nopEKONOMI - — - Trendhantering</p>
+  <button class="nav-link nav-back" id="trendBackBtn" type="button">← Start</button>
+  <p class="eyebrow view-headline" id="trendViewHeadline">nopEKONOMI - — - Trendhantering</p>
   <div class="wrap wide report-wrap">
 
     <div class="report-toolbar-scroll">
     <div class="trend-toolbar">
-      <button class="nav-link nav-back report-back" id="trendBackBtn" type="button">← Start</button>
       <label class="report-col-label" for="trendTypeMenu">Typ</label>
       <select id="trendTypeMenu" class="menu-select" aria-label="Trendtyp">
         <option value="prognosInUt">Prognos (In/Ut)</option>
@@ -4107,7 +4083,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v10';
+const APP_VERSION = '2026-09-20 v11';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
