@@ -4094,7 +4094,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v15';
+const APP_VERSION = '2026-09-20 v16';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9901,11 +9901,12 @@ function buildTrendInUtLineChart(data, opts){
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
 
-  const labelIdx = new Set([0, histN - 1, total - 1]);
-  const step = Math.max(1, Math.ceil(total / 6));
-  for(let i = 0; i < total; i += step) labelIdx.add(i);
+  // Endast startmånad, sista historikmånad och sista prognosmånad.
+  const labelIdx = [];
+  if(total > 0) labelIdx.push(0);
+  if(histN > 1) labelIdx.push(histN - 1);
+  if(total - 1 > 0 && total - 1 !== histN - 1) labelIdx.push(total - 1);
   for(const i of labelIdx){
-    if(i < 0 || i >= total) continue;
     svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
       + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
@@ -10098,19 +10099,22 @@ function sizeTrendChartText(wrap){
   const updated = wrap.querySelector('.report-table-updated');
   const mobile = isReportMobileLayout();
 
-  let targetPx = 13;
+  let refPx = 13;
   if(mobile && updated){
-    targetPx = parseFloat(getComputedStyle(updated).fontSize) || 11;
+    refPx = parseFloat(getComputedStyle(updated).fontSize) || 11;
   } else if(legend){
-    targetPx = parseFloat(getComputedStyle(legend).fontSize) || 14;
+    refPx = parseFloat(getComputedStyle(legend).fontSize) || 14;
   }
 
   // På mobilen ska även legenden följa "Uppdaterad…"-storleken.
   if(legend && mobile){
-    legend.style.fontSize = targetPx + 'px';
+    legend.style.fontSize = refPx + 'px';
   } else if(legend){
     legend.style.fontSize = '';
   }
+
+  // Axeltexter (x/y) = 75 % av referensstorleken.
+  const targetPx = refPx * 0.75;
 
   const rect = svg.getBoundingClientRect();
   const vbWidth = 560;
@@ -10455,11 +10459,12 @@ function buildTrendNettoLineChart(data){
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
 
-  const labelIdx = new Set([0, histN - 1, total - 1]);
-  const step = Math.max(1, Math.ceil(total / 6));
-  for(let i = 0; i < total; i += step) labelIdx.add(i);
+  // Endast startmånad, sista historikmånad och sista prognosmånad.
+  const labelIdx = [];
+  if(total > 0) labelIdx.push(0);
+  if(histN > 1) labelIdx.push(histN - 1);
+  if(total - 1 > 0 && total - 1 !== histN - 1) labelIdx.push(total - 1);
   for(const i of labelIdx){
-    if(i < 0 || i >= total) continue;
     svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
       + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
