@@ -4115,7 +4115,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v10';
+const APP_VERSION = '2026-09-21 v11';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -4344,6 +4344,8 @@ function isFileBook(id){
 }
 
 function bookFilePayload(book, name, extra){
+  // Materialisera trend-kryssen så att hela in-/urbockningen alltid sparas i filen.
+  try{ syncTrendIncludeMap(book); } catch(e){ /* ignore — sparar det som finns */ }
   const payload = {
     format: 'hemekonomi-book',
     version: 1,
@@ -10432,6 +10434,45 @@ function trendExcludedListHtml(recon){
     sumRows += '<tr><td>' + escapeHtml(reason) + '</td>'
       + '<td class="num">' + escapeHtml(formatReportInt(Math.round(byReason[reason]))) + '</td></tr>';
   }
+
+  // Per kategori: In (positiva) och Ut (negativa) var för sig, så man ser
+  // att rätt kategorier är i-/urbockade. Öppningsbalanser & överföringar egna rader.
+  const catAgg = Object.create(null);
+  for(const it of items){
+    const key = it.category;
+    if(!catAgg[key]) catAgg[key] = { in: 0, ut: 0, net: 0, count: 0 };
+    if(it.amount >= 0) catAgg[key].in += it.amount;
+    else catAgg[key].ut += it.amount;
+    catAgg[key].net += it.amount;
+    catAgg[key].count += 1;
+  }
+  let totIn = 0, totUt = 0;
+  const catKeys = Object.keys(catAgg).sort((a, b) => catAgg[a].net - catAgg[b].net);
+  let catRows = '';
+  for(const key of catKeys){
+    const a = catAgg[key];
+    totIn += a.in; totUt += a.ut;
+    catRows += '<tr>'
+      + '<td>' + escapeHtml(key) + '</td>'
+      + '<td class="num">' + escapeHtml(formatReportInt(Math.round(a.in))) + '</td>'
+      + '<td class="num neg">' + escapeHtml(formatReportInt(Math.round(a.ut))) + '</td>'
+      + '<td class="num' + (a.net < 0 ? ' neg' : '') + '">'
+        + escapeHtml(formatReportInt(Math.round(a.net))) + '</td>'
+      + '<td class="num">' + a.count + '</td>'
+      + '</tr>';
+  }
+  catRows += '<tr style="font-weight:600;border-top:1px solid #A8BDD4">'
+    + '<td>Totalt</td>'
+    + '<td class="num">' + escapeHtml(formatReportInt(Math.round(totIn))) + '</td>'
+    + '<td class="num neg">' + escapeHtml(formatReportInt(Math.round(totUt))) + '</td>'
+    + '<td class="num">' + escapeHtml(formatReportInt(Math.round(totIn + totUt))) + '</td>'
+    + '<td class="num">' + items.length + '</td>'
+    + '</tr>';
+  const catBlock = '<p class="trend-section-title">Uteslutet per kategori (In/Ut var för sig)</p>'
+    + '<table class="report-table"><thead><tr>'
+    + '<th>Kategori</th><th class="num">In</th><th class="num">Ut</th>'
+    + '<th class="num">Netto</th><th class="num">Antal</th></tr></thead>'
+    + '<tbody>' + catRows + '</tbody></table>';
   let rows = '';
   for(const it of items){
     const sideTxt = it.side === 'in' ? 'In' : 'Ut';
@@ -10454,6 +10495,7 @@ function trendExcludedListHtml(recon){
     + ' (summa uteslutna: ' + escapeHtml(formatReportInt(Math.round(recon.excludedTotal))) + ').</p>'
     + '<table class="report-table"><thead><tr><th>Orsak</th><th class="num">Summa</th></tr></thead>'
     + '<tbody>' + sumRows + '</tbody></table>'
+    + catBlock
     + '<div style="max-height:260px;overflow:auto;margin-top:6px">'
     + '<table class="report-table"><thead><tr>'
     + '<th class="report-label-col">Datum</th><th>Kategori</th><th>In/Ut</th>'
@@ -10466,9 +10508,9 @@ function trendExcludedListHtml(recon){
  * Alla = samma som rapporten (hela radbelopp inkl. öppningsbalans).
  * Bocklista = bara ibockade Trend-kategorier (poster, ej öppningsbalans).
  */
-function collectTrendNetOverTime(fromIso, toIso){
+function collectTrendNetOverTime(fromIso, toIso, forceMode){
   const monthlyDelta = Object.create(null);
-  const catMode = trendCategoryMode();
+  const catMode = forceMode || trendCategoryMode();
 
   for(const name of book.order){
     const acc = book.accounts[name];
@@ -10518,9 +10560,9 @@ function collectTrendNetOverTime(fromIso, toIso){
 }
 
 /** OLS-prognos på kumulativt netto (samma mönster som Prognos In/Ut). */
-function buildTrendNettoForecast(fromIso, toIso, horizon){
+function buildTrendNettoForecast(fromIso, toIso, horizon, forceMode){
   horizon = horizon || 12;
-  const series = collectTrendNetOverTime(fromIso, toIso);
+  const series = collectTrendNetOverTime(fromIso, toIso, forceMode);
   const { months, points, opening } = series;
   if(months.length < 2){
     return {
@@ -10620,9 +10662,24 @@ function trendNettoTableHtml(rows, opts){
   return html;
 }
 
-/** Linjediagram: kumulativt netto + OLS-trend (historik + prognos). */
-function buildTrendNettoLineChart(data){
+/** Plockar ut historik-/prognosvärden ur ett forecast-objekt, ankrat i sista verkliga. */
+function trendNettoSeriesFromData(data){
+  const histVals = data.values || data.points.map(p => p.value);
   const histN = data.months.length;
+  const lastActual = histN > 0
+    ? (Number.isFinite(data.lastActual) ? data.lastActual : histVals[histN - 1])
+    : 0;
+  const forecastVals = (data.forecast || []).map(p => p.value);
+  return { histVals, histN, lastActual, forecastVals };
+}
+
+/**
+ * Linjediagram: kumulativt netto (historik + ankrad prognos).
+ * opts.overlay = ett andra forecast-objekt (t.ex. verkligt saldo/"alla") som
+ * ritas i samma diagram med egen färg och märkning.
+ */
+function buildTrendNettoLineChart(data, opts){
+  opts = opts || {};
   const forecast = data.forecast || [];
   const allMonths = data.months.concat(forecast.map(p => p.month));
   const total = allMonths.length;
@@ -10632,13 +10689,20 @@ function buildTrendNettoLineChart(data){
       + '</div>';
   }
 
-  const histVals = data.values || data.points.map(p => p.value);
-  const lastActual = histN > 0
-    ? (Number.isFinite(data.lastActual) ? data.lastActual : histVals[histN - 1])
-    : 0;
-  // Prognoslinjen ANKRAS i sista verkliga punkten och följer sedan prognosvärdena.
-  const forecastVals = forecast.map(p => p.value);
-  const forecastLine = [lastActual].concat(forecastVals); // ritas från x=histN-1 och framåt
+  const colNet = '#2B579A';      // rensat/trend (primär)
+  const colReal = '#1F8A70';     // verkligt saldo (overlay)
+  const grid = '#A8BDD4';
+  const axis = '#5A6F88';
+
+  const primary = trendNettoSeriesFromData(data);
+  primary.color = colNet;
+  primary.label = opts.primaryLabel || 'Netto';
+  const overlay = opts.overlay ? trendNettoSeriesFromData(opts.overlay) : null;
+  if(overlay){
+    overlay.color = colReal;
+    overlay.label = opts.overlayLabel || 'Verkligt saldo';
+  }
+  const seriesList = overlay ? [overlay, primary] : [primary];
 
   let ymin = Infinity;
   let ymax = -Infinity;
@@ -10647,12 +10711,11 @@ function buildTrendNettoLineChart(data){
     if(v < ymin) ymin = v;
     if(v > ymax) ymax = v;
   };
-  for(let i = 0; i < histN; i++) bump(histVals[i]);
-  for(const v of forecastVals) bump(v);
-  if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){
-    ymin = 0;
-    ymax = 1;
+  for(const s of seriesList){
+    for(let i = 0; i < s.histN; i++) bump(s.histVals[i]);
+    for(const v of s.forecastVals) bump(v);
   }
+  if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){ ymin = 0; ymax = 1; }
   if(ymax <= ymin) ymax = ymin + 1;
   const padY = (ymax - ymin) * 0.08 || 1;
   ymin -= padY;
@@ -10669,9 +10732,7 @@ function buildTrendNettoLineChart(data){
   const xAt = i => padL + (total === 1 ? plotW / 2 : (i / (total - 1)) * plotW);
   const yAt = v => padT + plotH - ((v - ymin) / (ymax - ymin)) * plotH;
 
-  const colNet = '#2B579A';
-  const grid = '#A8BDD4';
-  const axis = '#5A6F88';
+  const histN = primary.histN;
 
   let svg = '';
   for(let g = 0; g <= 3; g++){
@@ -10690,32 +10751,26 @@ function buildTrendNettoLineChart(data){
       + ' stroke="' + axis + '" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>';
   }
 
-  const poly = (vals, color, dash, width) => {
-    const pts = vals.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
-    return '<polyline fill="none" stroke="' + color + '" stroke-width="' + width + '"'
-      + ' stroke-linejoin="round" stroke-linecap="round"'
-      + (dash ? ' stroke-dasharray="' + dash + '"' : '')
-      + ' points="' + pts + '"/>';
-  };
-
-  // Prognoslinjen (streckad) ritas från sista historikpunkten (x=histN-1) och framåt.
-  if(forecast.length && histN > 0){
-    const fPts = forecastLine
-      .map((v, k) => xAt(histN - 1 + k).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
-    svg += '<polyline fill="none" stroke="' + colNet + '" stroke-width="2"'
-      + ' stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"'
-      + ' points="' + fPts + '"/>';
-  }
-  const histPts = histVals.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
-  svg += '<polyline fill="none" stroke="' + colNet + '" stroke-width="2.2" stroke-linejoin="round"'
-    + ' stroke-linecap="round" points="' + histPts + '"/>';
-
-  for(let i = 0; i < histN; i++){
-    svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(histVals[i]).toFixed(1)
-      + '" r="3" fill="' + colNet + '">'
-      + '<title>' + escapeHtml(monthKeyYyMm(data.months[i]) + ' '
-        + formatReportInt(Math.round(histVals[i]))) + '</title>'
-      + '</circle>';
+  // Rita varje serie: prognos (streckad, ankrad i sista verkliga) + historik (heldragen) + punkter.
+  for(const s of seriesList){
+    if(s.forecastVals.length && s.histN > 0){
+      const fLine = [s.lastActual].concat(s.forecastVals);
+      const fPts = fLine
+        .map((v, k) => xAt(s.histN - 1 + k).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+      svg += '<polyline fill="none" stroke="' + s.color + '" stroke-width="2"'
+        + ' stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"'
+        + ' points="' + fPts + '"/>';
+    }
+    const histPts = s.histVals.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+    svg += '<polyline fill="none" stroke="' + s.color + '" stroke-width="2.2"'
+      + ' stroke-linejoin="round" stroke-linecap="round" points="' + histPts + '"/>';
+    for(let i = 0; i < s.histN; i++){
+      svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(s.histVals[i]).toFixed(1)
+        + '" r="3" fill="' + s.color + '">'
+        + '<title>' + escapeHtml(s.label + ' ' + monthKeyYyMm(data.months[i]) + ' '
+          + formatReportInt(Math.round(s.histVals[i]))) + '</title>'
+        + '</circle>';
+    }
   }
 
   for(let g = 0; g <= 3; g++){
@@ -10737,19 +10792,21 @@ function buildTrendNettoLineChart(data){
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
-  // Slutdest. = sista prognosvärdet (ankrat i historiken); diff mot sista verkliga.
-  const lastHist = lastActual;
-  const lastTrend = forecastVals.length ? forecastVals[forecastVals.length - 1] : lastActual;
-  const slutDest = Math.round(lastTrend);
-  const diff = Math.round(lastTrend - lastHist);
-  const diffCls = diff < 0 ? 'is-neg' : 'is-pos';
-  const diffTxt = (diff > 0 ? '+' : '') + formatReportInt(diff);
+  // Legend: en rad per serie med Slutdest. och ändring mot sista verkliga.
+  const legendFor = s => {
+    const last = s.forecastVals.length ? s.forecastVals[s.forecastVals.length - 1] : s.lastActual;
+    const dd = Math.round(last - s.lastActual);
+    const cls = dd < 0 ? 'is-neg' : 'is-pos';
+    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
+    return '<span><i class="trend-line-chart-swatch" aria-hidden="true"'
+      + ' style="color:' + s.color + '"></i>'
+      + escapeHtml(s.label) + ' <span class="trend-delta">(Slutdest. '
+      + escapeHtml(formatReportInt(Math.round(last))) + ')</span>'
+      + '<span class="trend-delta ' + cls + '">' + escapeHtml(txt) + '</span></span>';
+  };
   const legend = '<p class="trend-line-chart-legend">'
-    + '<span><i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
-    + '--- Netto <span class="trend-delta">(Slutdest. '
-    + escapeHtml(formatReportInt(slutDest)) + ')</span>'
-    + '<span class="trend-delta ' + diffCls + '">'
-    + escapeHtml(diffTxt) + '</span></span></p>';
+    + seriesList.slice().reverse().map(legendFor).join('')
+    + '</p>';
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
@@ -10771,10 +10828,13 @@ function renderTrendNettoOverTid(){
 
   // Bygg data + kör kontroller. Vid brott: trendFail visar felruta och kastar.
   let data;
+  let overlayData = null;
   let reconBlock = '';
   try{
     data = buildTrendNettoForecast(fromIso, toIso, horizon);
     if(data.ok && trendCategoryMode() === 'bocklista'){
+      // Verkligt saldo (alla radbelopp inkl. öppningsbalanser) att lägga i samma diagram.
+      overlayData = buildTrendNettoForecast(fromIso, toIso, horizon, 'alla');
       const recon = computeTrendNetReconciliation(toIso);
       const cleanedFromSeries = data.points.length
         ? data.points[data.points.length - 1].value : 0;
@@ -10846,7 +10906,11 @@ function renderTrendNettoOverTid(){
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
-    + buildTrendNettoLineChart(data)
+    + buildTrendNettoLineChart(data, {
+        primaryLabel: catMode === 'alla' ? 'Verkligt saldo' : 'Rensat (trend)',
+        overlay: (overlayData && overlayData.ok) ? overlayData : null,
+        overlayLabel: 'Verkligt saldo (inkl. öppningsbalans)'
+      })
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
     + historyBlock + forecastBlock + reconBlock
