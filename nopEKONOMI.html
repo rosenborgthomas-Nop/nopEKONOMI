@@ -3387,12 +3387,12 @@ td.num.dash .cell-content{
         aria-label="Hjälp om Trend Bocklista" aria-expanded="false"
         aria-controls="careHubTrendHelpPop" hidden>?</button>
       <span id="careHubTrendHelpPop" class="help-tip-pop" role="tooltip" hidden>
-        Här styr du vilka kategorier och underkategorier som ingår när programmet
-        räknar ut trendlutningen (Prognos / Netto över tid → Kategorialternativ
-        Bocklista). Ibockade ingår i lutningen; avbockade tas bort (t.ex. engångs-
-        poster som annars förvränger riktningen). Historiken och prognosens start
-        är fortfarande ditt verkliga saldo — bocklistan påverkar bara lutningen.
-        Ändringar sparas med OK och följer med i backupen.
+        Här styr du vilka kategorier och underkategorier som ingår i den rensade
+        serien (Netto över tid → Kategorialternativ Bocklista). Ibockade ingår;
+        avbockade tas bort (t.ex. engångsposter som annars förvränger riktningen).
+        I diagrammet visas två linjer: verkligt saldo (alla poster) och den rensade
+        bocklista-serien — vardera med egen historik och prognos ankrad i sitt sista
+        värde. Ändringar sparas med OK och följer med i backupen.
       </span>
     </div>
     <div class="menu-row" id="careHubMenuRow">
@@ -4143,7 +4143,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v16';
+const APP_VERSION = '2026-09-22 v17';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10853,18 +10853,18 @@ function renderTrendNettoOverTid(){
   const fromIso = range.from;
   const toIso = range.to;
   const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
+  const catMode = trendCategoryMode();
 
-  // Bygg data + kör kontroller. Vid brott: trendFail visar felruta och kastar.
-  let data;          // bocklista-serien: ger trendlutningen + avstämning
-  let renderData;    // det som faktiskt ritas (historik + prognos)
+  // cleaned = bocklista (eller aktuell meny); real = verkligt saldo (alla).
+  let cleaned = null;
+  let real = null;
   let reconBlock = '';
   try{
-    data = buildTrendNettoForecast(fromIso, toIso, horizon);
-    renderData = data;
-    if(data.ok && trendCategoryMode() === 'bocklista'){
+    cleaned = buildTrendNettoForecast(fromIso, toIso, horizon);
+    if(cleaned.ok && catMode === 'bocklista'){
       const recon = computeTrendNetReconciliation(toIso);
-      const cleanedFromSeries = data.points.length
-        ? data.points[data.points.length - 1].value : 0;
+      const cleanedFromSeries = cleaned.points.length
+        ? cleaned.points[cleaned.points.length - 1].value : 0;
       assertTrendNetReconciliation(recon, cleanedFromSeries);
       reconBlock = trendExcludedListHtml(recon);
       console.info('[Trend] Uteslutna poster (' + recon.excludedItems.length + ' st):',
@@ -10873,26 +10873,7 @@ function renderTrendNettoOverTid(){
         + ' − rensad ' + Math.round(recon.cleanedTotal)
         + ' = ' + Math.round(recon.rawTotal - recon.cleanedTotal)
         + ' (Σ uteslutna ' + Math.round(recon.excludedTotal) + ')');
-
-      // HISTORIK = verkligt saldo (alla poster, slutar t.ex. 142 639).
-      // TRENDLUTNING = från bocklistan (data.fit.b). Prognosen ankras i det
-      // verkliga sista värdet och dras med den beräknade lutningen.
-      const realData = buildTrendNettoForecast(fromIso, toIso, horizon, 'alla');
-      if(realData.ok){
-        const slope = data.fit.b;
-        const anchor = realData.lastActual;
-        const lastMk = realData.months[realData.months.length - 1];
-        const fc = [];
-        let prev = anchor;
-        for(let h = 1; h <= horizon; h++){
-          const delta = slope;
-          const value = prev + delta;
-          fc.push({ month: addMonthKey(lastMk, h), value: value, delta: delta });
-          prev = value;
-        }
-        assertTrendForecastChain(anchor, fc);
-        renderData = Object.assign({}, realData, { forecast: fc, fit: data.fit });
-      }
+      real = buildTrendNettoForecast(fromIso, toIso, horizon, 'alla');
     }
   } catch(err){
     if(err && err.trendHandled){ clearTrendCanvas(); return; }
@@ -10912,15 +10893,23 @@ function renderTrendNettoOverTid(){
     + '<div class="report-table-title-row">'
     + '<p class="report-table-title">NETTO ÖVER TID</p>';
 
-  if(!renderData || !renderData.ok){
+  if(!cleaned || !cleaned.ok){
     head += updatedHtml + '</div></div>';
     wrap.innerHTML = head
       + '<p class="report-empty-note">'
-      + escapeHtml((renderData && renderData.reason) || data.reason || 'Kunde inte beräkna trend.')
+      + escapeHtml((cleaned && cleaned.reason) || 'Kunde inte beräkna trend.')
       + '</p>';
     trendBody.appendChild(wrap);
     return;
   }
+
+  const showDual = catMode === 'bocklista' && real && real.ok;
+  // Primär serie i diagrammet = rensat; overlay = verkligt saldo (variant A).
+  const chartPrimary = showDual ? cleaned : cleaned;
+  const chartOverlay = showDual ? real : null;
+  // Tabeller: verkligt saldo som huvudhistorik när dual; annars den enda serien.
+  const mainTable = showDual ? real : cleaned;
+  const cleanedTable = showDual ? cleaned : null;
 
   const detailsId = 'trendPrognosDetails';
   head += '<button type="button" class="help-tip-btn trend-details-btn"'
@@ -10930,35 +10919,52 @@ function renderTrendNettoOverTid(){
     + updatedHtml
     + '</div></div>';
 
-  const catMode = trendCategoryMode();
   const basText = catMode === 'alla'
     ? 'Bas: kumulativt netto som i Rapport (alla belopp inkl. öppningsbalans). '
-    : 'Historik = verkligt saldo (alla poster). Trendlutningen är beräknad från '
-      + 'ibockade kategorier i Registervård → Trend, och prognosen dras från sista '
-      + 'verkliga värdet. ';
+    : (showDual
+      ? 'Diagram: två serier — verkligt saldo (alla poster) och rensat '
+        + '(ibockade kategorier i Registervård → Trend Bocklista). '
+        + 'Varje prognos är ankrad i respektive sista historikvärde. '
+      : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Trend Bocklista. ');
 
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
-    + 'Historik: ' + escapeHtml(renderData.historyFrom) + ' – ' + escapeHtml(renderData.historyTo)
-    + ' · ' + renderData.months.length + ' fulländade månader'
+    + 'Historik: ' + escapeHtml(mainTable.historyFrom) + ' – ' + escapeHtml(mainTable.historyTo)
+    + ' · ' + mainTable.months.length + ' fulländade månader'
     + ' (pågående månad ingår inte). '
     + basText
-    + 'Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(renderData.opening))) + '. '
-    + 'Lutning ' + escapeHtml(formatTrendSlope(renderData.fit.b))
-    + ' (OLS, lätt IQR-winsorize). '
+    + (showDual
+      ? ('Verkligt sista: ' + escapeHtml(formatReportInt(Math.round(real.lastActual)))
+        + ' · Rensat sista: ' + escapeHtml(formatReportInt(Math.round(cleaned.lastActual)))
+        + ' · Lutning verkligt ' + escapeHtml(formatTrendSlope(real.fit.b))
+        + ', rensat ' + escapeHtml(formatTrendSlope(cleaned.fit.b))
+        + ' (OLS, lätt IQR-winsorize). ')
+      : ('Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(mainTable.opening))) + '. '
+        + 'Lutning ' + escapeHtml(formatTrendSlope(mainTable.fit.b))
+        + ' (OLS, lätt IQR-winsorize). '))
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
 
-  const historyBlock = '<p class="trend-section-title">Historik</p>'
-    + trendNettoTableHtml(renderData.points);
-
-  const forecastBlock = '<p class="trend-section-title">Prognos ('
+  let historyBlock = '<p class="trend-section-title">'
+    + (showDual ? 'Historik — verkligt saldo' : 'Historik') + '</p>'
+    + trendNettoTableHtml(mainTable.points);
+  let forecastBlock = '<p class="trend-section-title">'
+    + (showDual ? 'Prognos — verkligt saldo (' : 'Prognos (')
     + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
-    + trendNettoTableHtml(renderData.forecast);
+    + trendNettoTableHtml(mainTable.forecast);
+  if(cleanedTable){
+    historyBlock += '<p class="trend-section-title">Historik — rensat (bocklista)</p>'
+      + trendNettoTableHtml(cleanedTable.points);
+    forecastBlock += '<p class="trend-section-title">Prognos — rensat (bocklista) ('
+      + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
+      + trendNettoTableHtml(cleanedTable.forecast);
+  }
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
-    + buildTrendNettoLineChart(renderData, {
-        primaryLabel: catMode === 'alla' ? 'Verkligt saldo' : 'Netto'
+    + buildTrendNettoLineChart(chartPrimary, {
+        primaryLabel: showDual ? 'Rensat (bocklista)' : (catMode === 'alla' ? 'Verkligt saldo' : 'Netto'),
+        overlay: chartOverlay,
+        overlayLabel: 'Verkligt saldo'
       })
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
