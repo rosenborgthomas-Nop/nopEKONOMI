@@ -321,6 +321,21 @@ input[type=file]{ display:none; }
   font-weight:600;
   color:var(--headline-accent);
 }
+.care-section-title-row{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin:0 0 8px;
+  position:relative;
+}
+.care-section-title-row .care-section-title{
+  margin:0;
+}
+.care-section-title-row .help-tip-pop{
+  left:0;
+  right:auto;
+  max-width:min(22rem, calc(100vw - 2rem));
+}
 .care-list-edit-lede{
   margin:0 0 14px;
   font-size:14px;
@@ -3366,7 +3381,20 @@ td.num.dash .cell-content{
     <button class="nav-link nav-back" id="careHubBackBtn" type="button">← Start</button>
     <p class="eyebrow view-headline" id="careHubViewHeadline">nopEKONOMI - — - Registervård</p>
 
-    <p class="care-section-title" id="careHubSectionTitle">Registervård</p>
+    <div class="care-section-title-row" id="careHubSectionTitleRow">
+      <p class="care-section-title" id="careHubSectionTitle">Registervård</p>
+      <button type="button" class="help-tip-btn" id="careHubTrendHelpBtn"
+        aria-label="Hjälp om Trend Bocklista" aria-expanded="false"
+        aria-controls="careHubTrendHelpPop" hidden>?</button>
+      <span id="careHubTrendHelpPop" class="help-tip-pop" role="tooltip" hidden>
+        Här styr du vilka kategorier och underkategorier som ingår när programmet
+        räknar ut trendlutningen (Prognos / Netto över tid → Kategorialternativ
+        Bocklista). Ibockade ingår i lutningen; avbockade tas bort (t.ex. engångs-
+        poster som annars förvränger riktningen). Historiken och prognosens start
+        är fortfarande ditt verkliga saldo — bocklistan påverkar bara lutningen.
+        Ändringar sparas med OK och följer med i backupen.
+      </span>
+    </div>
     <div class="menu-row" id="careHubMenuRow">
       <select id="careHubMenu" class="menu-select" aria-label="Registervård">
         <option value="">Välj...</option>
@@ -4115,7 +4143,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v15';
+const APP_VERSION = '2026-09-21 v16';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -12350,15 +12378,35 @@ function renderCareHub(){
 const careHubMenu = el('careHubMenu');
 const careHubMenuRow = el('careHubMenuRow');
 const careHubSectionTitle = el('careHubSectionTitle');
+const careHubTrendHelpBtn = el('careHubTrendHelpBtn');
+const careHubTrendHelpPop = el('careHubTrendHelpPop');
 const careHubListArea = el('careHubListArea');
 const careHubListStage = el('careHubListStage');
 const careHubListEditStage = el('careHubListEditStage');
+
+function setCareHubTrendHelpOpen(on){
+  if(!careHubTrendHelpBtn || !careHubTrendHelpPop) return;
+  careHubTrendHelpPop.hidden = !on;
+  careHubTrendHelpBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+}
+
+if(careHubTrendHelpBtn){
+  careHubTrendHelpBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    setCareHubTrendHelpOpen(careHubTrendHelpPop.hidden);
+  });
+  document.addEventListener('click', () => setCareHubTrendHelpOpen(false));
+}
 
 function syncCareHubSectionTitle(key){
   if(!careHubSectionTitle) return;
   if(key === 'trend') careHubSectionTitle.textContent = 'Trend Bocklista';
   else if(key === 'budget') careHubSectionTitle.textContent = 'Budget';
   else careHubSectionTitle.textContent = 'Registervård';
+  if(careHubTrendHelpBtn){
+    careHubTrendHelpBtn.hidden = key !== 'trend';
+    if(key !== 'trend') setCareHubTrendHelpOpen(false);
+  }
 }
 
 /** Snapshot av trendInclude medan Trend-listan är öppen (OK sparar, Avbryt återställer). */
