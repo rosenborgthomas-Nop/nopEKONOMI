@@ -2803,6 +2803,10 @@ footer p{
   gap:10px;
   margin-left:auto;
 }
+.trend-page-actions{
+  margin-top:12px;
+  margin-bottom:4px;
+}
 .care-list-edit-panel{
   margin-top:0;
 }
@@ -3273,6 +3277,13 @@ td.num.dash .cell-content{
         <span class="report-placeholder-hint">Välj typ och horisont ovan</span>
       </p>
     </main>
+
+    <div class="care-list-actions trend-page-actions">
+      <div class="care-list-actions-right">
+        <button class="btn-cancel" id="trendCancelBtn" type="button">Avbryt</button>
+        <button class="btn-ok" id="trendOkBtn" type="button">OK</button>
+      </div>
+    </div>
 
     <footer>
       <p class="app-version"></p>
@@ -4095,7 +4106,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v04';
+const APP_VERSION = '2026-09-21 v05';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6285,6 +6296,13 @@ async function show(name, opts){
 
   hideTooltip();
   window.scrollTo(0, 0);
+
+  const leavingTrend = views.trend && !views.trend.hidden
+    && name !== 'trend' && name !== 'ledger';
+  if(leavingTrend && trendPrefsSession){
+    // Lämnade Trend utan OK (t.ex. annan navigation) — återställ menyval.
+    discardTrendPrefsSession();
+  }
 
   // Bygg om boklistan innan inloggningen visas.
   if(name === 'login') await renderLogin();
@@ -9999,6 +10017,11 @@ const trendMessages = el('trendMessages');
 const trendBody = el('trendBody');
 const trendPlaceholder = el('trendPlaceholder');
 const trendBackBtn = el('trendBackBtn');
+const trendOkBtn = el('trendOkBtn');
+const trendCancelBtn = el('trendCancelBtn');
+
+/** Snapshot av menyval när Trend-sidan öppnades (OK sparar, Avbryt återställer). */
+let trendPrefsSession = null;
 
 function readTrendPrefsStore(){
   try{
@@ -10015,47 +10038,74 @@ function loadTrendPrefs(){
   return saved;
 }
 
-function saveTrendPrefs(){
-  if(!bookId || !trendTypeMenu || !trendHorizonMenu) return;
-  const all = readTrendPrefsStore();
-  const horizon = Number(trendHorizonMenu.value);
-  const history = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
-    ? trendHistoryMenu.value
-    : '12';
-  const catMode = trendCatMenu && TREND_CAT_MODES.has(trendCatMenu.value)
-    ? trendCatMenu.value
-    : 'bocklista';
-  all[bookId] = {
-    type: trendTypeMenu.value,
-    history: history,
+function captureTrendPrefsFromMenus(){
+  const horizon = Number(trendHorizonMenu && trendHorizonMenu.value);
+  return {
+    type: trendTypeMenu && TREND_TYPES.has(trendTypeMenu.value)
+      ? trendTypeMenu.value : 'prognosInUt',
+    history: trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
+      ? trendHistoryMenu.value : '12',
     horizon: TREND_HORIZONS.has(horizon) ? horizon : 12,
-    catMode: catMode
+    catMode: trendCatMenu && TREND_CAT_MODES.has(trendCatMenu.value)
+      ? trendCatMenu.value : 'bocklista'
   };
-  localStorage.setItem(TREND_PREFS_KEY, JSON.stringify(all));
 }
 
-function restoreTrendPrefs(){
-  const saved = loadTrendPrefs();
+function applyTrendPrefsToMenus(prefs){
+  const p = prefs && typeof prefs === 'object' ? prefs : {};
   if(trendTypeMenu){
-    const type = saved && TREND_TYPES.has(saved.type) ? saved.type : 'prognosInUt';
+    const type = TREND_TYPES.has(p.type) ? p.type : 'prognosInUt';
     if(trendTypeMenu.querySelector('option[value="' + type + '"]')) trendTypeMenu.value = type;
     else trendTypeMenu.selectedIndex = 0;
   }
   if(trendHistoryMenu){
-    const hist = saved && TREND_HISTORY.has(String(saved.history)) ? String(saved.history) : '12';
+    const hist = TREND_HISTORY.has(String(p.history)) ? String(p.history) : '12';
     if(trendHistoryMenu.querySelector('option[value="' + hist + '"]')) trendHistoryMenu.value = hist;
     else trendHistoryMenu.value = '12';
   }
   if(trendHorizonMenu){
-    const h = saved && TREND_HORIZONS.has(Number(saved.horizon)) ? String(saved.horizon) : '12';
+    const h = TREND_HORIZONS.has(Number(p.horizon)) ? String(p.horizon) : '12';
     if(trendHorizonMenu.querySelector('option[value="' + h + '"]')) trendHorizonMenu.value = h;
     else trendHorizonMenu.value = '12';
   }
   if(trendCatMenu){
-    const cat = saved && TREND_CAT_MODES.has(saved.catMode) ? saved.catMode : 'bocklista';
+    const cat = TREND_CAT_MODES.has(p.catMode) ? p.catMode : 'bocklista';
     if(trendCatMenu.querySelector('option[value="' + cat + '"]')) trendCatMenu.value = cat;
     else trendCatMenu.value = 'bocklista';
   }
+}
+
+function saveTrendPrefs(){
+  if(!bookId) return;
+  const all = readTrendPrefsStore();
+  all[bookId] = captureTrendPrefsFromMenus();
+  localStorage.setItem(TREND_PREFS_KEY, JSON.stringify(all));
+}
+
+function restoreTrendPrefs(){
+  applyTrendPrefsToMenus(loadTrendPrefs() || {});
+}
+
+function beginTrendPrefsSession(){
+  if(trendPrefsSession) return;
+  restoreTrendPrefs();
+  trendPrefsSession = captureTrendPrefsFromMenus();
+}
+
+function discardTrendPrefsSession(){
+  if(trendPrefsSession) applyTrendPrefsToMenus(trendPrefsSession);
+  trendPrefsSession = null;
+}
+
+function commitTrendPrefsSession(){
+  saveTrendPrefs();
+  trendPrefsSession = null;
+}
+
+function leaveTrendPage(commit){
+  if(commit) commitTrendPrefsSession();
+  else discardTrendPrefsSession();
+  show('start');
 }
 
 function clearTrendCanvas(){
@@ -10581,11 +10631,12 @@ function syncTrendControlsForType(){
 
 function renderTrendPage(){
   if(!bookMeetsTrendMonthGate()){
+    trendPrefsSession = null;
     show('start');
     return;
   }
   if(trendMessages) clear(trendMessages);
-  restoreTrendPrefs();
+  beginTrendPrefsSession();
   syncTrendControlsForType();
   syncReportMobileLayout();
   const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
@@ -10602,10 +10653,21 @@ function renderTrendPage(){
         + '<span class="report-placeholder-hint">Okänd trendtyp.</span>';
     }
   }
-  saveTrendPrefs();
 }
 
-if(trendBackBtn) trendBackBtn.addEventListener('click', () => show('start'));
+function refreshTrendPagePreview(){
+  if(!views.trend || views.trend.hidden) return;
+  if(trendMessages) clear(trendMessages);
+  syncTrendControlsForType();
+  syncReportMobileLayout();
+  const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
+  if(type === 'nettoOverTid') renderTrendNettoOverTid();
+  else if(type === 'prognosInUt') renderTrendPrognosInUt();
+}
+
+if(trendBackBtn) trendBackBtn.addEventListener('click', () => leaveTrendPage(false));
+if(trendCancelBtn) trendCancelBtn.addEventListener('click', () => leaveTrendPage(false));
+if(trendOkBtn) trendOkBtn.addEventListener('click', () => leaveTrendPage(true));
 if(trendBody){
   trendBody.addEventListener('dblclick', e => {
     const numTd = e.target && e.target.closest && e.target.closest('td.num[data-drill]');
@@ -10622,28 +10684,16 @@ if(trendBody){
   });
 }
 if(trendTypeMenu){
-  trendTypeMenu.addEventListener('change', () => {
-    saveTrendPrefs();
-    renderTrendPage();
-  });
+  trendTypeMenu.addEventListener('change', refreshTrendPagePreview);
 }
 if(trendHistoryMenu){
-  trendHistoryMenu.addEventListener('change', () => {
-    saveTrendPrefs();
-    renderTrendPage();
-  });
+  trendHistoryMenu.addEventListener('change', refreshTrendPagePreview);
 }
 if(trendHorizonMenu){
-  trendHorizonMenu.addEventListener('change', () => {
-    saveTrendPrefs();
-    renderTrendPage();
-  });
+  trendHorizonMenu.addEventListener('change', refreshTrendPagePreview);
 }
 if(trendCatMenu){
-  trendCatMenu.addEventListener('change', () => {
-    saveTrendPrefs();
-    renderTrendPage();
-  });
+  trendCatMenu.addEventListener('change', refreshTrendPagePreview);
 }
 
 function collectPayeeReport(fromIso, toIso){
@@ -18544,7 +18594,7 @@ function triggerEscapeBack(){
       show('start');
       return true;
     case 'trend':
-      show('start');
+      leaveTrendPage(false);
       return true;
     case 'start':
       leaveBook();
