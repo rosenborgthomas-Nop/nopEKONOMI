@@ -713,6 +713,12 @@ body.trend-view-active{
   font-weight:500;
   color:var(--text-on-paper-soft);
 }
+.trend-line-chart-legend .trend-delta.is-pos{
+  color:var(--chart-positive);
+}
+.trend-line-chart-legend .trend-delta.is-neg{
+  color:var(--wine);
+}
 .trend-line-chart-swatch{
   display:inline-block;
   width:14px;
@@ -4106,7 +4112,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v06';
+const APP_VERSION = '2026-09-21 v07';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10521,11 +10527,16 @@ function buildTrendNettoLineChart(data){
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
-  const slutDest = Math.round(fitAll[total - 1]);
+  // Skillnad: sista kumulativa trend − sista historiska kumulativa.
+  const lastHist = histN > 0 ? histVals[histN - 1] : 0;
+  const lastTrend = fitAll[total - 1];
+  const diff = Math.round(lastTrend - lastHist);
+  const diffCls = diff < 0 ? 'is-neg' : 'is-pos';
+  const diffTxt = (diff > 0 ? '+' : '') + formatReportInt(diff);
   const legend = '<p class="trend-line-chart-legend">'
     + '<span><i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
-    + '--- Netto <span class="trend-delta">(Slutdest. '
-    + escapeHtml(formatReportInt(slutDest)) + ')</span></span></p>';
+    + '--- Netto <span class="trend-delta ' + diffCls + '">(Slutdest. '
+    + escapeHtml(diffTxt) + ')</span></span></p>';
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
