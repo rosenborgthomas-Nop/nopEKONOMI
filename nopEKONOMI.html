@@ -4095,7 +4095,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v03';
+const APP_VERSION = '2026-09-21 v04';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -12616,7 +12616,7 @@ function renderCareList(){
   careListNewBtn.textContent = meta.newLabel;
   careListNewBtn.hidden = careListKind === 'bok' || careListKind === 'trend'
     || careListKind === 'budget' || !meta.newLabel;
-  if(careListOkBtn) careListOkBtn.hidden = careListKind === 'budget';
+  if(careListOkBtn) careListOkBtn.hidden = false;
   if(careListBackupBtn) careListBackupBtn.hidden = careListKind !== 'bok';
   syncCareHubMenuVisibility();
   clear(careListMessages);
@@ -13212,6 +13212,11 @@ careListCancelBtn.addEventListener('click', closeCareList);
 careListOkBtn.addEventListener('click', () => {
   if(careListKind === 'trend'){
     confirmCareListTrend();
+    return;
+  }
+  if(careListKind === 'budget'){
+    careHubMenu.selectedIndex = 0;
+    hideCareHubSection();
     return;
   }
   careListOpenHighlighted();
