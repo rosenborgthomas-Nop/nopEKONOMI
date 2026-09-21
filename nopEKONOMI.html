@@ -4115,7 +4115,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v09';
+const APP_VERSION = '2026-09-21 v10';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10298,6 +10298,169 @@ function renderTrendPrognosInUt(){
   }
 }
 
+/** Hårt stopp: visa tydligt fel i Trend-vyn och avbryt renderingen. */
+function trendFail(title, lines){
+  const detail = (lines || []).join('\n');
+  console.error('[Trend] ' + title + (detail ? '\n' + detail : ''));
+  if(trendMessages){
+    clear(trendMessages);
+    const box = document.createElement('div');
+    box.setAttribute('role', 'alert');
+    box.style.cssText = 'white-space:pre-wrap;border:1px solid #cc0000;background:#ffecec;'
+      + 'color:#7a0000;padding:10px 12px;border-radius:8px;margin:8px 0;'
+      + 'font-family:JetBrains Mono, monospace;font-size:12px;line-height:1.45;';
+    box.textContent = '⛔ ' + title + (detail ? '\n' + detail : '');
+    trendMessages.appendChild(box);
+  }
+  const err = new Error('[Trend] ' + title);
+  err.trendHandled = true;
+  throw err;
+}
+
+/**
+ * Avstämning för Netto över tid (bocklista):
+ *   rå total (alla radbelopp) = rensad total (ibockade poster) + Σ uteslutna poster.
+ * Rensad total byggs som "rå − uteslutna" per rad/split, så invarianten håller
+ * exakt om datan är konsekvent. Split-differenser (r.total ≠ Σ split) bokförs
+ * som egen utesluten post och flaggas.
+ */
+function computeTrendNetReconciliation(toIso){
+  let rawTotal = 0;         // Σ r.total (som läget "alla")
+  let cleanedTotal = 0;     // Σ ibockade split-delar (som bocklista)
+  const excludedItems = []; // { date, category, sub, side, amount, reason }
+  const mismatches = [];
+
+  const pushExcl = (date, cat, sub, amount, reason) => {
+    if(!Number.isFinite(amount) || !amount) return;
+    excludedItems.push({
+      date: date,
+      category: cat,
+      sub: sub || '',
+      side: amount >= 0 ? 'in' : 'ut',
+      amount: amount,
+      reason: reason
+    });
+  };
+
+  for(const name of book.order){
+    const acc = book.accounts[name];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(d > toIso) continue;
+
+      const rowTotalRaw = typeof r.total === 'number' ? r.total : Number(r.total);
+      const rt = Number.isFinite(rowTotalRaw) ? rowTotalRaw : 0;
+      rawTotal += rt;
+
+      // Rader som bocklistan helt hoppar över → hela raden utesluten.
+      if(isReportExcludedRow(r)){
+        pushExcl(d, (r.category || '').trim() || '(öppningsbalans)', '', rt, 'öppningsbalans');
+        continue;
+      }
+      if(rowIsPureTransfer(r) && !rowHasSplits(r)){
+        pushExcl(d, (r.category || '').trim(), '', rt, 'överföring');
+        continue;
+      }
+
+      // Övriga rader: dela i split-delar, räkna ibockade, uteslut övriga.
+      let pieceSum = 0;
+      for(const piece of reportPiecesFromRow(r)){
+        const cat = (piece.category || '').trim();
+        const sub = (piece.subCategory || '').trim();
+        const amt = piece.amount;
+        if(!Number.isFinite(amt)) continue;
+        pieceSum += amt;
+        if(trendPieceAllowed(cat, sub)){
+          cleanedTotal += amt;
+        } else {
+          const reason = isTransferCategory(cat) ? 'överföringsben' : 'ej ibockad kategori';
+          pushExcl(d, cat || '(tom kategori)', sub, amt, reason);
+        }
+      }
+      // r.total ska = Σ split-delar; annars bokförs diffen (annars spricker avstämningen).
+      const diff = rt - pieceSum;
+      if(Math.abs(diff) > 0.005){
+        mismatches.push({ date: d, account: name, payee: (r.payee || '').trim(),
+          rowTotal: rt, pieceSum: pieceSum, diff: diff });
+        pushExcl(d, '(split-differens: ' + ((r.payee || '').trim() || name) + ')', '', diff, 'split-mismatch');
+      }
+    }
+  }
+
+  let excludedTotal = 0;
+  for(const it of excludedItems) excludedTotal += it.amount;
+  return { rawTotal, cleanedTotal, excludedItems, excludedTotal, mismatches };
+}
+
+/** Stoppar med tydligt fel om rå − rensad ≠ Σ uteslutna poster. */
+function assertTrendNetReconciliation(recon, cleanedFromSeries){
+  const lhs = recon.rawTotal - recon.cleanedTotal;
+  const rhs = recon.excludedTotal;
+  if(Math.abs(lhs - rhs) > 0.01){
+    trendFail('Avstämning misslyckades i Netto över tid (rå − rensad ≠ Σ uteslutna).', [
+      'Rå total (alla radbelopp): ' + formatReportInt(Math.round(recon.rawTotal)),
+      'Rensad total (ibockade):   ' + formatReportInt(Math.round(recon.cleanedTotal)),
+      'Rå − rensad:               ' + formatReportInt(Math.round(lhs)),
+      'Summa uteslutna poster:    ' + formatReportInt(Math.round(rhs)),
+      'Differens (ska vara 0):    ' + formatReportInt(Math.round(lhs - rhs)),
+      'Antal uteslutna poster:    ' + recon.excludedItems.length
+    ]);
+  }
+  // Kontroll: seriens slutliga kumulativa (bocklista) ska = avstämd rensad total.
+  if(Number.isFinite(cleanedFromSeries)
+      && Math.abs(cleanedFromSeries - recon.cleanedTotal) > 0.01){
+    trendFail('Kumulativ serie matchar inte avstämd rensad total.', [
+      'Serie (sista kumulativa): ' + formatReportInt(Math.round(cleanedFromSeries)),
+      'Avstämd rensad total:     ' + formatReportInt(Math.round(recon.cleanedTotal)),
+      'Differens:                ' + formatReportInt(Math.round(cleanedFromSeries - recon.cleanedTotal))
+    ]);
+  }
+}
+
+/** HTML: lista över alla uteslutna poster (datum, kategori, in/ut, belopp) + summor. */
+function trendExcludedListHtml(recon){
+  const items = recon.excludedItems.slice().sort((a, b) =>
+    a.date.localeCompare(b.date) || a.category.localeCompare(b.category, 'sv'));
+  const byReason = Object.create(null);
+  for(const it of items){
+    byReason[it.reason] = (byReason[it.reason] || 0) + it.amount;
+  }
+  let sumRows = '';
+  for(const reason of Object.keys(byReason).sort()){
+    sumRows += '<tr><td>' + escapeHtml(reason) + '</td>'
+      + '<td class="num">' + escapeHtml(formatReportInt(Math.round(byReason[reason]))) + '</td></tr>';
+  }
+  let rows = '';
+  for(const it of items){
+    const sideTxt = it.side === 'in' ? 'In' : 'Ut';
+    const cat = it.category + (it.sub ? ' / ' + it.sub : '');
+    rows += '<tr>'
+      + '<td class="report-label-col">' + escapeHtml(it.date) + '</td>'
+      + '<td>' + escapeHtml(cat) + '</td>'
+      + '<td>' + escapeHtml(sideTxt) + '</td>'
+      + '<td class="num' + (it.amount < 0 ? ' neg' : '') + '">'
+        + escapeHtml(formatReportInt(Math.round(it.amount))) + '</td>'
+      + '<td>' + escapeHtml(it.reason) + '</td>'
+      + '</tr>';
+  }
+  return '<p class="trend-section-title">Uteslutna poster ('
+      + items.length + ' st)</p>'
+    + '<p class="report-empty-note" style="margin:0 0 6px">'
+    + 'Rå total ' + escapeHtml(formatReportInt(Math.round(recon.rawTotal)))
+    + ' − rensad total ' + escapeHtml(formatReportInt(Math.round(recon.cleanedTotal)))
+    + ' = ' + escapeHtml(formatReportInt(Math.round(recon.rawTotal - recon.cleanedTotal)))
+    + ' (summa uteslutna: ' + escapeHtml(formatReportInt(Math.round(recon.excludedTotal))) + ').</p>'
+    + '<table class="report-table"><thead><tr><th>Orsak</th><th class="num">Summa</th></tr></thead>'
+    + '<tbody>' + sumRows + '</tbody></table>'
+    + '<div style="max-height:260px;overflow:auto;margin-top:6px">'
+    + '<table class="report-table"><thead><tr>'
+    + '<th class="report-label-col">Datum</th><th>Kategori</th><th>In/Ut</th>'
+    + '<th class="num">Belopp</th><th>Orsak</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table></div>';
+}
+
 /**
  * Kumulativt netto som i Rapport → Netto över tid.
  * Alla = samma som rapporten (hela radbelopp inkl. öppningsbalans).
@@ -10371,19 +10534,24 @@ function buildTrendNettoForecast(fromIso, toIso, horizon){
   const fit = olsFitSeries(winsorizeSeries(values));
   const n = months.length;
   const lastMk = months[n - 1];
+
+  // Prognosen ANKRAS i sista verkliga kumulativa värdet och byggs som en kedja:
+  // nästa kumulativ = föregående kumulativ + ändring (ändring = OLS-lutningen).
+  const lastActual = values[n - 1];
+  const slope = fit.b;
   const forecast = [];
+  let prevCum = lastActual;
   for(let h = 1; h <= horizon; h++){
-    const t = n - 1 + h;
-    const value = fit.a + fit.b * t;
-    const prev = h === 1
-      ? (fit.a + fit.b * (n - 1))
-      : (fit.a + fit.b * (t - 1));
+    const delta = slope;
+    const value = prevCum + delta;
     forecast.push({
       month: addMonthKey(lastMk, h),
       value: value,
-      delta: value - prev
+      delta: delta
     });
+    prevCum = value;
   }
+  assertTrendForecastChain(lastActual, forecast);
 
   return {
     ok: true,
@@ -10392,10 +10560,40 @@ function buildTrendNettoForecast(fromIso, toIso, horizon){
     opening,
     values,
     fit,
+    lastActual,
     forecast,
     historyFrom: months[0],
     historyTo: lastMk
   };
+}
+
+/**
+ * Stoppar med tydligt fel om prognosen inte startar i sista historiska värdet,
+ * eller om kedjan (föregående + ändring = nästa) bryts.
+ */
+function assertTrendForecastChain(lastActual, forecast){
+  if(!forecast || !forecast.length) return;
+  const first = forecast[0];
+  if(Math.abs((lastActual + first.delta) - first.value) > 0.005){
+    trendFail('Prognosen startar inte i sista historiska värdet.', [
+      'Sista historiska kumulativa: ' + formatReportInt(Math.round(lastActual)),
+      'Prognos första ändring:      ' + formatReportInt(Math.round(first.delta)),
+      'Förväntat första värde:      ' + formatReportInt(Math.round(lastActual + first.delta)),
+      'Faktiskt första värde:       ' + formatReportInt(Math.round(first.value))
+    ]);
+  }
+  let prev = lastActual;
+  for(const p of forecast){
+    if(Math.abs((prev + p.delta) - p.value) > 0.005){
+      trendFail('Prognoskedjan bruten (föregående + ändring ≠ nästa) vid ' + p.month + '.', [
+        'Föregående kumulativa: ' + formatReportInt(Math.round(prev)),
+        'Ändring:               ' + formatReportInt(Math.round(p.delta)),
+        'Förväntat värde:       ' + formatReportInt(Math.round(prev + p.delta)),
+        'Faktiskt värde:        ' + formatReportInt(Math.round(p.value))
+      ]);
+    }
+    prev = p.value;
+  }
 }
 
 function trendNettoTableHtml(rows, opts){
@@ -10435,10 +10633,12 @@ function buildTrendNettoLineChart(data){
   }
 
   const histVals = data.values || data.points.map(p => p.value);
-  const fitAll = [];
-  for(let i = 0; i < total; i++){
-    fitAll.push(data.fit.a + data.fit.b * i);
-  }
+  const lastActual = histN > 0
+    ? (Number.isFinite(data.lastActual) ? data.lastActual : histVals[histN - 1])
+    : 0;
+  // Prognoslinjen ANKRAS i sista verkliga punkten och följer sedan prognosvärdena.
+  const forecastVals = forecast.map(p => p.value);
+  const forecastLine = [lastActual].concat(forecastVals); // ritas från x=histN-1 och framåt
 
   let ymin = Infinity;
   let ymax = -Infinity;
@@ -10448,7 +10648,7 @@ function buildTrendNettoLineChart(data){
     if(v > ymax) ymax = v;
   };
   for(let i = 0; i < histN; i++) bump(histVals[i]);
-  for(let i = 0; i < total; i++) bump(fitAll[i]);
+  for(const v of forecastVals) bump(v);
   if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){
     ymin = 0;
     ymax = 1;
@@ -10498,7 +10698,14 @@ function buildTrendNettoLineChart(data){
       + ' points="' + pts + '"/>';
   };
 
-  svg += poly(fitAll, colNet, '5 4', 2);
+  // Prognoslinjen (streckad) ritas från sista historikpunkten (x=histN-1) och framåt.
+  if(forecast.length && histN > 0){
+    const fPts = forecastLine
+      .map((v, k) => xAt(histN - 1 + k).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+    svg += '<polyline fill="none" stroke="' + colNet + '" stroke-width="2"'
+      + ' stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"'
+      + ' points="' + fPts + '"/>';
+  }
   const histPts = histVals.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
   svg += '<polyline fill="none" stroke="' + colNet + '" stroke-width="2.2" stroke-linejoin="round"'
     + ' stroke-linecap="round" points="' + histPts + '"/>';
@@ -10530,9 +10737,9 @@ function buildTrendNettoLineChart(data){
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
-  // Slutdest. = sista kumulativa trendvärdet; därefter skillnad trend − historik.
-  const lastHist = histN > 0 ? histVals[histN - 1] : 0;
-  const lastTrend = fitAll[total - 1];
+  // Slutdest. = sista prognosvärdet (ankrat i historiken); diff mot sista verkliga.
+  const lastHist = lastActual;
+  const lastTrend = forecastVals.length ? forecastVals[forecastVals.length - 1] : lastActual;
   const slutDest = Math.round(lastTrend);
   const diff = Math.round(lastTrend - lastHist);
   const diffCls = diff < 0 ? 'is-neg' : 'is-pos';
@@ -10561,7 +10768,29 @@ function renderTrendNettoOverTid(){
   const fromIso = range.from;
   const toIso = range.to;
   const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
-  const data = buildTrendNettoForecast(fromIso, toIso, horizon);
+
+  // Bygg data + kör kontroller. Vid brott: trendFail visar felruta och kastar.
+  let data;
+  let reconBlock = '';
+  try{
+    data = buildTrendNettoForecast(fromIso, toIso, horizon);
+    if(data.ok && trendCategoryMode() === 'bocklista'){
+      const recon = computeTrendNetReconciliation(toIso);
+      const cleanedFromSeries = data.points.length
+        ? data.points[data.points.length - 1].value : 0;
+      assertTrendNetReconciliation(recon, cleanedFromSeries);
+      reconBlock = trendExcludedListHtml(recon);
+      console.info('[Trend] Uteslutna poster (' + recon.excludedItems.length + ' st):',
+        recon.excludedItems);
+      console.info('[Trend] Rå ' + Math.round(recon.rawTotal)
+        + ' − rensad ' + Math.round(recon.cleanedTotal)
+        + ' = ' + Math.round(recon.rawTotal - recon.cleanedTotal)
+        + ' (Σ uteslutna ' + Math.round(recon.excludedTotal) + ')');
+    }
+  } catch(err){
+    if(err && err.trendHandled){ clearTrendCanvas(); return; }
+    throw err;
+  }
 
   clearTrendCanvas();
   if(trendPlaceholder) trendPlaceholder.hidden = true;
@@ -10620,7 +10849,7 @@ function renderTrendNettoOverTid(){
     + buildTrendNettoLineChart(data)
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
-    + historyBlock + forecastBlock
+    + historyBlock + forecastBlock + reconBlock
     + '</div>'
     + '</div>';
   trendBody.appendChild(wrap);
