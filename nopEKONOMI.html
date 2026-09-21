@@ -4115,7 +4115,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v14';
+const APP_VERSION = '2026-09-21 v15';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -12356,7 +12356,7 @@ const careHubListEditStage = el('careHubListEditStage');
 
 function syncCareHubSectionTitle(key){
   if(!careHubSectionTitle) return;
-  if(key === 'trend') careHubSectionTitle.textContent = 'Trend';
+  if(key === 'trend') careHubSectionTitle.textContent = 'Trend Bocklista';
   else if(key === 'budget') careHubSectionTitle.textContent = 'Budget';
   else careHubSectionTitle.textContent = 'Registervård';
 }
@@ -12407,7 +12407,7 @@ const CARE_HUB_SECTIONS = {
   payee: { title: 'Payee', kind: 'list' },
   kategori: { title: 'Kategori', kind: 'list' },
   underkategori: { title: 'Underkategori', kind: 'list' },
-  trend: { title: 'Trend', kind: 'list' },
+  trend: { title: 'Trend Bocklista', kind: 'list' },
   budget: { title: 'Budget', kind: 'list' },
   bok: { title: 'Bok (backup)', kind: 'list' }
 };
@@ -12514,7 +12514,7 @@ const CARE_LIST_KINDS = {
     maxLen: 60
   },
   trend: {
-    title: 'Trend',
+    title: 'Trend Bocklista',
     newLabel: '',
     nameLabel: 'Kategori',
     deleteLabel: '',
@@ -12787,7 +12787,7 @@ function careListKindLabel(){
   if(careListKind === 'underkategori') return 'Underkategori';
   if(careListKind === 'payee') return 'Payee';
   if(careListKind === 'konto') return 'Konto';
-  if(careListKind === 'trend') return 'Trend';
+  if(careListKind === 'trend') return 'Trend Bocklista';
   if(careListKind === 'budget') return 'Budget';
   if(careListKind === 'bok') return 'Bok';
   return '';
