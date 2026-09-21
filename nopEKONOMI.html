@@ -3346,8 +3346,7 @@ td.num.dash .cell-content{
     <button class="nav-link nav-back" id="careHubBackBtn" type="button">← Start</button>
     <p class="eyebrow view-headline" id="careHubViewHeadline">nopEKONOMI - — - Registervård</p>
 
-    <p class="care-section-title">Registervård</p>
-    <div class="menu-row" id="careHubMenuRow">
+    <p class="care-section-title" id="careHubSectionTitle">Registervård</p>
       <select id="careHubMenu" class="menu-select" aria-label="Registervård">
         <option value="">Välj...</option>
         <option value="konto">Konto</option>
@@ -4095,7 +4094,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-20 v19';
+const APP_VERSION = '2026-09-21 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11968,9 +11967,17 @@ function renderCareHub(){
 
 const careHubMenu = el('careHubMenu');
 const careHubMenuRow = el('careHubMenuRow');
+const careHubSectionTitle = el('careHubSectionTitle');
 const careHubListArea = el('careHubListArea');
 const careHubListStage = el('careHubListStage');
 const careHubListEditStage = el('careHubListEditStage');
+
+function syncCareHubSectionTitle(key){
+  if(!careHubSectionTitle) return;
+  if(key === 'trend') careHubSectionTitle.textContent = 'Trend';
+  else if(key === 'budget') careHubSectionTitle.textContent = 'Budget';
+  else careHubSectionTitle.textContent = 'Registervård';
+}
 
 /** Snapshot av trendInclude medan Trend-listan är öppen (OK sparar, Avbryt återställer). */
 let trendIncludeEditSnapshot = null;
@@ -12030,6 +12037,7 @@ function hideCareHubSection(){
   careListEditOriginal = '';
   hideCareListDeleteConfirm();
   syncCareHubMenuVisibility();
+  syncCareHubSectionTitle('');
   refreshViewHeadline('careHub', 'Registervård');
 }
 
@@ -12070,6 +12078,7 @@ function showCareHubSection(key){
   if(careHubListStage) careHubListStage.hidden = false;
   renderCareList();
   syncCareHubMenuVisibility();
+  syncCareHubSectionTitle(key);
   refreshViewHeadline('careHub', 'Registervård');
 }
 
