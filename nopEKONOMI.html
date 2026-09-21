@@ -4115,7 +4115,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v11';
+const APP_VERSION = '2026-09-21 v12';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10828,13 +10828,10 @@ function renderTrendNettoOverTid(){
 
   // Bygg data + kör kontroller. Vid brott: trendFail visar felruta och kastar.
   let data;
-  let overlayData = null;
   let reconBlock = '';
   try{
     data = buildTrendNettoForecast(fromIso, toIso, horizon);
     if(data.ok && trendCategoryMode() === 'bocklista'){
-      // Verkligt saldo (alla radbelopp inkl. öppningsbalanser) att lägga i samma diagram.
-      overlayData = buildTrendNettoForecast(fromIso, toIso, horizon, 'alla');
       const recon = computeTrendNetReconciliation(toIso);
       const cleanedFromSeries = data.points.length
         ? data.points[data.points.length - 1].value : 0;
@@ -10907,9 +10904,7 @@ function renderTrendNettoOverTid(){
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
     + buildTrendNettoLineChart(data, {
-        primaryLabel: catMode === 'alla' ? 'Verkligt saldo' : 'Rensat (trend)',
-        overlay: (overlayData && overlayData.ok) ? overlayData : null,
-        overlayLabel: 'Verkligt saldo (inkl. öppningsbalans)'
+        primaryLabel: catMode === 'alla' ? 'Verkligt saldo' : 'Netto'
       })
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
