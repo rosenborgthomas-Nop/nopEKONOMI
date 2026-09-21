@@ -723,6 +723,18 @@ body.trend-view-active{
   align-items:center;
   gap:6px;
 }
+.trend-line-chart-legend .trend-legend-series{
+  font-weight:700;
+}
+.trend-line-chart-legend .trend-legend-label{
+  color:inherit;
+  font-weight:700;
+}
+.trend-line-chart-legend .trend-legend-series .trend-delta:not(.is-pos):not(.is-neg){
+  color:inherit;
+  opacity:0.85;
+  font-weight:600;
+}
 .trend-line-chart-legend .trend-delta{
   font-family:'JetBrains Mono', monospace;
   font-weight:500;
@@ -739,9 +751,9 @@ body.trend-view-active{
 }
 .trend-line-chart-swatch{
   display:inline-block;
-  width:14px;
+  width:16px;
   height:0;
-  border-top:2.5px solid currentColor;
+  border-top:3px solid currentColor;
 }
 .trend-line-chart-swatch.is-dash{
   border-top-style:dashed;
@@ -4143,7 +4155,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v17';
+const APP_VERSION = '2026-09-22 v18';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10717,8 +10729,9 @@ function buildTrendNettoLineChart(data, opts){
       + '</div>';
   }
 
-  const colNet = '#2B579A';      // rensat/trend (primär)
-  const colReal = '#1F8A70';     // verkligt saldo (overlay)
+  // Neonkontrast så linjerna skiljer sig tydligt på ljus bakgrund.
+  const colNet = '#FF2BD6';      // rensat/bocklista — neon magenta
+  const colReal = '#00D4FF';     // verkligt saldo — neon cyan
   const grid = '#A8BDD4';
   const axis = '#5A6F88';
 
@@ -10785,16 +10798,16 @@ function buildTrendNettoLineChart(data, opts){
       const fLine = [s.lastActual].concat(s.forecastVals);
       const fPts = fLine
         .map((v, k) => xAt(s.histN - 1 + k).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
-      svg += '<polyline fill="none" stroke="' + s.color + '" stroke-width="2"'
+      svg += '<polyline fill="none" stroke="' + s.color + '" stroke-width="2.6"'
         + ' stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"'
         + ' points="' + fPts + '"/>';
     }
     const histPts = s.histVals.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
-    svg += '<polyline fill="none" stroke="' + s.color + '" stroke-width="2.2"'
+    svg += '<polyline fill="none" stroke="' + s.color + '" stroke-width="2.8"'
       + ' stroke-linejoin="round" stroke-linecap="round" points="' + histPts + '"/>';
     for(let i = 0; i < s.histN; i++){
       svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(s.histVals[i]).toFixed(1)
-        + '" r="3" fill="' + s.color + '">'
+        + '" r="3.4" fill="' + s.color + '">'
         + '<title>' + escapeHtml(s.label + ' ' + monthKeyYyMm(data.months[i]) + ' '
           + formatReportInt(Math.round(s.histVals[i]))) + '</title>'
         + '</circle>';
@@ -10821,14 +10834,17 @@ function buildTrendNettoLineChart(data, opts){
   }
 
   // Legend: en rad per serie med Slutdest. och ändring mot sista verkliga.
+  // Etikett + swatch i samma neonfärg som diagramlinjen.
   const legendFor = s => {
     const last = s.forecastVals.length ? s.forecastVals[s.forecastVals.length - 1] : s.lastActual;
     const dd = Math.round(last - s.lastActual);
     const cls = dd < 0 ? 'is-neg' : 'is-pos';
     const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
-    return '<span><i class="trend-line-chart-swatch" aria-hidden="true"'
-      + ' style="color:' + s.color + '"></i>'
-      + escapeHtml(s.label) + ' <span class="trend-delta">(Slutdest. '
+    return '<span class="trend-legend-series" style="color:' + s.color + '">'
+      + '<i class="trend-line-chart-swatch" aria-hidden="true"'
+      + ' style="color:' + s.color + ';border-top-color:' + s.color + '"></i>'
+      + '<span class="trend-legend-label">' + escapeHtml(s.label) + '</span>'
+      + ' <span class="trend-delta">(Slutdest. '
       + escapeHtml(formatReportInt(Math.round(last))) + ')</span>'
       + '<span class="trend-delta ' + cls + '">' + escapeHtml(txt) + '</span></span>';
   };
