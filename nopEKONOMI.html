@@ -4115,7 +4115,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v12';
+const APP_VERSION = '2026-09-21 v13';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10827,10 +10827,12 @@ function renderTrendNettoOverTid(){
   const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
 
   // Bygg data + kör kontroller. Vid brott: trendFail visar felruta och kastar.
-  let data;
+  let data;          // bocklista-serien: ger trendlutningen + avstämning
+  let renderData;    // det som faktiskt ritas (historik + prognos)
   let reconBlock = '';
   try{
     data = buildTrendNettoForecast(fromIso, toIso, horizon);
+    renderData = data;
     if(data.ok && trendCategoryMode() === 'bocklista'){
       const recon = computeTrendNetReconciliation(toIso);
       const cleanedFromSeries = data.points.length
@@ -10843,6 +10845,26 @@ function renderTrendNettoOverTid(){
         + ' − rensad ' + Math.round(recon.cleanedTotal)
         + ' = ' + Math.round(recon.rawTotal - recon.cleanedTotal)
         + ' (Σ uteslutna ' + Math.round(recon.excludedTotal) + ')');
+
+      // HISTORIK = verkligt saldo (alla poster, slutar t.ex. 142 639).
+      // TRENDLUTNING = från bocklistan (data.fit.b). Prognosen ankras i det
+      // verkliga sista värdet och dras med den beräknade lutningen.
+      const realData = buildTrendNettoForecast(fromIso, toIso, horizon, 'alla');
+      if(realData.ok){
+        const slope = data.fit.b;
+        const anchor = realData.lastActual;
+        const lastMk = realData.months[realData.months.length - 1];
+        const fc = [];
+        let prev = anchor;
+        for(let h = 1; h <= horizon; h++){
+          const delta = slope;
+          const value = prev + delta;
+          fc.push({ month: addMonthKey(lastMk, h), value: value, delta: delta });
+          prev = value;
+        }
+        assertTrendForecastChain(anchor, fc);
+        renderData = Object.assign({}, realData, { forecast: fc, fit: data.fit });
+      }
     }
   } catch(err){
     if(err && err.trendHandled){ clearTrendCanvas(); return; }
@@ -10862,10 +10884,12 @@ function renderTrendNettoOverTid(){
     + '<div class="report-table-title-row">'
     + '<p class="report-table-title">NETTO ÖVER TID</p>';
 
-  if(!data.ok){
+  if(!renderData || !renderData.ok){
     head += updatedHtml + '</div></div>';
     wrap.innerHTML = head
-      + '<p class="report-empty-note">' + escapeHtml(data.reason || 'Kunde inte beräkna trend.') + '</p>';
+      + '<p class="report-empty-note">'
+      + escapeHtml((renderData && renderData.reason) || data.reason || 'Kunde inte beräkna trend.')
+      + '</p>';
     trendBody.appendChild(wrap);
     return;
   }
@@ -10881,29 +10905,31 @@ function renderTrendNettoOverTid(){
   const catMode = trendCategoryMode();
   const basText = catMode === 'alla'
     ? 'Bas: kumulativt netto som i Rapport (alla belopp inkl. öppningsbalans). '
-    : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Trend. ';
+    : 'Historik = verkligt saldo (alla poster). Trendlutningen är beräknad från '
+      + 'ibockade kategorier i Registervård → Trend, och prognosen dras från sista '
+      + 'verkliga värdet. ';
 
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
-    + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
-    + ' · ' + data.months.length + ' fulländade månader'
+    + 'Historik: ' + escapeHtml(renderData.historyFrom) + ' – ' + escapeHtml(renderData.historyTo)
+    + ' · ' + renderData.months.length + ' fulländade månader'
     + ' (pågående månad ingår inte). '
     + basText
-    + 'Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(data.opening))) + '. '
-    + 'Lutning ' + escapeHtml(formatTrendSlope(data.fit.b))
+    + 'Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(renderData.opening))) + '. '
+    + 'Lutning ' + escapeHtml(formatTrendSlope(renderData.fit.b))
     + ' (OLS, lätt IQR-winsorize). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
 
   const historyBlock = '<p class="trend-section-title">Historik</p>'
-    + trendNettoTableHtml(data.points);
+    + trendNettoTableHtml(renderData.points);
 
   const forecastBlock = '<p class="trend-section-title">Prognos ('
     + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
-    + trendNettoTableHtml(data.forecast);
+    + trendNettoTableHtml(renderData.forecast);
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
-    + buildTrendNettoLineChart(data, {
+    + buildTrendNettoLineChart(renderData, {
         primaryLabel: catMode === 'alla' ? 'Verkligt saldo' : 'Netto'
       })
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
