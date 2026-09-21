@@ -4106,7 +4106,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-21 v05';
+const APP_VERSION = '2026-09-21 v06';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10521,11 +10521,11 @@ function buildTrendNettoLineChart(data){
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
-  const dNet = Math.round(fitAll[total - 1] - fitAll[0]);
+  const slutDest = Math.round(fitAll[total - 1]);
   const legend = '<p class="trend-line-chart-legend">'
     + '<span><i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
-    + '--- Netto <span class="trend-delta">('
-    + escapeHtml(formatReportInt(dNet)) + ')</span></span></p>';
+    + '--- Netto <span class="trend-delta">(Slutdest. '
+    + escapeHtml(formatReportInt(slutDest)) + ')</span></span></p>';
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
