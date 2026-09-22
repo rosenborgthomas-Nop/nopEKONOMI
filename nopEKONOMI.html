@@ -630,6 +630,25 @@ body.trend-view-active{
   text-transform:uppercase;
   color:var(--ink, #1a3050);
 }
+.trend-payee-toolbar{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px 14px;
+  margin:0 0 8px;
+}
+.trend-payee-toolbar .btn-quiet{
+  flex:0 0 auto;
+}
+.trend-payee-sign{
+  margin:0;
+  font-size:14px;
+  font-weight:700;
+  letter-spacing:0.02em;
+  color:var(--ink, #1a3050);
+}
+.trend-payee-sign.is-income{ color:var(--chart-positive, #3A8F5C); }
+.trend-payee-sign.is-expense{ color:var(--wine, #A33B3B); }
 .report-table-title-row{
   display:flex;
   align-items:center;
@@ -4169,7 +4188,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v31';
+const APP_VERSION = '2026-09-22 v32';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11119,6 +11138,7 @@ function syncTrendControlsForType(){
 
 /**
  * Prognos In/Ut för en enda payee (samma beräkning/diagram som Typ → Prognos In/Ut).
+ * Om trendens slutvärde är negativt: visa som Utgift (absolutvärde / speglad serie).
  */
 function renderTrendPayeePrognos(payeeName){
   const payee = String(payeeName || '').trim();
@@ -11136,7 +11156,7 @@ function renderTrendPayeePrognos(payeeName){
   const fromIso = range.from;
   const toIso = range.to;
   const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
-  const data = buildTrendForecast(fromIso, toIso, horizon, payee);
+  const raw = buildTrendForecast(fromIso, toIso, horizon, payee);
 
   clearTrendCanvas();
   if(trendPlaceholder) trendPlaceholder.hidden = true;
@@ -11151,10 +11171,10 @@ function renderTrendPayeePrognos(payeeName){
     + '<div class="report-table-title-row">'
     + '<p class="report-table-title">' + escapeHtml(payee) + '</p>';
 
-  if(!data.ok){
+  if(!raw.ok){
     head += updatedHtml + '</div></div>';
     wrap.innerHTML = head
-      + '<p class="report-empty-note">' + escapeHtml(data.reason || 'Kunde inte beräkna trend.') + '</p>'
+      + '<p class="report-empty-note">' + escapeHtml(raw.reason || 'Kunde inte beräkna trend.') + '</p>'
       + '<p class="report-empty-note"><button type="button" class="btn-quiet" id="trendPayeeBackBtn">'
       + '← Payee-lista</button></p>';
     trendBody.appendChild(wrap);
@@ -11165,6 +11185,29 @@ function renderTrendPayeePrognos(payeeName){
     });
     return;
   }
+
+  // Klassificera efter trendlinjens slutvärde (före spegling).
+  const lastT = raw.months.length + raw.forecast.length - 1;
+  const trendEnd = raw.fitNet.a + raw.fitNet.b * Math.max(0, lastT);
+  const isExpense = trendEnd < 0;
+  const signLabel = isExpense ? 'Negativt - Utgift' : 'Positivt-Inkomst';
+  const signClass = isExpense ? 'is-expense' : 'is-income';
+
+  // Spegla till absolutvärde när utgift: minus → plus (behåller kurvans form).
+  const data = isExpense
+    ? {
+        ...raw,
+        netSeries: raw.netSeries.map(v => -v),
+        fitNet: { a: -raw.fitNet.a, b: -raw.fitNet.b },
+        forecast: raw.forecast.map(p => ({
+          month: p.month,
+          income: p.income,
+          expense: p.expense,
+          net: -p.net,
+          netFit: p.netFit != null ? -p.netFit : undefined
+        }))
+      }
+    : raw;
 
   const detailsId = 'trendPayeePrognosDetails';
   head += '<button type="button" class="help-tip-btn trend-details-btn"'
@@ -11186,7 +11229,10 @@ function renderTrendPayeePrognos(payeeName){
     + ' · ' + data.months.length + ' fulländade månader'
     + ' (pågående månad ingår inte). '
     + basText
-    + 'En summa per månad (In − Ut). Lutning '
+    + (isExpense
+      ? 'Visas som utgift (absolutvärde av In − Ut). '
+      : 'En summa per månad (In − Ut). ')
+    + 'Lutning '
     + escapeHtml(formatTrendSlope(data.fitNet.b))
     + ' (OLS, lätt IQR-winsorize). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
@@ -11226,8 +11272,11 @@ function renderTrendPayeePrognos(payeeName){
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
-    + '<p style="margin:0 0 8px"><button type="button" class="btn-quiet" id="trendPayeeBackBtn">'
-    + '← Payee-lista</button></p>'
+    + '<div class="trend-payee-toolbar">'
+    + '<button type="button" class="btn-quiet" id="trendPayeeBackBtn">'
+    + '← Payee-lista</button>'
+    + '<p class="trend-payee-sign ' + signClass + '">' + escapeHtml(signLabel) + '</p>'
+    + '</div>'
     + buildTrendInUtLineChart(data, { onlyNet: true })
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
