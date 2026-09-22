@@ -2773,6 +2773,9 @@ footer p{
   padding-left:1.6rem;
   font-weight:400;
 }
+.care-list-table tr.trend-cat-focus td.cl-name{
+  font-weight:700;
+}
 .care-list-table tr.trend-empty-sub td.cl-name .trend-empty-label{
   font-style:italic;
   opacity:0.9;
@@ -3288,6 +3291,7 @@ td.num.dash .cell-content{
       <select id="trendTypeMenu" class="menu-select" aria-label="Trendtyp">
         <option value="prognosInUt">Prognos (In/Ut)</option>
         <option value="nettoOverTid">Netto över tid</option>
+        <option value="" disabled class="menu-sep menu-sep-title" id="trendTypeCatSep">── Kategori ──</option>
       </select>
       <label class="report-col-label" for="trendHistoryMenu">Historik</label>
       <select id="trendHistoryMenu" class="menu-select" aria-label="Historik bakåt">
@@ -4162,7 +4166,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v21';
+const APP_VERSION = '2026-09-22 v22';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10063,6 +10067,7 @@ function trendInUtTableHtml(rows, sumLabel, sumIn, sumUt, sumNet, opts){
 
 const TREND_PREFS_KEY = 'msmoney_trend_prefs__' + STORAGE_SCOPE;
 const TREND_TYPES = new Set(['prognosInUt', 'nettoOverTid']);
+const TREND_TYPE_CAT_PREFIX = 'kat:';
 const TREND_HORIZONS = new Set([1, 3, 6, 12]);
 const TREND_HISTORY = new Set(['3', '6', '12', '24', 'allt']);
 const TREND_CAT_MODES = new Set(['bocklista', 'alla']);
@@ -10077,6 +10082,64 @@ const trendPlaceholder = el('trendPlaceholder');
 const trendBackBtn = el('trendBackBtn');
 const trendOkBtn = el('trendOkBtn');
 const trendCancelBtn = el('trendCancelBtn');
+
+/** Expanderade underkategorier i Typ → Kategori-vyn (session). */
+const trendTypeCatExpanded = new Set();
+/** Senast auto-utfällda kategori från Typ-menyn (undvik att öppna igen vid fäll-ihop). */
+let trendTypeCatLastFocus = '';
+
+function isTrendCategoryType(val){
+  return typeof val === 'string' && val.indexOf(TREND_TYPE_CAT_PREFIX) === 0;
+}
+
+function trendCategoryTypeName(val){
+  if(!isTrendCategoryType(val)) return '';
+  return val.slice(TREND_TYPE_CAT_PREFIX.length);
+}
+
+function trendCategoryTypeValue(catName){
+  return TREND_TYPE_CAT_PREFIX + String(catName || '');
+}
+
+/** Fyll Typ-menyn med kategorier A–Ö efter avskiljaren (inga överföringar). */
+function populateTrendTypeCategoryOptions(){
+  if(!trendTypeMenu) return;
+  const prev = trendTypeMenu.value;
+  const sep = el('trendTypeCatSep');
+  // Ta bort tidigare kategori-optioner (behåll bas + sep).
+  const toRemove = [];
+  for(const opt of Array.from(trendTypeMenu.options)){
+    if(isTrendCategoryType(opt.value)) toRemove.push(opt);
+  }
+  for(const opt of toRemove) opt.remove();
+
+  const cats = (bookLookup && Array.isArray(bookLookup.categories))
+    ? bookLookup.categories
+      .filter(c => c && !isTransferCategory(c))
+      .slice()
+      .sort((a, b) => a.localeCompare(b, 'sv'))
+    : [];
+  let at = sep ? sep.index + 1 : trendTypeMenu.options.length;
+  for(const name of cats){
+    const opt = document.createElement('option');
+    opt.value = trendCategoryTypeValue(name);
+    opt.textContent = name;
+    if(at >= trendTypeMenu.options.length) trendTypeMenu.appendChild(opt);
+    else trendTypeMenu.add(opt, trendTypeMenu.options[at]);
+    at += 1;
+  }
+  if(prev && Array.from(trendTypeMenu.options).some(o => o.value === prev)){
+    trendTypeMenu.value = prev;
+  }
+}
+
+function isTrendTypeValueOk(val){
+  if(TREND_TYPES.has(val)) return true;
+  if(!isTrendCategoryType(val)) return false;
+  const name = trendCategoryTypeName(val);
+  if(!name || !bookLookup || !Array.isArray(bookLookup.categories)) return false;
+  return bookLookup.categories.some(c => c === name && !isTransferCategory(c));
+}
 
 /** Snapshot av menyval när Trend-sidan öppnades (OK sparar, Avbryt återställer). */
 let trendPrefsSession = null;
@@ -10098,9 +10161,9 @@ function loadTrendPrefs(){
 
 function captureTrendPrefsFromMenus(){
   const horizon = Number(trendHorizonMenu && trendHorizonMenu.value);
+  const typeVal = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
   return {
-    type: trendTypeMenu && TREND_TYPES.has(trendTypeMenu.value)
-      ? trendTypeMenu.value : 'prognosInUt',
+    type: isTrendTypeValueOk(typeVal) ? typeVal : 'prognosInUt',
     history: trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
       ? trendHistoryMenu.value : '12',
     horizon: TREND_HORIZONS.has(horizon) ? horizon : 12,
@@ -10111,9 +10174,11 @@ function captureTrendPrefsFromMenus(){
 
 function applyTrendPrefsToMenus(prefs){
   const p = prefs && typeof prefs === 'object' ? prefs : {};
+  populateTrendTypeCategoryOptions();
   if(trendTypeMenu){
-    const type = TREND_TYPES.has(p.type) ? p.type : 'prognosInUt';
-    if(trendTypeMenu.querySelector('option[value="' + type + '"]')) trendTypeMenu.value = type;
+    const type = isTrendTypeValueOk(p.type) ? p.type : 'prognosInUt';
+    const has = Array.from(trendTypeMenu.options).some(o => o.value === type);
+    if(has) trendTypeMenu.value = type;
     else trendTypeMenu.selectedIndex = 0;
   }
   if(trendHistoryMenu){
@@ -11020,10 +11085,116 @@ function renderTrendNettoOverTid(){
 }
 
 function syncTrendControlsForType(){
-  // Horisont används av både Prognos In/Ut och Netto över tid.
-  if(trendHorizonMenu) trendHorizonMenu.disabled = false;
-  const lab = document.querySelector('label[for="trendHorizonMenu"]');
-  if(lab) lab.classList.remove('is-muted');
+  const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
+  const catBrowse = isTrendCategoryType(type);
+  // Historik / Horisont / Kategorialternativ gäller bara prognosvyerna.
+  const menus = [
+    [trendHistoryMenu, 'trendHistoryMenu'],
+    [trendHorizonMenu, 'trendHorizonMenu'],
+    [trendCatMenu, 'trendCatMenu']
+  ];
+  for(const [menu, id] of menus){
+    if(menu) menu.disabled = catBrowse;
+    const lab = document.querySelector('label[for="' + id + '"]');
+    if(lab) lab.classList.toggle('is-muted', catBrowse);
+  }
+}
+
+/**
+ * Typ → Kategori: alla kategorier A–Ö med expand till underkategorier (inga bockrutor).
+ * Vald kategori i menyn fälls ut automatiskt första gången.
+ */
+function renderTrendAllCategoriesBrowse(focusCat){
+  clearTrendCanvas();
+  if(trendPlaceholder) trendPlaceholder.hidden = true;
+  if(trendBody) trendBody.classList.add('has-report');
+
+  if(focusCat && focusCat !== trendTypeCatLastFocus){
+    trendTypeCatExpanded.add(focusCat);
+    trendTypeCatLastFocus = focusCat;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'report-table-wrap';
+  const updatedHtml = '<p class="report-table-updated">'
+    + escapeHtml(reportUpdatedLineHtml()) + '</p>';
+  let head = '<div class="report-table-head">'
+    + '<div class="report-table-title-row">'
+    + '<p class="report-table-title">KATEGORI</p>'
+    + updatedHtml
+    + '</div></div>';
+
+  const catSubs = buildTrendCategorySubsMap(book);
+  const cats = (bookLookup && Array.isArray(bookLookup.categories))
+    ? bookLookup.categories
+      .filter(c => c && !isTransferCategory(c))
+      .slice()
+      .sort((a, b) => a.localeCompare(b, 'sv'))
+    : [];
+
+  if(!cats.length){
+    wrap.innerHTML = head
+      + '<p class="report-empty-note">Inga kategorier ännu.</p>';
+    trendBody.appendChild(wrap);
+    return;
+  }
+
+  let rows = '';
+  for(const name of cats){
+    const subs = (catSubs[name] || []).slice().sort((a, b) => a.localeCompare(b, 'sv'));
+    const expanded = trendTypeCatExpanded.has(name);
+    const chev = expanded ? '▼' : '▶';
+    const focusCls = (focusCat && focusCat === name) ? ' trend-cat-focus' : '';
+    rows += '<tr class="' + focusCls.trim() + '" data-trend-cat-browse="' + escapeAttr(name) + '">'
+      + '<td class="cl-name">'
+      + '<button type="button" class="trend-expand-btn" data-trend-cat-expand="'
+      + escapeAttr(name) + '" aria-expanded="' + (expanded ? 'true' : 'false')
+      + '" title="Fäll ut/in underkategorier">' + chev + '</button>'
+      + escapeHtml(name)
+      + '</td>'
+      + '<td class="cl-count num">' + formatCount(countCategoryUsage(name)) + '</td>'
+      + '</tr>';
+    if(expanded){
+      rows += '<tr class="trend-sub trend-empty-sub">'
+        + '<td class="cl-name"><span class="trend-expand-spacer" aria-hidden="true"></span>'
+        + '<em class="trend-empty-label">' + escapeHtml(TREND_EMPTY_SUB_LABEL) + '</em></td>'
+        + '<td class="cl-count num">' + formatCount(countCategoryEmptySubUsage(name)) + '</td>'
+        + '</tr>';
+      for(const sub of subs){
+        rows += '<tr class="trend-sub">'
+          + '<td class="cl-name"><span class="trend-expand-spacer" aria-hidden="true"></span>'
+          + escapeHtml(sub) + '</td>'
+          + '<td class="cl-count num">'
+          + formatCount(countCategorySubUsage(name, sub)) + '</td>'
+          + '</tr>';
+      }
+    }
+  }
+
+  wrap.innerHTML = head
+    + '<div class="trend-body-scroll">'
+    + '<p class="report-empty-note" style="margin:0 0 10px">'
+    + 'Alla kategorier i bokstavsordning. Pilen fäller ut underkategorier '
+    + '(samma uppbyggnad som Registervård → Trend Bocklista, utan bockrutor).'
+    + '</p>'
+    + '<table class="care-list-table report-table"><thead><tr>'
+    + '<th>Kategori</th><th class="cl-count num">Poster</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table>'
+    + '</div>';
+  trendBody.appendChild(wrap);
+
+  wrap.querySelectorAll('[data-trend-cat-expand]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const c = btn.getAttribute('data-trend-cat-expand') || '';
+      if(!c) return;
+      if(trendTypeCatExpanded.has(c)) trendTypeCatExpanded.delete(c);
+      else trendTypeCatExpanded.add(c);
+      const type = trendTypeMenu ? trendTypeMenu.value : '';
+      renderTrendAllCategoriesBrowse(trendCategoryTypeName(type));
+    });
+  });
 }
 
 function renderTrendPage(){
@@ -11033,6 +11204,7 @@ function renderTrendPage(){
     return;
   }
   if(trendMessages) clear(trendMessages);
+  populateTrendTypeCategoryOptions();
   beginTrendPrefsSession();
   syncTrendControlsForType();
   syncReportMobileLayout();
@@ -11041,6 +11213,8 @@ function renderTrendPage(){
     renderTrendNettoOverTid();
   } else if(type === 'prognosInUt'){
     renderTrendPrognosInUt();
+  } else if(isTrendCategoryType(type)){
+    renderTrendAllCategoriesBrowse(trendCategoryTypeName(type));
   } else {
     clearTrendCanvas();
     if(trendPlaceholder){
@@ -11055,11 +11229,13 @@ function renderTrendPage(){
 function refreshTrendPagePreview(){
   if(!views.trend || views.trend.hidden) return;
   if(trendMessages) clear(trendMessages);
+  populateTrendTypeCategoryOptions();
   syncTrendControlsForType();
   syncReportMobileLayout();
   const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
   if(type === 'nettoOverTid') renderTrendNettoOverTid();
   else if(type === 'prognosInUt') renderTrendPrognosInUt();
+  else if(isTrendCategoryType(type)) renderTrendAllCategoriesBrowse(trendCategoryTypeName(type));
 }
 
 if(trendBackBtn) trendBackBtn.addEventListener('click', () => leaveTrendPage(false));
