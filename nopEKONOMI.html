@@ -3406,7 +3406,7 @@ td.num.dash .cell-content{
 
       <div class="field">
         <label for="acctEditBalance">Öppningsbalans:</label>
-        <input type="text" id="acctEditBalance" autocomplete="off" spellcheck="false" inputmode="decimal">
+        <input type="text" id="acctEditBalance" autocomplete="off" spellcheck="false" inputmode="decimal" enterkeyhint="done">
       </div>
 
       <div class="confirm" id="acctEditDeleteBox" hidden>
@@ -3505,7 +3505,7 @@ td.num.dash .cell-content{
             </div>
             <div class="field" id="careListEditBalanceWrap" hidden>
               <label for="careListEditBalance">Öppningsbalans</label>
-              <input type="text" id="careListEditBalance" autocomplete="off" spellcheck="false" inputmode="decimal">
+              <input type="text" id="careListEditBalance" autocomplete="off" spellcheck="false" inputmode="decimal" enterkeyhint="done">
             </div>
 
             <div class="confirm" id="careListDeleteBox" hidden>
@@ -3891,7 +3891,7 @@ td.num.dash .cell-content{
             </div>
             <div class="new-tx-summa-row">
               <label for="newTxUtSumma">Summa</label>
-              <input type="text" id="newTxUtSumma" autocomplete="off" spellcheck="false" inputmode="decimal">
+              <input type="text" id="newTxUtSumma" autocomplete="off" spellcheck="false" inputmode="decimal" enterkeyhint="done">
               <button class="btn-split" id="newTxUtSplitBtn" type="button">Split</button>
             </div>
             <div class="new-tx-row">
@@ -3917,7 +3917,7 @@ td.num.dash .cell-content{
             </div>
             <div class="new-tx-summa-row">
               <label for="newTxInSumma">Summa</label>
-              <input type="text" id="newTxInSumma" autocomplete="off" spellcheck="false" inputmode="decimal">
+              <input type="text" id="newTxInSumma" autocomplete="off" spellcheck="false" inputmode="decimal" enterkeyhint="done">
               <button class="btn-split" id="newTxInSplitBtn" type="button">Split</button>
             </div>
             <div class="new-tx-row">
@@ -3939,7 +3939,7 @@ td.num.dash .cell-content{
             </div>
             <div class="new-tx-summa-row new-tx-summa-row--plain">
               <label for="newTxOverforingSumma">Summa</label>
-              <input type="text" id="newTxOverforingSumma" autocomplete="off" spellcheck="false" inputmode="decimal">
+              <input type="text" id="newTxOverforingSumma" autocomplete="off" spellcheck="false" inputmode="decimal" enterkeyhint="done">
             </div>
             <div class="new-tx-row">
               <label for="newTxOverforingMemo">Memo</label>
@@ -4195,7 +4195,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v43';
+const APP_VERSION = '2026-09-22 v44';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5349,6 +5349,13 @@ function parseAmount(rawValue){
   return val;
 }
 
+// Mobil: sifferklaviatur med decimalavskiljare (behåll type=text för svensk komma).
+function applyAmountInputMobileAttrs(input){
+  if(!input) return;
+  input.setAttribute('inputmode', 'decimal');
+  input.setAttribute('enterkeyhint', 'done');
+}
+
 // Under inmatning: siffror, högst ett decimaltecken, valfritt ledande minustecken.
 function sanitizeSignedAmountInput(raw){
   let out = '';
@@ -5364,6 +5371,7 @@ function sanitizeSignedAmountInput(raw){
 }
 
 function bindSignedAmountInput(input){
+  applyAmountInputMobileAttrs(input);
   input.addEventListener('input', () => {
     const clean = sanitizeSignedAmountInput(input.value);
     if(clean !== input.value) input.value = clean;
@@ -5384,6 +5392,7 @@ function sanitizeAmountInput(raw){
 }
 
 function bindAmountInput(input){
+  applyAmountInputMobileAttrs(input);
   input.addEventListener('input', () => {
     const clean = sanitizeAmountInput(input.value);
     if(clean !== input.value) input.value = clean;
@@ -15993,7 +16002,6 @@ function buildSplitRowEl(data){
   amt.className = 'split-amt';
   amt.autocomplete = 'off';
   amt.spellcheck = false;
-  amt.inputMode = 'decimal';
   amt.placeholder = 'Belopp';
   if(splitAmountNonZero(data.total)) amt.value = formatSignedSummaInput(data.total);
   bindSignedAmountInput(amt);
