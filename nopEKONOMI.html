@@ -4192,7 +4192,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v39';
+const APP_VERSION = '2026-09-22 v40';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10723,7 +10723,7 @@ function trendExcludedListHtml(recon){
 /**
  * Kumulativt netto som i Rapport → Netto över tid.
  * Alla = samma som rapporten (hela radbelopp inkl. öppningsbalans).
- * Bocklista = bara ibockade Trend-kategorier (poster, ej öppningsbalans).
+ * Bocklista = ibockade Trend-kategorier + öppningsbalans (startsaldo).
  */
 function collectTrendNetOverTime(fromIso, toIso, forceMode){
   const monthlyDelta = Object.create(null);
@@ -10744,6 +10744,14 @@ function collectTrendNetOverTime(fromIso, toIso, forceMode){
         continue;
       }
 
+      // Startsaldo räknas alltid in (samma bas som Alla), även i bocklista.
+      if(isOpeningBalanceRow(r)){
+        const amount = typeof r.total === 'number' ? r.total : Number(r.total);
+        if(!Number.isFinite(amount)) continue;
+        const mk = monthKeyFromIso(d);
+        monthlyDelta[mk] = (monthlyDelta[mk] || 0) + amount;
+        continue;
+      }
       if(isReportExcludedRow(r)) continue;
       if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
       for(const piece of reportPiecesFromRow(r)){
@@ -10774,6 +10782,23 @@ function collectTrendNetOverTime(fromIso, toIso, forceMode){
   }
 
   return { months: months, points: points, opening: opening };
+}
+
+/** Summa öppningsbalanser t.o.m. toIso (för avstämning mot bocklistaserie). */
+function sumOpeningBalanceThrough(toIso){
+  let sum = 0;
+  for(const name of book.order){
+    const acc = book.accounts[name];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(!isOpeningBalanceRow(r)) continue;
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d) || d > toIso) continue;
+      const amount = typeof r.total === 'number' ? r.total : Number(r.total);
+      if(Number.isFinite(amount)) sum += amount;
+    }
+  }
+  return sum;
 }
 
 /** OLS-prognos på kumulativt netto (samma mönster som Prognos In/Ut). */
@@ -10877,6 +10902,19 @@ function trendNettoTableHtml(rows, opts){
   }
   html += '</tbody></table>';
   return html;
+}
+
+/** Historikrader inkl. Startsaldo (värde före första historikmånad). */
+function trendNettoHistoryRows(data){
+  const rows = [];
+  if(data && Number.isFinite(data.opening)){
+    rows.push({
+      month: 'Startsaldo',
+      delta: data.opening,
+      value: data.opening
+    });
+  }
+  return rows.concat((data && data.points) || []);
 }
 
 /** Plockar ut historik-/prognosvärden ur ett forecast-objekt, ankrat i sista verkliga. */
@@ -11060,14 +11098,17 @@ function renderTrendNettoOverTid(){
       const recon = computeTrendNetReconciliation(toIso);
       const cleanedFromSeries = data.points.length
         ? data.points[data.points.length - 1].value : 0;
-      assertTrendNetReconciliation(recon, cleanedFromSeries);
+      // Serien inkluderar startsaldo; avstämd rensad total gör det inte.
+      const openSum = sumOpeningBalanceThrough(toIso);
+      assertTrendNetReconciliation(recon, cleanedFromSeries - openSum);
       reconBlock = trendExcludedListHtml(recon);
       console.info('[Trend] Uteslutna poster (' + recon.excludedItems.length + ' st):',
         recon.excludedItems);
       console.info('[Trend] Rå ' + Math.round(recon.rawTotal)
         + ' − rensad ' + Math.round(recon.cleanedTotal)
         + ' = ' + Math.round(recon.rawTotal - recon.cleanedTotal)
-        + ' (Σ uteslutna ' + Math.round(recon.excludedTotal) + ')');
+        + ' (Σ uteslutna ' + Math.round(recon.excludedTotal) + ')'
+        + ' · startsaldo i serie ' + Math.round(openSum));
     }
   } catch(err){
     if(err && err.trendHandled){ clearTrendCanvas(); return; }
@@ -11106,22 +11147,23 @@ function renderTrendNettoOverTid(){
     + '</div></div>';
 
   const basText = catMode === 'alla'
-    ? 'Bas: kumulativt netto som i Rapport (alla belopp inkl. öppningsbalans). '
-    : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Trend Bocklista. ';
+    ? 'Bas: kumulativt netto som i Rapport (alla belopp inkl. öppningsbalans/startsaldo). '
+    : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Trend Bocklista'
+      + ' plus öppningsbalans (startsaldo). ';
 
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
     + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
     + ' · ' + data.months.length + ' fulländade månader'
     + ' (pågående månad ingår inte). '
     + basText
-    + 'Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(data.opening))) + '. '
+    + 'Startsaldo före perioden: ' + escapeHtml(formatReportInt(Math.round(data.opening))) + '. '
     + 'Lutning ' + escapeHtml(formatTrendSlope(data.fit.b))
     + ' (OLS, lätt IQR-winsorize). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
 
   const historyBlock = '<p class="trend-section-title">Historik</p>'
-    + trendNettoTableHtml(data.points);
+    + trendNettoTableHtml(trendNettoHistoryRows(data));
   const forecastBlock = '<p class="trend-section-title">Prognos ('
     + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
     + trendNettoTableHtml(data.forecast);
