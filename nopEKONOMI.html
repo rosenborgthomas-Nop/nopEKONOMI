@@ -3291,7 +3291,7 @@ td.num.dash .cell-content{
       <select id="trendTypeMenu" class="menu-select" aria-label="Trendtyp">
         <option value="prognosInUt">Prognos (In/Ut)</option>
         <option value="nettoOverTid">Netto över tid</option>
-        <option value="" disabled class="menu-sep menu-sep-title" id="trendTypeCatSep">— Kategori —</option>
+        <optgroup label="Kategori" id="trendTypeCatGroup"></optgroup>
       </select>
       <label class="report-col-label" for="trendHistoryMenu">Historik</label>
       <select id="trendHistoryMenu" class="menu-select" aria-label="Historik bakåt">
@@ -4166,7 +4166,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v24';
+const APP_VERSION = '2026-09-22 v25';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10107,16 +10107,22 @@ function isTrendTypeValueOk(val){
 /** Gamla Detalj-val från v23 — ignoreras vid återställning. */
 const TREND_DETAIL_TYPES_LEGACY = new Set(['payee', 'kategori', 'underkategori']);
 
-/** Fyll Typ-menyn med kategorier A–Ö efter avskiljaren (inga överföringar). */
+/** Fyll Typ-menyn med kategorier A–Ö under optgroup "Kategori" (iOS-vänligt). */
 function populateTrendTypeCategoryOptions(){
   if(!trendTypeMenu) return;
   const prev = trendTypeMenu.value;
-  const sep = el('trendTypeCatSep');
-  const toRemove = [];
-  for(const opt of Array.from(trendTypeMenu.options)){
-    if(isTrendCategoryType(opt.value)) toRemove.push(opt);
+  let group = el('trendTypeCatGroup');
+  if(!group){
+    group = document.createElement('optgroup');
+    group.id = 'trendTypeCatGroup';
+    group.label = 'Kategori';
+    trendTypeMenu.appendChild(group);
   }
-  for(const opt of toRemove) opt.remove();
+  // Rensa tidigare kategori-optioner (inkl. ev. lösa kat: utanför group).
+  while(group.firstChild) group.removeChild(group.firstChild);
+  for(const opt of Array.from(trendTypeMenu.options)){
+    if(isTrendCategoryType(opt.value) && opt.parentNode !== group) opt.remove();
+  }
 
   const cats = (bookLookup && Array.isArray(bookLookup.categories))
     ? bookLookup.categories
@@ -10124,14 +10130,11 @@ function populateTrendTypeCategoryOptions(){
       .slice()
       .sort((a, b) => a.localeCompare(b, 'sv'))
     : [];
-  let at = sep ? sep.index + 1 : trendTypeMenu.options.length;
   for(const name of cats){
     const opt = document.createElement('option');
     opt.value = trendCategoryTypeValue(name);
     opt.textContent = name;
-    if(at >= trendTypeMenu.options.length) trendTypeMenu.appendChild(opt);
-    else trendTypeMenu.add(opt, trendTypeMenu.options[at]);
-    at += 1;
+    group.appendChild(opt);
   }
   if(prev && Array.from(trendTypeMenu.options).some(o => o.value === prev)){
     trendTypeMenu.value = prev;
