@@ -4188,7 +4188,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v33';
+const APP_VERSION = '2026-09-22 v34';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9901,12 +9901,15 @@ function buildTrendInUtLineChart(data, opts){
   const fitInAll = [];
   const fitUtAll = [];
   const fitNetAll = [];
+  const useFitSeries = data.fitNetSeries && data.fitNetSeries.length === total;
   for(let i = 0; i < total; i++){
     const fi = data.fitIn.a + data.fitIn.b * i;
     const fu = data.fitUt.a + data.fitUt.b * i;
     fitInAll.push(fi);
     fitUtAll.push(fu);
-    if(data.fitNet){
+    if(useFitSeries){
+      fitNetAll.push(data.fitNetSeries[i]);
+    } else if(data.fitNet){
       fitNetAll.push(data.fitNet.a + data.fitNet.b * i);
     } else {
       fitNetAll.push(fi - fu);
@@ -11138,8 +11141,39 @@ function syncTrendControlsForType(){
 }
 
 /**
+ * Klassificera payee-trend utifrån historik (inte trendens slutvärde).
+ * Ren utgift → spegla + limma trend vid 0.
+ * Övergång minus→plus i historiken → ingen specialhantering.
+ */
+function classifyPayeeTrendSign(netSeries){
+  const n = netSeries && netSeries.length;
+  if(!n) return { isExpense: false, clampAtZero: false };
+  let sum = 0;
+  let neg = 0;
+  let pos = 0;
+  for(const v of netSeries){
+    sum += v;
+    if(v < 0) neg += 1;
+    else if(v > 0) pos += 1;
+  }
+  const third = Math.max(1, Math.floor(n / 3));
+  let firstSum = 0;
+  let lastSum = 0;
+  for(let i = 0; i < third; i++) firstSum += netSeries[i];
+  for(let i = n - third; i < n; i++) lastSum += netSeries[i];
+  const firstAvg = firstSum / third;
+  const lastAvg = lastSum / third;
+  // Historik som går från minus till plus: låt trenden korsa 0 fritt.
+  if(firstAvg < 0 && lastAvg > 0){
+    return { isExpense: false, clampAtZero: false };
+  }
+  const isExpense = sum < 0 || neg > pos;
+  return { isExpense: isExpense, clampAtZero: !!isExpense };
+}
+
+/**
  * Prognos In/Ut för en enda payee (samma beräkning/diagram som Typ → Prognos In/Ut).
- * Om trendens slutvärde är negativt: visa som Utgift (absolutvärde / speglad serie).
+ * Utgift: absolutvärde; limma trenden vid 0 om historiken inte redan gått till plus.
  */
 function renderTrendPayeePrognos(payeeName){
   const payee = String(payeeName || '').trim();
@@ -11187,28 +11221,43 @@ function renderTrendPayeePrognos(payeeName){
     return;
   }
 
-  // Klassificera efter trendlinjens slutvärde (före spegling).
-  const lastT = raw.months.length + raw.forecast.length - 1;
-  const trendEnd = raw.fitNet.a + raw.fitNet.b * Math.max(0, lastT);
-  const isExpense = trendEnd < 0;
+  const classif = classifyPayeeTrendSign(raw.netSeries);
+  const isExpense = classif.isExpense;
+  const clampAtZero = classif.clampAtZero;
   const signLabel = isExpense ? 'Negativt - Utgift' : 'Positivt-Inkomst';
   const signClass = isExpense ? 'is-expense' : 'is-income';
 
-  // Spegla till absolutvärde när utgift: minus → plus (behåller kurvans form).
-  const data = isExpense
-    ? {
-        ...raw,
-        netSeries: raw.netSeries.map(v => -v),
-        fitNet: { a: -raw.fitNet.a, b: -raw.fitNet.b },
-        forecast: raw.forecast.map(p => ({
+  let data = raw;
+  if(isExpense){
+    const histN = raw.months.length;
+    const total = histN + raw.forecast.length;
+    const clampRaw = v => (clampAtZero ? Math.min(0, v) : v);
+    const fitNetSeries = [];
+    for(let i = 0; i < total; i++){
+      const rawFit = raw.fitNet.a + raw.fitNet.b * i;
+      fitNetSeries.push(-clampRaw(rawFit));
+    }
+    data = {
+      ...raw,
+      netSeries: raw.netSeries.map(v => -v),
+      fitNet: {
+        a: -raw.fitNet.a,
+        b: -raw.fitNet.b
+      },
+      fitNetSeries: fitNetSeries,
+      forecast: raw.forecast.map((p, hi) => {
+        const t = histN + hi;
+        const rawFit = p.netFit != null ? p.netFit : (raw.fitNet.a + raw.fitNet.b * t);
+        return {
           month: p.month,
           income: p.income,
           expense: p.expense,
           net: -p.net,
-          netFit: p.netFit != null ? -p.netFit : undefined
-        }))
-      }
-    : raw;
+          netFit: -clampRaw(rawFit)
+        };
+      })
+    };
+  }
 
   const detailsId = 'trendPayeePrognosDetails';
   head += '<button type="button" class="help-tip-btn trend-details-btn"'
@@ -11231,7 +11280,9 @@ function renderTrendPayeePrognos(payeeName){
     + ' (pågående månad ingår inte). '
     + basText
     + (isExpense
-      ? 'Visas som utgift (absolutvärde av In − Ut). '
+      ? ('Visas som utgift (absolutvärde av In − Ut)'
+        + (clampAtZero ? '; trend limmas vid 0' : '')
+        + '. ')
       : 'En summa per månad (In − Ut). ')
     + 'Lutning '
     + escapeHtml(formatTrendSlope(data.fitNet.b))
