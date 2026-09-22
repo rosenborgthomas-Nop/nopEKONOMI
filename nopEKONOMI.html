@@ -597,10 +597,14 @@ body.trend-view-active{
   overflow:hidden;
 }
 #viewTrend.report-mobile .report-table-wrap,
-#viewTrend.report-mobile .trend-body-scroll,
 #viewTrend.report-mobile .trend-line-chart-wrap{
   max-width:100%;
   overflow-x:hidden;
+}
+#viewTrend.report-mobile .trend-body-scroll{
+  max-width:100%;
+  overflow-x:hidden;
+  overflow-y:auto;
 }
 #viewTrend.report-mobile .report-table-title-row{
   flex-wrap:wrap;
@@ -4188,7 +4192,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v35';
+const APP_VERSION = '2026-09-22 v36';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10296,6 +10300,25 @@ function clearTrendCanvas(){
   if(trendPlaceholder) trendPlaceholder.hidden = false;
 }
 
+/** Nollställ scroll så ny lista/diagram börjar högst upp. */
+function resetTrendScroll(){
+  const run = () => {
+    try{ window.scrollTo(0, 0); } catch(e){ /* ignore */ }
+    if(document.documentElement) document.documentElement.scrollTop = 0;
+    if(document.body) document.body.scrollTop = 0;
+    if(views.trend) views.trend.scrollTop = 0;
+    const reportWrap = views.trend && views.trend.querySelector('.report-wrap');
+    if(reportWrap) reportWrap.scrollTop = 0;
+    if(trendBody){
+      trendBody.scrollTop = 0;
+      const nodes = trendBody.querySelectorAll('.trend-body-scroll, .report-table-wrap');
+      for(const n of nodes) n.scrollTop = 0;
+    }
+  };
+  run();
+  requestAnimationFrame(run);
+}
+
 /** Lookback-spann för Trend: N fulländade månader bakåt, eller allt t.o.m. sista fulla. */
 function trendHistoryDateRange(historyVal){
   const toIso = endOfLastCompleteTrendMonthIso();
@@ -11246,6 +11269,7 @@ function renderTrendDetailPrognos(kind, itemName){
     trendBody.appendChild(wrap);
     const back = wrap.querySelector('#' + backBtnId);
     if(back) back.addEventListener('click', goBack);
+    resetTrendScroll();
     return;
   }
 
@@ -11379,6 +11403,7 @@ function renderTrendDetailPrognos(kind, itemName){
     + '</div>';
   trendBody.appendChild(wrap);
   sizeTrendChartText(wrap);
+  resetTrendScroll();
 
   const back = wrap.querySelector('#' + backBtnId);
   if(back) back.addEventListener('click', goBack);
@@ -11453,6 +11478,7 @@ function renderTrendDetailList(kind){
       + '<p class="report-empty-note">Inga ' + escapeHtml(emptyLabels[kind] || 'poster')
       + ' ännu.</p>';
     trendBody.appendChild(wrap);
+    resetTrendScroll();
     return;
   }
 
@@ -11477,6 +11503,7 @@ function renderTrendDetailList(kind){
     + '</tr></thead><tbody>' + rows + '</tbody></table>'
     + '</div>';
   trendBody.appendChild(wrap);
+  resetTrendScroll();
 }
 
 function renderTrendPage(){
