@@ -4169,7 +4169,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v28';
+const APP_VERSION = '2026-09-22 v29';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9789,10 +9789,13 @@ function buildTrendForecast(fromIso, toIso, horizon, payeeFilter){
     };
   }
 
+  const netSeries = months.map((_, i) => incomeSeries[i] - expenseSeries[i]);
   const incW = winsorizeSeries(incomeSeries);
   const expW = winsorizeSeries(expenseSeries);
+  const netW = winsorizeSeries(netSeries);
   const fitIn = olsFitSeries(incW);
   const fitUt = olsFitSeries(expW);
+  const fitNet = olsFitSeries(netW);
   const n = months.length;
   const lastMk = months[n - 1];
   const forecast = [];
@@ -9801,8 +9804,9 @@ function buildTrendForecast(fromIso, toIso, horizon, payeeFilter){
     const t = n - 1 + h;
     const fi = fitIn.a + fitIn.b * t;
     const fe = fitUt.a + fitUt.b * t;
+    const fn = fitNet.a + fitNet.b * t;
     const mk = addMonthKey(lastMk, h);
-    forecast.push({ month: mk, income: fi, expense: fe, net: fi - fe });
+    forecast.push({ month: mk, income: fi, expense: fe, net: fi - fe, netFit: fn });
     sumIn += fi;
     sumUt += fe;
   }
@@ -9812,8 +9816,10 @@ function buildTrendForecast(fromIso, toIso, horizon, payeeFilter){
     months,
     incomeSeries,
     expenseSeries,
+    netSeries,
     fitIn,
     fitUt,
+    fitNet,
     forecast,
     sumIn,
     sumUt,
@@ -9853,7 +9859,11 @@ function buildTrendInUtLineChart(data, opts){
 
   const histNet = [];
   for(let i = 0; i < histN; i++){
-    histNet.push(data.incomeSeries[i] - data.expenseSeries[i]);
+    histNet.push(
+      data.netSeries
+        ? data.netSeries[i]
+        : (data.incomeSeries[i] - data.expenseSeries[i])
+    );
   }
 
   const fitInAll = [];
@@ -9864,7 +9874,11 @@ function buildTrendInUtLineChart(data, opts){
     const fu = data.fitUt.a + data.fitUt.b * i;
     fitInAll.push(fi);
     fitUtAll.push(fu);
-    fitNetAll.push(fi - fu);
+    if(data.fitNet){
+      fitNetAll.push(data.fitNet.a + data.fitNet.b * i);
+    } else {
+      fitNetAll.push(fi - fu);
+    }
   }
 
   let ymin = Infinity;
@@ -10015,7 +10029,7 @@ function buildTrendInUtLineChart(data, opts){
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
-    + ' aria-label="' + (onlyNet ? 'Netto över tid' : 'Trendlinjer In, Ut och Netto') + '">'
+    + ' aria-label="' + (onlyNet ? 'Netto historik och trend' : 'Trendlinjer In, Ut och Netto') + '">'
     + svg
     + '</svg>'
     + legend
@@ -11124,37 +11138,49 @@ function renderTrendPayeePrognos(payeeName){
     + ' · ' + data.months.length + ' fulländade månader'
     + ' (pågående månad ingår inte). '
     + basText
-    + 'Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
-    + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))
+    + 'En summa per månad (In − Ut). Lutning '
+    + escapeHtml(formatTrendSlope(data.fitNet.b))
     + ' (OLS, lätt IQR-winsorize). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
 
-  const historyRows = data.months.map((mk, i) => {
-    const income = data.incomeSeries[i];
-    const expense = data.expenseSeries[i];
-    return { month: mk, income: income, expense: expense, net: income - expense };
-  });
+  const netTable = rows => {
+    let html = '<table class="report-table trend-forecast-table"><thead><tr>'
+      + '<th class="report-label-col">Månad</th>'
+      + '<th class="num">Netto</th>'
+      + '</tr></thead><tbody>';
+    for(const r of rows){
+      const cls = r.net < 0 ? ' neg' : '';
+      html += '<tr>'
+        + '<td class="report-label-col">' + escapeHtml(r.month) + '</td>'
+        + '<td class="num' + cls + '">'
+        + escapeHtml(formatReportInt(Math.round(r.net))) + '</td>'
+        + '</tr>';
+    }
+    html += '</tbody></table>';
+    return html;
+  };
+
+  const historyRows = data.months.map((mk, i) => ({
+    month: mk,
+    net: data.netSeries[i]
+  }));
 
   const historyBlock = '<p class="trend-section-title">Historik</p>'
-    + trendInUtTableHtml(historyRows, null, null, null, null, { drillable: false });
+    + netTable(historyRows);
 
   const forecastBlock = '<p class="trend-section-title">Prognos ('
     + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
-    + trendInUtTableHtml(
-      data.forecast.map(p => ({
-        month: p.month,
-        income: p.income,
-        expense: p.expense,
-        net: p.net
-      }))
-    );
+    + netTable(data.forecast.map(p => ({
+      month: p.month,
+      net: p.netFit != null ? p.netFit : p.net
+    })));
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
     + '<p style="margin:0 0 8px"><button type="button" class="btn-quiet" id="trendPayeeBackBtn">'
     + '← Payee-lista</button></p>'
-    + buildTrendInUtLineChart(data)
+    + buildTrendInUtLineChart(data, { onlyNet: true })
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
     + historyBlock + forecastBlock
