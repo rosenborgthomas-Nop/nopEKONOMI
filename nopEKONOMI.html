@@ -4192,7 +4192,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v38';
+const APP_VERSION = '2026-09-22 v39';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11011,27 +11011,18 @@ function buildTrendNettoLineChart(data, opts){
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
-  // Legend: Verkligt saldo först (Slutdest. + diff + %), därefter Bocklista (namn + skillnad + %).
+  // Legend: Slutdest + diff + % mot sista historiska (samma modell för Alla och Bocklista).
   const legendFor = s => {
     const last = s.forecastVals.length ? s.forecastVals[s.forecastVals.length - 1] : s.lastActual;
     const dd = Math.round(last - s.lastActual);
     const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
     const txt = (dd > 0 ? '+' : '') + formatReportInt(dd)
       + formatTrendDeltaPct(dd, s.lastActual);
-    const isBocklista = /bocklista/i.test(s.label || '');
-    if(isBocklista){
-      return '<span class="trend-legend-series" style="color:' + s.color + '">'
-        + '<i class="trend-line-chart-swatch" aria-hidden="true"'
-        + ' style="color:' + s.color + ';border-top-color:' + s.color + '"></i>'
-        + '<span class="trend-legend-label">' + escapeHtml(s.label) + '</span>'
-        + '<span class="trend-legend-value trend-delta' + (cls ? ' ' + cls : '') + '">'
-        + escapeHtml(txt) + '</span></span>';
-    }
     return '<span class="trend-legend-series" style="color:' + s.color + '">'
       + '<i class="trend-line-chart-swatch" aria-hidden="true"'
       + ' style="color:' + s.color + ';border-top-color:' + s.color + '"></i>'
       + '<span class="trend-legend-label">' + escapeHtml(s.label) + '</span>'
-      + ' <span class="trend-delta">(Slutdest. '
+      + ' <span class="trend-delta">(Slutdest: '
       + escapeHtml(formatReportInt(Math.round(last))) + ')</span>'
       + '<span class="trend-delta' + (cls ? ' ' + cls : '') + '">'
       + escapeHtml(txt) + '</span></span>';
