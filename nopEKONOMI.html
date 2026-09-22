@@ -4162,7 +4162,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v20';
+const APP_VERSION = '2026-09-22 v21';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10840,21 +10840,21 @@ function buildTrendNettoLineChart(data, opts){
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
-  // Legend: Verkligt saldo först, därefter Bocklista (utan "Slutdest." / diff).
+  // Legend: Verkligt saldo först (Slutdest. + diff), därefter Bocklista (bara namn + skillnad).
   const legendFor = s => {
     const last = s.forecastVals.length ? s.forecastVals[s.forecastVals.length - 1] : s.lastActual;
+    const dd = Math.round(last - s.lastActual);
+    const cls = dd < 0 ? 'is-neg' : 'is-pos';
+    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
     const isBocklista = /bocklista/i.test(s.label || '');
     if(isBocklista){
       return '<span class="trend-legend-series" style="color:' + s.color + '">'
         + '<i class="trend-line-chart-swatch" aria-hidden="true"'
         + ' style="color:' + s.color + ';border-top-color:' + s.color + '"></i>'
         + '<span class="trend-legend-label">' + escapeHtml(s.label) + '</span>'
-        + '<span class="trend-legend-value">'
-        + escapeHtml(formatReportInt(Math.round(last))) + '</span></span>';
+        + '<span class="trend-legend-value trend-delta ' + cls + '">'
+        + escapeHtml(txt) + '</span></span>';
     }
-    const dd = Math.round(last - s.lastActual);
-    const cls = dd < 0 ? 'is-neg' : 'is-pos';
-    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
     return '<span class="trend-legend-series" style="color:' + s.color + '">'
       + '<i class="trend-line-chart-swatch" aria-hidden="true"'
       + ' style="color:' + s.color + ';border-top-color:' + s.color + '"></i>'
