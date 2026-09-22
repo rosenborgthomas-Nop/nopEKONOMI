@@ -4169,7 +4169,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v29';
+const APP_VERSION = '2026-09-22 v30';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9837,6 +9837,19 @@ function formatTrendSlope(b){
   return sign + formatAmount(v) + '/mån';
 }
 
+/** Vänstermarginal så y-axelns etiketter får plats även när mobilen förstorar texten. */
+function trendChartYAxisPad(ymin, ymax){
+  let maxChars = 1;
+  for(let g = 0; g <= 3; g++){
+    const val = ymax - ((ymax - ymin) * g) / 3;
+    const len = String(formatReportInt(Math.round(val))).length;
+    if(len > maxChars) maxChars = len;
+  }
+  // Mono ~0.62em; räkna med mobil uppskalning till ~15 vb-enheter.
+  const padL = Math.max(56, Math.ceil(maxChars * 7.5) + 16);
+  return { padL: padL, yChars: maxChars };
+}
+
 function trendHorizonLabel(n){
   if(n === 1) return '1 månad';
   if(n === 12) return '1 år';
@@ -9915,7 +9928,8 @@ function buildTrendInUtLineChart(data, opts){
 
   const W = 560;
   const H = 220;
-  const padL = 48;
+  const yPad = trendChartYAxisPad(ymin, ymax);
+  const padL = yPad.padL;
   const padR = 12;
   const padT = 14;
   const padB = 28;
@@ -10029,6 +10043,7 @@ function buildTrendInUtLineChart(data, opts){
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
+    + ' data-pad-l="' + padL + '" data-y-chars="' + yPad.yChars + '"'
     + ' aria-label="' + (onlyNet ? 'Netto historik och trend' : 'Trendlinjer In, Ut och Netto') + '">'
     + svg
     + '</svg>'
@@ -10265,7 +10280,16 @@ function sizeTrendChartText(wrap){
     return;
   }
   const scale = rect.width / vbWidth;
-  const vbFont = Math.max(4, targetPx / scale);
+  let vbFont = Math.max(4, targetPx / scale);
+
+  // Begränsa så y-etiketter inte klipps utanför viewBox (särskilt på smal mobil).
+  const padL = Number(svg.getAttribute('data-pad-l')) || 56;
+  const yChars = Number(svg.getAttribute('data-y-chars')) || 6;
+  const maxVbFont = (padL - 10) / Math.max(1, yChars * 0.62);
+  if(Number.isFinite(maxVbFont) && maxVbFont > 0){
+    vbFont = Math.min(vbFont, maxVbFont);
+  }
+
   const texts = svg.querySelectorAll('text.tl-axis');
   for(const t of texts){
     t.setAttribute('font-size', vbFont.toFixed(2));
@@ -10803,7 +10827,8 @@ function buildTrendNettoLineChart(data, opts){
 
   const W = 560;
   const H = 220;
-  const padL = 52;
+  const yPad = trendChartYAxisPad(ymin, ymax);
+  const padL = yPad.padL;
   const padR = 12;
   const padT = 14;
   const padB = 28;
@@ -10902,6 +10927,7 @@ function buildTrendNettoLineChart(data, opts){
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
+    + ' data-pad-l="' + padL + '" data-y-chars="' + yPad.yChars + '"'
     + ' aria-label="Kumulativt netto med prognos">'
     + svg
     + '</svg>'
