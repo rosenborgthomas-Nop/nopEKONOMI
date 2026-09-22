@@ -730,6 +730,13 @@ body.trend-view-active{
   color:inherit;
   font-weight:700;
 }
+.trend-line-chart-legend .trend-legend-value{
+  margin-left:0.75em;
+  font-family:'JetBrains Mono', monospace;
+  font-weight:700;
+  color:inherit;
+  letter-spacing:0.02em;
+}
 .trend-line-chart-legend .trend-legend-series .trend-delta:not(.is-pos):not(.is-neg){
   color:inherit;
   opacity:0.85;
@@ -4155,7 +4162,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v19';
+const APP_VERSION = '2026-09-22 v20';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10833,10 +10840,18 @@ function buildTrendNettoLineChart(data, opts){
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
-  // Legend: en rad per serie med Slutdest. och ändring mot sista verkliga.
-  // Etikett + swatch i samma neonfärg som diagramlinjen.
+  // Legend: Verkligt saldo först, därefter Bocklista (utan "Slutdest." / diff).
   const legendFor = s => {
     const last = s.forecastVals.length ? s.forecastVals[s.forecastVals.length - 1] : s.lastActual;
+    const isBocklista = /bocklista/i.test(s.label || '');
+    if(isBocklista){
+      return '<span class="trend-legend-series" style="color:' + s.color + '">'
+        + '<i class="trend-line-chart-swatch" aria-hidden="true"'
+        + ' style="color:' + s.color + ';border-top-color:' + s.color + '"></i>'
+        + '<span class="trend-legend-label">' + escapeHtml(s.label) + '</span>'
+        + '<span class="trend-legend-value">'
+        + escapeHtml(formatReportInt(Math.round(last))) + '</span></span>';
+    }
     const dd = Math.round(last - s.lastActual);
     const cls = dd < 0 ? 'is-neg' : 'is-pos';
     const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
@@ -10848,8 +10863,9 @@ function buildTrendNettoLineChart(data, opts){
       + escapeHtml(formatReportInt(Math.round(last))) + ')</span>'
       + '<span class="trend-delta ' + cls + '">' + escapeHtml(txt) + '</span></span>';
   };
+  // seriesList är [verkligt, bocklista] — visa i den ordningen (inte omvänd).
   const legend = '<p class="trend-line-chart-legend">'
-    + seriesList.slice().reverse().map(legendFor).join('')
+    + seriesList.map(legendFor).join('')
     + '</p>';
 
   return '<div class="trend-line-chart-wrap">'
