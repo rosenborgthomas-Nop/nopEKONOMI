@@ -4192,7 +4192,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v40';
+const APP_VERSION = '2026-09-22 v41';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9489,7 +9489,7 @@ function buildNetOverTimeChunkedHtml(points, opening, opts){
     html += buildNetOverTimeVerticalChartBlock(chunk, points, opening, start, {
       forPrint: forPrint,
       wrapPanel: false,
-      newestFirst: true,
+      newestFirst: false,
       showMean: false,
       useNetDeltaSum: true
     });
@@ -9582,7 +9582,7 @@ function buildNetOverTimeChart(points, opening){
   return buildNetOverTimeVerticalChartBlock(points, points, opening, 0, {
     wrapPanel: true,
     animate: true,
-    newestFirst: true,
+    newestFirst: false,
     showMean: false,
     useNetDeltaSum: true
   });
