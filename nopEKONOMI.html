@@ -4188,7 +4188,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v32';
+const APP_VERSION = '2026-09-22 v33';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10047,10 +10047,12 @@ function buildTrendInUtLineChart(data, opts){
 
   let legend = '<p class="trend-line-chart-legend">';
   const lastT = total - 1;
+  // Skillnad = trendens slut − trenden vid sista historikmånad (inte sista faktiska punkten,
+  // som kan vara en outlier och ge fel tecken när lutningen är tydlig).
+  const trendAtHistEnd = histN > 0 ? fitNetAll[histN - 1] : fitNetAll[0];
   if(onlyNet){
     const slutdest = fitNetAll[lastT];
-    const lastHist = histN > 0 ? histNet[histN - 1] : slutdest;
-    const dd = Math.round(slutdest - lastHist);
+    const dd = Math.round(slutdest - trendAtHistEnd);
     const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
     const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
     legend += '<span class="trend-legend-series">'
@@ -10068,8 +10070,7 @@ function buildTrendInUtLineChart(data, opts){
     legend += deltaLabel('In', Math.round(fitInAll[lastT] - fitInAll[0]), 'is-in')
       + deltaLabel('Ut', Math.round(fitUtAll[lastT] - fitUtAll[0]), 'is-ut');
     const slutdest = fitNetAll[lastT];
-    const lastHist = histN > 0 ? histNet[histN - 1] : slutdest;
-    const dd = Math.round(slutdest - lastHist);
+    const dd = Math.round(slutdest - trendAtHistEnd);
     const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
     const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
     legend += '<span class="trend-legend-series">'
