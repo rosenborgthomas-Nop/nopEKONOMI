@@ -4169,7 +4169,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v27';
+const APP_VERSION = '2026-09-22 v28';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9727,7 +9727,7 @@ function syncTrendMenuGates(){
  * Månadsserie In/Ut från Trend-registret (ibockade kategorier / underkategorier).
  * Bara fulländade månader — ingen skattning av pågående månad.
  */
-function collectTrendInUtSeries(fromIso, toIso){
+function collectTrendInUtSeries(fromIso, toIso, payeeFilter){
   syncTrendIncludeMap(book);
   const income = Object.create(null);
   const expense = Object.create(null);
@@ -9739,6 +9739,7 @@ function collectTrendInUtSeries(fromIso, toIso){
       else excludedCats += 1;
     }
   }
+  const payeeWant = payeeFilter ? String(payeeFilter).trim() : '';
 
   for(const name of book.order){
     const acc = book.accounts[name];
@@ -9748,6 +9749,7 @@ function collectTrendInUtSeries(fromIso, toIso){
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
       if(d < fromIso || d > toIso) continue;
+      if(payeeWant && (r.payee || '').trim() !== payeeWant) continue;
       if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
       for(const piece of reportPiecesFromRow(r)){
         const cat = (piece.category || '').trim();
@@ -9775,9 +9777,9 @@ function collectTrendInUtSeries(fromIso, toIso){
   };
 }
 
-function buildTrendForecast(fromIso, toIso, horizon){
+function buildTrendForecast(fromIso, toIso, horizon, payeeFilter){
   horizon = horizon || 12;
-  const series = collectTrendInUtSeries(fromIso, toIso);
+  const series = collectTrendInUtSeries(fromIso, toIso, payeeFilter);
   const { months, incomeSeries, expenseSeries, includedCats, excludedCats } = series;
   if(months.length < 2){
     return {
@@ -10090,6 +10092,9 @@ function isTrendDetailType(val){
   return TREND_DETAIL_TYPES.has(val);
 }
 
+/** Aktiv payee-drill från Detalj-listan (null = visa listan). */
+let trendPayeeDrillName = null;
+
 /** Snapshot av menyval när Trend-sidan öppnades (OK sparar, Avbryt återställer). */
 let trendPrefsSession = null;
 
@@ -10175,6 +10180,7 @@ function commitTrendPrefsSession(){
 function leaveTrendPage(commit){
   if(commit) commitTrendPrefsSession();
   else discardTrendPrefsSession();
+  trendPayeeDrillName = null;
   show('start');
 }
 
@@ -11034,21 +11040,151 @@ function renderTrendNettoOverTid(){
 function syncTrendControlsForType(){
   const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
   const detail = isTrendDetailType(type);
-  // Historik / Horisont / Kategorialternativ gäller bara prognosvyerna.
+  const payeeMode = type === 'payee';
+  // Payee-prognos använder Historik + Horisont (+ Kategorialternativ som In/Ut).
+  // Övriga detaljlistor behöver dem inte.
   const menus = [
-    [trendHistoryMenu, 'trendHistoryMenu'],
-    [trendHorizonMenu, 'trendHorizonMenu'],
-    [trendCatMenu, 'trendCatMenu']
+    [trendHistoryMenu, 'trendHistoryMenu', detail && !payeeMode],
+    [trendHorizonMenu, 'trendHorizonMenu', detail && !payeeMode],
+    [trendCatMenu, 'trendCatMenu', detail && !payeeMode]
   ];
-  for(const [menu, id] of menus){
-    if(menu) menu.disabled = detail;
+  for(const [menu, id, off] of menus){
+    if(menu) menu.disabled = !!off;
     const lab = document.querySelector('label[for="' + id + '"]');
-    if(lab) lab.classList.toggle('is-muted', detail);
+    if(lab) lab.classList.toggle('is-muted', !!off);
+  }
+}
+
+/**
+ * Prognos In/Ut för en enda payee (samma beräkning/diagram som Typ → Prognos In/Ut).
+ */
+function renderTrendPayeePrognos(payeeName){
+  const payee = String(payeeName || '').trim();
+  if(!payee){
+    trendPayeeDrillName = null;
+    renderTrendDetailList('payee');
+    return;
+  }
+  trendPayeeDrillName = payee;
+
+  const historyVal = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
+    ? trendHistoryMenu.value
+    : '12';
+  const range = trendHistoryDateRange(historyVal);
+  const fromIso = range.from;
+  const toIso = range.to;
+  const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
+  const data = buildTrendForecast(fromIso, toIso, horizon, payee);
+
+  clearTrendCanvas();
+  if(trendPlaceholder) trendPlaceholder.hidden = true;
+  if(trendBody) trendBody.classList.add('has-report');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'report-table-wrap';
+
+  const updatedHtml = '<p class="report-table-updated">'
+    + escapeHtml(reportUpdatedLineHtml()) + '</p>';
+  let head = '<div class="report-table-head">'
+    + '<div class="report-table-title-row">'
+    + '<p class="report-table-title">' + escapeHtml(payee) + '</p>';
+
+  if(!data.ok){
+    head += updatedHtml + '</div></div>';
+    wrap.innerHTML = head
+      + '<p class="report-empty-note">' + escapeHtml(data.reason || 'Kunde inte beräkna trend.') + '</p>'
+      + '<p class="report-empty-note"><button type="button" class="btn-quiet" id="trendPayeeBackBtn">'
+      + '← Payee-lista</button></p>';
+    trendBody.appendChild(wrap);
+    const back = wrap.querySelector('#trendPayeeBackBtn');
+    if(back) back.addEventListener('click', () => {
+      trendPayeeDrillName = null;
+      renderTrendDetailList('payee');
+    });
+    return;
+  }
+
+  const detailsId = 'trendPayeePrognosDetails';
+  head += '<button type="button" class="help-tip-btn trend-details-btn"'
+    + ' aria-label="Visa förklaring och tabeller"'
+    + ' aria-expanded="false"'
+    + ' aria-controls="' + detailsId + '">?</button>'
+    + updatedHtml
+    + '</div></div>';
+
+  const catMode = trendCategoryMode();
+  const basText = catMode === 'alla'
+    ? 'Bas: alla kategorier (ej överföringar) för denna payee. '
+    : ('Bas: ibockade kategorier i Registervård → Trend Bocklista'
+      + ' för denna payee (' + data.includedCats + ' med, ' + data.excludedCats + ' utan). ');
+
+  const note = '<p class="report-empty-note" style="margin:0 0 10px">'
+    + 'Payee: ' + escapeHtml(payee) + '. '
+    + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
+    + ' · ' + data.months.length + ' fulländade månader'
+    + ' (pågående månad ingår inte). '
+    + basText
+    + 'Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
+    + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))
+    + ' (OLS, lätt IQR-winsorize). '
+    + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
+    + '</p>';
+
+  const historyRows = data.months.map((mk, i) => {
+    const income = data.incomeSeries[i];
+    const expense = data.expenseSeries[i];
+    return { month: mk, income: income, expense: expense, net: income - expense };
+  });
+
+  const historyBlock = '<p class="trend-section-title">Historik</p>'
+    + trendInUtTableHtml(historyRows, null, null, null, null, { drillable: false });
+
+  const forecastBlock = '<p class="trend-section-title">Prognos ('
+    + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
+    + trendInUtTableHtml(
+      data.forecast.map(p => ({
+        month: p.month,
+        income: p.income,
+        expense: p.expense,
+        net: p.net
+      }))
+    );
+
+  wrap.innerHTML = head
+    + '<div class="trend-body-scroll">'
+    + '<p style="margin:0 0 8px"><button type="button" class="btn-quiet" id="trendPayeeBackBtn">'
+    + '← Payee-lista</button></p>'
+    + buildTrendInUtLineChart(data)
+    + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
+    + note
+    + historyBlock + forecastBlock
+    + '</div>'
+    + '</div>';
+  trendBody.appendChild(wrap);
+  sizeTrendChartText(wrap);
+
+  const back = wrap.querySelector('#trendPayeeBackBtn');
+  if(back) back.addEventListener('click', () => {
+    trendPayeeDrillName = null;
+    renderTrendDetailList('payee');
+  });
+
+  const detailsBtn = wrap.querySelector('.trend-details-btn');
+  const detailsPanel = wrap.querySelector('#' + detailsId);
+  if(detailsBtn && detailsPanel){
+    detailsBtn.addEventListener('click', () => {
+      const open = detailsPanel.hidden;
+      detailsPanel.hidden = !open;
+      detailsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      detailsBtn.setAttribute('aria-label',
+        open ? 'Dölj förklaring och tabeller' : 'Visa förklaring och tabeller');
+    });
   }
 }
 
 /** Typ → Detalj: enkel lista (Payee / Kategori / Underkategori), utan expanders. */
 function renderTrendDetailList(kind){
+  if(kind !== 'payee') trendPayeeDrillName = null;
   clearTrendCanvas();
   if(trendPlaceholder) trendPlaceholder.hidden = true;
   if(trendBody) trendBody.classList.add('has-report');
@@ -11104,7 +11240,13 @@ function renderTrendDetailList(kind){
 
   let rows = '';
   for(const name of names){
-    rows += '<tr>'
+    const tip = kind === 'payee'
+      ? ' title="Dubbelklicka för historik och prognos"'
+      : '';
+    const payeeAttr = kind === 'payee'
+      ? ' data-trend-payee="' + escapeAttr(name) + '"'
+      : '';
+    rows += '<tr' + payeeAttr + tip + '>'
       + '<td class="cl-name">' + escapeHtml(name) + '</td>'
       + '<td class="cl-count num">' + formatCount(counter(name)) + '</td>'
       + '</tr>';
@@ -11112,6 +11254,11 @@ function renderTrendDetailList(kind){
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
+    + (kind === 'payee'
+      ? '<p class="report-empty-note" style="margin:0 0 8px">'
+        + 'Dubbelklicka på en payee för historik och prognos (In/Ut) '
+        + 'med vald Historik och Horisont.</p>'
+      : '')
     + '<table class="care-list-table report-table"><thead><tr>'
     + '<th>' + escapeHtml(colLabels[kind] || 'Namn') + '</th>'
     + '<th class="cl-count num">Poster</th>'
@@ -11131,10 +11278,13 @@ function renderTrendPage(){
   syncTrendControlsForType();
   syncReportMobileLayout();
   const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
+  if(type !== 'payee') trendPayeeDrillName = null;
   if(type === 'nettoOverTid'){
     renderTrendNettoOverTid();
   } else if(type === 'prognosInUt'){
     renderTrendPrognosInUt();
+  } else if(type === 'payee' && trendPayeeDrillName){
+    renderTrendPayeePrognos(trendPayeeDrillName);
   } else if(isTrendDetailType(type)){
     renderTrendDetailList(type);
   } else {
@@ -11154,8 +11304,10 @@ function refreshTrendPagePreview(){
   syncTrendControlsForType();
   syncReportMobileLayout();
   const type = trendTypeMenu ? trendTypeMenu.value : 'prognosInUt';
+  if(type !== 'payee') trendPayeeDrillName = null;
   if(type === 'nettoOverTid') renderTrendNettoOverTid();
   else if(type === 'prognosInUt') renderTrendPrognosInUt();
+  else if(type === 'payee' && trendPayeeDrillName) renderTrendPayeePrognos(trendPayeeDrillName);
   else if(isTrendDetailType(type)) renderTrendDetailList(type);
 }
 
@@ -11164,6 +11316,15 @@ if(trendCancelBtn) trendCancelBtn.addEventListener('click', () => leaveTrendPage
 if(trendOkBtn) trendOkBtn.addEventListener('click', () => leaveTrendPage(true));
 if(trendBody){
   trendBody.addEventListener('dblclick', e => {
+    const payeeRow = e.target && e.target.closest && e.target.closest('tr[data-trend-payee]');
+    if(payeeRow){
+      const name = payeeRow.getAttribute('data-trend-payee') || '';
+      if(name){
+        e.preventDefault();
+        renderTrendPayeePrognos(name);
+      }
+      return;
+    }
     const numTd = e.target && e.target.closest && e.target.closest('td.num[data-drill]');
     if(!numTd) return;
     let drill;
