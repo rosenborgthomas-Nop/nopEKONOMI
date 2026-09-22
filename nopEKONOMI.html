@@ -4234,7 +4234,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v47';
+const APP_VERSION = '2026-09-22 v48';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -14256,9 +14256,16 @@ function wireBudgetAmtInputs(){
       }
     });
     inp.addEventListener('keydown', e => {
-      if(e.key === 'Enter'){
-        e.preventDefault();
-        e.stopPropagation();
+      if(e.key !== 'Enter') return;
+      e.preventDefault();
+      e.stopPropagation();
+      const list = Array.from(careListBody.querySelectorAll('input[data-budget-amt]'));
+      const at = list.indexOf(inp);
+      const next = at >= 0 ? list[at + 1] : null;
+      if(next){
+        next.focus();
+        next.select();
+      } else {
         inp.blur();
       }
     });
