@@ -4169,7 +4169,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v30';
+const APP_VERSION = '2026-09-22 v31';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10027,19 +10027,41 @@ function buildTrendInUtLineChart(data, opts){
   }
 
   let legend = '<p class="trend-line-chart-legend">';
-  const deltaLabel = (name, delta, swatchClass) =>
-    '<span><i class="trend-line-chart-swatch ' + swatchClass + '" aria-hidden="true"></i>'
-    + '--- ' + escapeHtml(name) + ' <span class="trend-delta">('
-    + escapeHtml(formatReportInt(delta)) + ')</span></span>';
   const lastT = total - 1;
-  const dIn = Math.round(fitInAll[lastT] - fitInAll[0]);
-  const dUt = Math.round(fitUtAll[lastT] - fitUtAll[0]);
-  const dNet = Math.round(fitNetAll[lastT] - fitNetAll[0]);
-  if(!onlyNet){
-    legend += deltaLabel('In', dIn, 'is-in')
-      + deltaLabel('Ut', dUt, 'is-ut');
+  if(onlyNet){
+    const slutdest = fitNetAll[lastT];
+    const lastHist = histN > 0 ? histNet[histN - 1] : slutdest;
+    const dd = Math.round(slutdest - lastHist);
+    const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
+    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
+    legend += '<span class="trend-legend-series">'
+      + '<i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
+      + '<span class="trend-legend-label">Netto</span>'
+      + ' <span class="trend-delta">(Slutdest: '
+      + escapeHtml(formatReportInt(Math.round(slutdest))) + ')</span>'
+      + '<span class="trend-delta' + (cls ? ' ' + cls : '') + '">'
+      + escapeHtml(txt) + '</span></span>';
+  } else {
+    const deltaLabel = (name, delta, swatchClass) =>
+      '<span><i class="trend-line-chart-swatch ' + swatchClass + '" aria-hidden="true"></i>'
+      + '--- ' + escapeHtml(name) + ' <span class="trend-delta">('
+      + escapeHtml(formatReportInt(delta)) + ')</span></span>';
+    legend += deltaLabel('In', Math.round(fitInAll[lastT] - fitInAll[0]), 'is-in')
+      + deltaLabel('Ut', Math.round(fitUtAll[lastT] - fitUtAll[0]), 'is-ut');
+    const slutdest = fitNetAll[lastT];
+    const lastHist = histN > 0 ? histNet[histN - 1] : slutdest;
+    const dd = Math.round(slutdest - lastHist);
+    const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
+    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
+    legend += '<span class="trend-legend-series">'
+      + '<i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
+      + '<span class="trend-legend-label">Netto</span>'
+      + ' <span class="trend-delta">(Slutdest: '
+      + escapeHtml(formatReportInt(Math.round(slutdest))) + ')</span>'
+      + '<span class="trend-delta' + (cls ? ' ' + cls : '') + '">'
+      + escapeHtml(txt) + '</span></span>';
   }
-  legend += deltaLabel('Netto', dNet, 'is-net') + '</p>';
+  legend += '</p>';
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
