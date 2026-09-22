@@ -3554,6 +3554,13 @@ td.num.dash .cell-content{
                 <button class="btn-ok" id="careListOkBtn" type="button">OK</button>
               </div>
             </div>
+            <div class="confirm" id="careListBudgetLeaveBox" hidden>
+              <p id="careListBudgetLeaveText">Ändringarna har inte sparats.</p>
+              <div class="confirm-buttons">
+                <button class="btn-cancel" id="careListBudgetLeaveCancelBtn" type="button">Avbryt</button>
+                <button class="btn-ok" id="careListBudgetLeaveOkBtn" type="button">OK</button>
+              </div>
+            </div>
           </div>
         </main>
       </div>
@@ -4259,7 +4266,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v04';
+const APP_VERSION = '2026-09-23 v05';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -13312,6 +13319,28 @@ function cloneBudgetMonthMap(src){
   return out;
 }
 
+function budgetIncludeMapsEqual(a, b){
+  const aa = a && typeof a === 'object' ? a : {};
+  const bb = b && typeof b === 'object' ? b : {};
+  const keys = new Set(Object.keys(aa).concat(Object.keys(bb)));
+  for(const k of keys){
+    if(!!aa[k] !== !!bb[k]) return false;
+  }
+  return true;
+}
+
+function budgetMonthMapsEqual(a, b){
+  const aa = a && typeof a === 'object' ? a : {};
+  const bb = b && typeof b === 'object' ? b : {};
+  const keys = new Set(Object.keys(aa).concat(Object.keys(bb)));
+  for(const k of keys){
+    const na = typeof aa[k] === 'number' && Number.isFinite(aa[k]) ? aa[k] : null;
+    const nb = typeof bb[k] === 'number' && Number.isFinite(bb[k]) ? bb[k] : null;
+    if(na !== nb) return false;
+  }
+  return true;
+}
+
 function beginTrendIncludeEdit(){
   if(!book){
     trendIncludeEditSnapshot = {};
@@ -13366,6 +13395,50 @@ async function commitBudgetEdit(){
   await persistBudgetEdit();
 }
 
+function isBudgetEditDirty(){
+  if(careListKind !== 'budget') return false;
+  if(budgetMonthEditSnapshot == null && budgetIncludeEditSnapshot == null) return false;
+  flushBudgetMonthInputs();
+  if(!budgetMonthMapsEqual(book && book.budgetMonth, budgetMonthEditSnapshot)) return true;
+  if(!budgetIncludeMapsEqual(book && book.budgetInclude, budgetIncludeEditSnapshot)) return true;
+  return false;
+}
+
+function hideBudgetLeaveConfirm(){
+  const box = el('careListBudgetLeaveBox');
+  if(box) box.hidden = true;
+}
+
+function showBudgetLeaveConfirm(){
+  const box = el('careListBudgetLeaveBox');
+  if(!box) return;
+  clear(careListMessages);
+  box.hidden = false;
+  const okBtn = el('careListBudgetLeaveOkBtn');
+  if(okBtn) okBtn.focus();
+}
+
+function leaveBudgetDiscarded(){
+  hideBudgetLeaveConfirm();
+  discardBudgetEdit();
+  careHubMenu.selectedIndex = 0;
+  hideCareHubSection();
+  show('start');
+}
+
+function requestLeaveBudget(){
+  if(careListKind !== 'budget'){
+    closeCareList();
+    return;
+  }
+  if(el('careListBudgetLeaveBox') && !el('careListBudgetLeaveBox').hidden) return;
+  if(!isBudgetEditDirty()){
+    leaveBudgetDiscarded();
+    return;
+  }
+  showBudgetLeaveConfirm();
+}
+
 const CARE_HUB_SECTIONS = {
   konto: { title: 'Konto', kind: 'accountEdit' },
   payee: { title: 'Payee', kind: 'list' },
@@ -13383,6 +13456,7 @@ function hideCareHubSection(){
   careListEditMode = '';
   careListEditOriginal = '';
   hideCareListDeleteConfirm();
+  hideBudgetLeaveConfirm();
   syncCareHubMenuVisibility();
   syncCareHubSectionTitle('');
   refreshViewHeadline('careHub', 'Registervård');
@@ -13443,9 +13517,12 @@ function runCareHubMenu(){
 el('careHubBackBtn').addEventListener('click', () => {
   if(careListKind === 'trend' && careHubListArea && !careHubListArea.hidden){
     discardTrendIncludeEdit();
+    show('start');
+    return;
   }
   if(careListKind === 'budget' && careHubListArea && !careHubListArea.hidden){
-    discardBudgetEdit();
+    requestLeaveBudget();
+    return;
   }
   show('start');
 });
@@ -13552,10 +13629,7 @@ function careListMeta(){
 function closeCareList(){
   if(careListKind === 'trend') discardTrendIncludeEdit();
   if(careListKind === 'budget'){
-    discardBudgetEdit();
-    careHubMenu.selectedIndex = 0;
-    hideCareHubSection();
-    show('start');
+    requestLeaveBudget();
     return;
   }
   careHubMenu.selectedIndex = 0;
@@ -14041,6 +14115,7 @@ function renderCareList(){
   if(careListBackupBtn) careListBackupBtn.hidden = careListKind !== 'bok';
   syncCareHubMenuVisibility();
   clear(careListMessages);
+  hideBudgetLeaveConfirm();
   closeCareListEdit();
 
   careListItems = buildCareListItems();
@@ -14829,11 +14904,20 @@ careListOkBtn.addEventListener('click', () => {
     return;
   }
   if(careListKind === 'budget'){
+    hideBudgetLeaveConfirm();
     confirmCareListBudget();
     return;
   }
   careListOpenHighlighted();
 });
+const careListBudgetLeaveCancelBtn = el('careListBudgetLeaveCancelBtn');
+const careListBudgetLeaveOkBtn = el('careListBudgetLeaveOkBtn');
+if(careListBudgetLeaveCancelBtn){
+  careListBudgetLeaveCancelBtn.addEventListener('click', hideBudgetLeaveConfirm);
+}
+if(careListBudgetLeaveOkBtn){
+  careListBudgetLeaveOkBtn.addEventListener('click', leaveBudgetDiscarded);
+}
 careListNewBtn.addEventListener('click', () => openCareListEdit(''));
 careListEditCancelBtn.addEventListener('click', closeCareListEdit);
 careListEditOkBtn.addEventListener('click', saveCareListEdit);
@@ -15270,6 +15354,22 @@ wireViewFormKeys(views.backup, backupRunBtn, backupCancelBtn, () =>
 
 views.careHub.addEventListener('keydown', e => {
   if(careHubListArea && careHubListArea.hidden) return;
+  const leaveBox = el('careListBudgetLeaveBox');
+  if(leaveBox && !leaveBox.hidden){
+    if(e.key === 'Escape'){
+      e.preventDefault();
+      e.stopPropagation();
+      hideBudgetLeaveConfirm();
+      return;
+    }
+    if(e.key === 'Enter'){
+      if(e.target === careListBudgetLeaveCancelBtn) return;
+      e.preventDefault();
+      leaveBudgetDiscarded();
+      return;
+    }
+    return;
+  }
   if(careListIsDeleteOpen()){
     if(e.key === 'Escape'){
       e.preventDefault();
