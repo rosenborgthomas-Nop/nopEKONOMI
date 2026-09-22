@@ -3215,6 +3215,7 @@ td.num.dash .cell-content{
         <option value="newTransaction">Ny transaktion</option>
         <option value="report">Rapport</option>
         <option value="trend" id="startMenuTrendOpt">Trend</option>
+        <option value="budget" id="startMenuBudgetOpt">Budget</option>
         <option value="" disabled class="menu-sep">────────</option>
         <option value="registervard">Registervård</option>
         <option value="settings">Inställningar</option>
@@ -3462,7 +3463,6 @@ td.num.dash .cell-content{
         <option value="kategori">Kategori</option>
         <option value="underkategori">Underkategori</option>
         <option value="trend" id="careHubTrendOpt">Trend Bocklista</option>
-        <option value="budget" id="careHubBudgetOpt">Budget</option>
         <option value="" disabled class="menu-sep" id="careHubBookSep">────────</option>
         <option value="bok">Bok (backup)</option>
       </select>
@@ -4195,7 +4195,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v44';
+const APP_VERSION = '2026-09-22 v45';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6993,6 +6993,9 @@ function runStartMenu(){
         break;
       }
       show('trend');
+      break;
+    case 'budget':
+      openCareList('budget');
       break;
   }
 }
@@ -13081,8 +13084,9 @@ function showCareHubSection(key){
   const reopen = currentViewName() !== 'careHub';
   if(reopen) show('careHub');
 
-  // show('careHub') nollställer menyn — sätt om efteråt.
-  if(careHubMenu.value !== key) careHubMenu.value = key;
+  // show('careHub') nollställer menyn — sätt om efteråt (Budget saknas i hub-menyn).
+  if(key !== 'budget' && careHubMenu.value !== key) careHubMenu.value = key;
+  else if(key === 'budget' && careHubMenu) careHubMenu.value = '';
   careListKind = key;
   if(key === 'trend') beginTrendIncludeEdit();
   if(careHubListArea) careHubListArea.hidden = false;
@@ -13091,7 +13095,7 @@ function showCareHubSection(key){
   renderCareList();
   syncCareHubMenuVisibility();
   syncCareHubSectionTitle(key);
-  refreshViewHeadline('careHub', 'Registervård');
+  refreshViewHeadline('careHub', key === 'budget' ? 'Budget' : 'Registervård');
 }
 
 function runCareHubMenu(){
@@ -13209,6 +13213,12 @@ function careListMeta(){
 
 function closeCareList(){
   if(careListKind === 'trend') discardTrendIncludeEdit();
+  if(careListKind === 'budget'){
+    careHubMenu.selectedIndex = 0;
+    hideCareHubSection();
+    show('start');
+    return;
+  }
   careHubMenu.selectedIndex = 0;
   hideCareHubSection();
 }
@@ -14227,6 +14237,7 @@ careListOkBtn.addEventListener('click', () => {
   if(careListKind === 'budget'){
     careHubMenu.selectedIndex = 0;
     hideCareHubSection();
+    show('start');
     return;
   }
   careListOpenHighlighted();
