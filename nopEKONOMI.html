@@ -2063,11 +2063,24 @@ body.trend-view-active{
   }
   #viewCareHub .care-list-table td.cl-count,
   #viewCareHub .care-list-table td.cl-backup,
-  #viewCareHub .care-list-table td.cl-saldo{
+  #viewCareHub .care-list-table td.cl-saldo,
+  #viewCareHub .care-list-table td.cl-budget-amt{
     flex:0 0 auto;
     white-space:nowrap;
     color:var(--text-on-paper-soft);
     font-size:13px;
+  }
+  #viewCareHub .care-list-table.budget-list tbody tr[data-idx]{
+    align-items:center;
+    padding-top:12px;
+    padding-bottom:12px;
+  }
+  #viewCareHub .care-list-table td.cl-budget-amt input.budget-amt-input{
+    max-width:5.5rem;
+    font-size:14px;
+  }
+  #viewCareHub .care-list-table td.cl-trend{
+    flex:0 0 auto;
   }
   #viewCareHub .care-list-table td.cl-backup::before{
     content:"Backup ";
@@ -2793,6 +2806,39 @@ footer p{
   cursor:pointer;
   accent-color:var(--ink, #1a3050);
 }
+/* Budget-bocklista: något högre rader så månadsbeloppets input får plats. */
+.care-list-table.budget-list tbody tr[data-idx] td{
+  padding-top:0.55rem;
+  padding-bottom:0.55rem;
+}
+.care-list-table th.cl-budget-amt,
+.care-list-table td.cl-budget-amt{
+  width:6.5rem;
+  text-align:right;
+  vertical-align:middle;
+}
+.care-list-table td.cl-budget-amt input.budget-amt-input{
+  width:100%;
+  max-width:6rem;
+  box-sizing:border-box;
+  margin:0;
+  padding:0.28rem 0.4rem;
+  border:1px solid var(--paper-line, #b8c4d4);
+  border-radius:4px;
+  background:var(--paper, #eef3f8);
+  color:var(--ink, #1a3050);
+  font-family:'JetBrains Mono', monospace;
+  font-size:13px;
+  text-align:right;
+  line-height:1.2;
+}
+.care-list-table td.cl-budget-amt input.budget-amt-input:focus{
+  outline:2px solid var(--ink, #1a3050);
+  outline-offset:1px;
+}
+.care-list-table tr.trend-off td.cl-budget-amt input.budget-amt-input{
+  opacity:0.55;
+}
 .care-list-table tr.trend-off td.cl-name{
   opacity:0.55;
 }
@@ -3444,16 +3490,9 @@ td.num.dash .cell-content{
     <div class="care-section-title-row" id="careHubSectionTitleRow">
       <p class="care-section-title" id="careHubSectionTitle">Registervård</p>
       <button type="button" class="help-tip-btn" id="careHubTrendHelpBtn"
-        aria-label="Hjälp om Trend Bocklista" aria-expanded="false"
+        aria-label="Hjälp" aria-expanded="false"
         aria-controls="careHubTrendHelpPop" hidden>?</button>
-      <span id="careHubTrendHelpPop" class="help-tip-pop" role="tooltip" hidden>
-        Här styr du vilka kategorier och underkategorier som ingår i den rensade
-        serien (Netto över tid → Kategorialternativ Bocklista). Ibockade ingår;
-        avbockade tas bort (t.ex. engångsposter som annars förvränger riktningen).
-        I diagrammet visas två linjer: verkligt saldo (alla poster) och den rensade
-        bocklista-serien — vardera med egen historik och prognos ankrad i sitt sista
-        värde. Ändringar sparas med OK och följer med i backupen.
-      </span>
+      <span id="careHubTrendHelpPop" class="help-tip-pop" role="tooltip" hidden></span>
     </div>
     <div class="menu-row" id="careHubMenuRow">
       <select id="careHubMenu" class="menu-select" aria-label="Registervård">
@@ -4195,7 +4234,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v45';
+const APP_VERSION = '2026-09-22 v46';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -4334,13 +4373,32 @@ function sanitizeBook(book){
       trendInclude[raw] = !!book.trendInclude[key];
     }
   }
+  const budgetInclude = {};
+  if(book.budgetInclude && typeof book.budgetInclude === 'object'){
+    for(const key of Object.keys(book.budgetInclude)){
+      const raw = String(key || '');
+      if(!raw || isTransferCategory(raw.split(TREND_SUB_SEP)[0])) continue;
+      budgetInclude[raw] = !!book.budgetInclude[key];
+    }
+  }
+  const budgetMonth = {};
+  if(book.budgetMonth && typeof book.budgetMonth === 'object'){
+    for(const key of Object.keys(book.budgetMonth)){
+      const raw = String(key || '');
+      if(!raw || isTransferCategory(raw.split(TREND_SUB_SEP)[0])) continue;
+      const n = book.budgetMonth[key];
+      if(typeof n === 'number' && Number.isFinite(n)) budgetMonth[raw] = n;
+    }
+  }
   return {
     order: book.order.slice(),
     accounts: accounts,
     payeeList: payeeList,
     categoryList: categoryList,
     subCategoryList: subCategoryList,
-    trendInclude: trendInclude
+    trendInclude: trendInclude,
+    budgetInclude: budgetInclude,
+    budgetMonth: budgetMonth
   };
 }
 
@@ -5799,6 +5857,133 @@ async function persistTrendInclude(){
   }
 }
 
+/** Budget-inkluderingsregister: samma nyckelstruktur som trendInclude. */
+function syncBudgetIncludeMap(bookData){
+  if(!bookData || typeof bookData !== 'object') return false;
+  if(!bookData.budgetInclude || typeof bookData.budgetInclude !== 'object'){
+    bookData.budgetInclude = {};
+  }
+  const map = bookData.budgetInclude;
+  const lookup = buildBookLookup(bookData);
+  const knownCats = new Set(lookup.categories || []);
+  const catSubs = buildTrendCategorySubsMap(bookData);
+  let changed = false;
+
+  for(const cat of knownCats){
+    if(!Object.prototype.hasOwnProperty.call(map, cat)){
+      map[cat] = true;
+      changed = true;
+    }
+    const emptyKey = trendEmptySubKey(cat);
+    if(!Object.prototype.hasOwnProperty.call(map, emptyKey)){
+      map[emptyKey] = !!map[cat];
+      changed = true;
+    }
+    const subs = catSubs[cat] || [];
+    for(const sub of subs){
+      const sk = trendIncludeSubKey(cat, sub);
+      if(!Object.prototype.hasOwnProperty.call(map, sk)){
+        map[sk] = !!map[cat];
+        changed = true;
+      }
+    }
+  }
+
+  for(const key of Object.keys(map)){
+    const parsed = parseTrendIncludeKey(key);
+    if(!parsed.cat || isTransferCategory(parsed.cat) || !knownCats.has(parsed.cat)){
+      delete map[key];
+      changed = true;
+      continue;
+    }
+    if(parsed.kind === 'sub'){
+      const subs = catSubs[parsed.cat] || [];
+      if(subs.indexOf(parsed.sub) < 0){
+        delete map[key];
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
+function syncBudgetMonthMap(bookData){
+  if(!bookData || typeof bookData !== 'object') return false;
+  if(!bookData.budgetMonth || typeof bookData.budgetMonth !== 'object'){
+    bookData.budgetMonth = {};
+    return true;
+  }
+  const map = bookData.budgetMonth;
+  const lookup = buildBookLookup(bookData);
+  const knownCats = new Set(lookup.categories || []);
+  const catSubs = buildTrendCategorySubsMap(bookData);
+  let changed = false;
+  for(const key of Object.keys(map)){
+    const parsed = parseTrendIncludeKey(key);
+    if(!parsed.cat || isTransferCategory(parsed.cat) || !knownCats.has(parsed.cat)){
+      delete map[key];
+      changed = true;
+      continue;
+    }
+    if(parsed.kind === 'sub'){
+      const subs = catSubs[parsed.cat] || [];
+      if(subs.indexOf(parsed.sub) < 0){
+        delete map[key];
+        changed = true;
+      }
+    }
+    const n = map[key];
+    if(typeof n !== 'number' || !Number.isFinite(n)){
+      delete map[key];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function isBudgetLeafIncluded(cat, subName){
+  const c = (cat || '').trim();
+  if(!c || isTransferCategory(c)) return false;
+  if(!book || !book.budgetInclude || typeof book.budgetInclude !== 'object') return true;
+  const map = book.budgetInclude;
+  const sk = subName === '' || subName == null
+    ? trendEmptySubKey(c)
+    : trendIncludeSubKey(c, subName);
+  if(Object.prototype.hasOwnProperty.call(map, sk)) return !!map[sk];
+  if(Object.prototype.hasOwnProperty.call(map, c)) return !!map[c];
+  return true;
+}
+
+function budgetMonthKeyForItem(item){
+  if(!item) return '';
+  if(item.rowKind === 'sub'){
+    return item.emptySub
+      ? trendEmptySubKey(item.parent)
+      : trendIncludeSubKey(item.parent, item.name);
+  }
+  return item.name || '';
+}
+
+function formatBudgetAmtEdit(v){
+  if(typeof v !== 'number' || !Number.isFinite(v)) return '';
+  const neg = v < 0;
+  const abs = Math.abs(v);
+  if(Math.abs(abs - Math.round(abs)) < 1e-9){
+    return (neg ? '-' : '') + String(Math.round(abs));
+  }
+  return (neg ? '-' : '') + abs.toFixed(2).replace('.', ',');
+}
+
+async function persistBudgetEdit(){
+  if(!bookId || !book) return;
+  try{
+    book = sanitizeBook(book);
+    await writeBookPreferGranted(bookId, book);
+  } catch(e){
+    /* ignore — UI visar fel vid behov */
+  }
+}
+
 function transferAccountFromCategory(cat){
   const s = (cat || '').trim();
   if(!isTransferCategory(s)) return '';
@@ -6334,6 +6519,10 @@ function rebuildBookLookup(){
   bookLookup = buildBookLookup(book);
   if(book && syncTrendIncludeMap(book)){
     // Nya kategorier default:på — sparas vid nästa vanliga bokskrivning / Trend-toggle.
+  }
+  if(book){
+    syncBudgetIncludeMap(book);
+    syncBudgetMonthMap(book);
   }
 }
 
@@ -12954,6 +13143,9 @@ function renderCareHub(){
   if(careListKind === 'trend' && careHubListArea && !careHubListArea.hidden){
     discardTrendIncludeEdit();
   }
+  if(careListKind === 'budget' && careHubListArea && !careHubListArea.hidden){
+    discardBudgetEdit();
+  }
   careHubMenu.selectedIndex = 0;
   syncTrendMenuGates();
   hideCareHubSection();
@@ -12967,6 +13159,19 @@ const careHubTrendHelpPop = el('careHubTrendHelpPop');
 const careHubListArea = el('careHubListArea');
 const careHubListStage = el('careHubListStage');
 const careHubListEditStage = el('careHubListEditStage');
+
+const CARE_HUB_TREND_HELP =
+  'Här styr du vilka kategorier och underkategorier som ingår i den rensade '
+  + 'serien (Netto över tid → Kategorialternativ Bocklista). Ibockade ingår; '
+  + 'avbockade tas bort (t.ex. engångsposter som annars förvränger riktningen). '
+  + 'I diagrammet visas två linjer: verkligt saldo (alla poster) och den rensade '
+  + 'bocklista-serien — vardera med egen historik och prognos ankrad i sitt sista '
+  + 'värde. Ändringar sparas med OK och följer med i backupen.';
+
+const CARE_HUB_BUDGET_HELP =
+  'Här sätter du månadsbelopp per kategori/underkategori och bockar dem som ska '
+  + 'ingå i budgeten. Skriv beloppet i rutan (Månad). Ibockade ingår; avbockade '
+  + 'räknas bort. Ändringar sparas med OK och följer med i backupen.';
 
 function setCareHubTrendHelpOpen(on){
   if(!careHubTrendHelpBtn || !careHubTrendHelpPop) return;
@@ -12987,14 +13192,25 @@ function syncCareHubSectionTitle(key){
   if(key === 'trend') careHubSectionTitle.textContent = 'Trend Bocklista';
   else if(key === 'budget') careHubSectionTitle.textContent = 'Budget';
   else careHubSectionTitle.textContent = 'Registervård';
-  if(careHubTrendHelpBtn){
-    careHubTrendHelpBtn.hidden = key !== 'trend';
-    if(key !== 'trend') setCareHubTrendHelpOpen(false);
+  if(careHubTrendHelpBtn && careHubTrendHelpPop){
+    const showHelp = key === 'trend' || key === 'budget';
+    careHubTrendHelpBtn.hidden = !showHelp;
+    if(!showHelp) setCareHubTrendHelpOpen(false);
+    else {
+      careHubTrendHelpPop.textContent = key === 'budget'
+        ? CARE_HUB_BUDGET_HELP
+        : CARE_HUB_TREND_HELP;
+      careHubTrendHelpBtn.setAttribute('aria-label',
+        key === 'budget' ? 'Hjälp om Budget' : 'Hjälp om Trend Bocklista');
+    }
   }
 }
 
 /** Snapshot av trendInclude medan Trend-listan är öppen (OK sparar, Avbryt återställer). */
 let trendIncludeEditSnapshot = null;
+/** Snapshot av budgetInclude + budgetMonth medan Budget är öppen. */
+let budgetIncludeEditSnapshot = null;
+let budgetMonthEditSnapshot = null;
 
 function syncCareHubMenuVisibility(){
   if(!careHubMenuRow) return;
@@ -13008,6 +13224,16 @@ function cloneTrendIncludeMap(src){
   const out = {};
   if(!src || typeof src !== 'object') return out;
   for(const k of Object.keys(src)) out[k] = !!src[k];
+  return out;
+}
+
+function cloneBudgetMonthMap(src){
+  const out = {};
+  if(!src || typeof src !== 'object') return out;
+  for(const k of Object.keys(src)){
+    const n = src[k];
+    if(typeof n === 'number' && Number.isFinite(n)) out[k] = n;
+  }
   return out;
 }
 
@@ -13032,6 +13258,37 @@ function discardTrendIncludeEdit(){
 async function commitTrendIncludeEdit(){
   trendIncludeEditSnapshot = null;
   await persistTrendInclude();
+}
+
+function beginBudgetEdit(){
+  if(!book){
+    budgetIncludeEditSnapshot = {};
+    budgetMonthEditSnapshot = {};
+    return;
+  }
+  syncBudgetIncludeMap(book);
+  syncBudgetMonthMap(book);
+  budgetIncludeEditSnapshot = cloneTrendIncludeMap(book.budgetInclude);
+  budgetMonthEditSnapshot = cloneBudgetMonthMap(book.budgetMonth);
+}
+
+function discardBudgetEdit(){
+  if(!book || budgetIncludeEditSnapshot == null){
+    budgetIncludeEditSnapshot = null;
+    budgetMonthEditSnapshot = null;
+    return;
+  }
+  book.budgetInclude = cloneTrendIncludeMap(budgetIncludeEditSnapshot);
+  book.budgetMonth = cloneBudgetMonthMap(budgetMonthEditSnapshot);
+  budgetIncludeEditSnapshot = null;
+  budgetMonthEditSnapshot = null;
+}
+
+async function commitBudgetEdit(){
+  flushBudgetMonthInputs();
+  budgetIncludeEditSnapshot = null;
+  budgetMonthEditSnapshot = null;
+  await persistBudgetEdit();
 }
 
 const CARE_HUB_SECTIONS = {
@@ -13089,6 +13346,7 @@ function showCareHubSection(key){
   else if(key === 'budget' && careHubMenu) careHubMenu.value = '';
   careListKind = key;
   if(key === 'trend') beginTrendIncludeEdit();
+  if(key === 'budget') beginBudgetEdit();
   if(careHubListArea) careHubListArea.hidden = false;
   if(careHubListEditStage) careHubListEditStage.hidden = true;
   if(careHubListStage) careHubListStage.hidden = false;
@@ -13110,6 +13368,9 @@ function runCareHubMenu(){
 el('careHubBackBtn').addEventListener('click', () => {
   if(careListKind === 'trend' && careHubListArea && !careHubListArea.hidden){
     discardTrendIncludeEdit();
+  }
+  if(careListKind === 'budget' && careHubListArea && !careHubListArea.hidden){
+    discardBudgetEdit();
   }
   show('start');
 });
@@ -13204,6 +13465,8 @@ let careListEditOriginal = '';
 let careListSaving = false;
 /** Expanderade kategorier i Registervård → Trend (session). */
 let trendExpandedCats = new Set();
+/** Expanderade kategorier i Budget (session). */
+let budgetExpandedCats = new Set();
 
 bindSignedAmountInput(careListEditBalance);
 
@@ -13214,6 +13477,7 @@ function careListMeta(){
 function closeCareList(){
   if(careListKind === 'trend') discardTrendIncludeEdit();
   if(careListKind === 'budget'){
+    discardBudgetEdit();
     careHubMenu.selectedIndex = 0;
     hideCareHubSection();
     show('start');
@@ -13233,6 +13497,19 @@ async function confirmCareListTrend(){
   }
   careHubMenu.selectedIndex = 0;
   hideCareHubSection();
+}
+
+async function confirmCareListBudget(){
+  clear(careListMessages);
+  try{
+    await commitBudgetEdit();
+  } catch(e){
+    addBox(careListMessages, 'notice', 'Kunde inte spara budgeten.');
+    return;
+  }
+  careHubMenu.selectedIndex = 0;
+  hideCareHubSection();
+  show('start');
 }
 
 function openCareList(kind){
@@ -13304,7 +13581,6 @@ function rewriteSubCategoryToCategoryInBook(draft, fromSubName, toCategoryName){
 }
 
 function buildCareListItems(){
-  if(careListKind === 'budget') return [];
   if(careListKind === 'bok'){
     if(!bookId) return [];
     const rec = lastBackupRecord(bookId);
@@ -13336,47 +13612,73 @@ function buildCareListItems(){
       .sort((a, b) => a.localeCompare(b, 'sv'))
       .map(name => ({ name, count: countPayeeUsage(name) }));
   }
-  if(careListKind === 'trend'){
-    syncTrendIncludeMap(book);
+  if(careListKind === 'trend' || careListKind === 'budget'){
+    const isBudget = careListKind === 'budget';
+    if(isBudget){
+      syncBudgetIncludeMap(book);
+      syncBudgetMonthMap(book);
+    } else {
+      syncTrendIncludeMap(book);
+    }
     const catSubs = buildTrendCategorySubsMap(book);
-    const map = book.trendInclude || {};
+    const map = isBudget ? (book.budgetInclude || {}) : (book.trendInclude || {});
+    const monthMap = isBudget ? (book.budgetMonth || {}) : null;
+    const expandedSet = isBudget ? budgetExpandedCats : trendExpandedCats;
     const items = [];
     const cats = bookLookup.categories
       .slice()
       .sort((a, b) => a.localeCompare(b, 'sv'));
     for(const name of cats){
       const subs = catSubs[name] || [];
-      const expanded = trendExpandedCats.has(name);
+      const expanded = expandedSet.has(name);
       const checkState = trendCategoryCheckState(name, map, catSubs);
+      const catAmt = monthMap && Object.prototype.hasOwnProperty.call(monthMap, name)
+        ? monthMap[name]
+        : null;
       items.push({
         rowKind: 'cat',
         name,
         parent: '',
         count: countCategoryUsage(name),
+        monthAmt: catAmt,
         included: checkState !== 'none',
         checkState: checkState,
         hasSubs: true,
         expanded: expanded
       });
       if(expanded){
+        const emptyKey = trendEmptySubKey(name);
+        const emptyAmt = monthMap && Object.prototype.hasOwnProperty.call(monthMap, emptyKey)
+          ? monthMap[emptyKey]
+          : null;
         items.push({
           rowKind: 'sub',
           name: '',
           emptySub: true,
           parent: name,
           count: countCategoryEmptySubUsage(name),
-          included: isTrendLeafIncluded(name, ''),
+          monthAmt: emptyAmt,
+          included: isBudget
+            ? isBudgetLeafIncluded(name, '')
+            : isTrendLeafIncluded(name, ''),
           hasSubs: false,
           expanded: false
         });
         for(const sub of subs){
+          const sk = trendIncludeSubKey(name, sub);
+          const subAmt = monthMap && Object.prototype.hasOwnProperty.call(monthMap, sk)
+            ? monthMap[sk]
+            : null;
           items.push({
             rowKind: 'sub',
             name: sub,
             emptySub: false,
             parent: name,
             count: countCategorySubUsage(name, sub),
-            included: isTrendLeafIncluded(name, sub),
+            monthAmt: subAmt,
+            included: isBudget
+              ? isBudgetLeafIncluded(name, sub)
+              : isTrendLeafIncluded(name, sub),
             hasSubs: false,
             expanded: false
           });
@@ -13555,7 +13857,8 @@ function careListRowHtml(item, idx){
       + '<td class="cl-saldo ' + saldoCls + '">' + escapeHtml(formatAmount(item.saldo)) + '</td>'
       + '</tr>';
   }
-  if(careListKind === 'trend'){
+  if(careListKind === 'trend' || careListKind === 'budget'){
+    const isBudget = careListKind === 'budget';
     const isSub = item.rowKind === 'sub';
     const isEmptySub = !!(isSub && item.emptySub);
     const checkState = item.checkState || (item.included ? 'all' : 'none');
@@ -13565,34 +13868,55 @@ function careListRowHtml(item, idx){
       + (dim ? ' trend-partial' : '')
       + (isSub ? ' trend-sub' : '')
       + (isEmptySub ? ' trend-empty-sub' : '');
-    const tip = isSub
-      ? (isEmptySub
-        ? 'Poster i kategorin utan underkategori'
-        : 'Använd bockrutan för att inkludera underkategorin i trend')
-      : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga (delvis = vissa valda)';
+    const tip = isBudget
+      ? (isSub
+        ? (isEmptySub
+          ? 'Månadsbelopp för poster i kategorin utan underkategori'
+          : 'Månadsbelopp och bockruta för underkategorin')
+        : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga. Skriv månadsbelopp i rutan.')
+      : (isSub
+        ? (isEmptySub
+          ? 'Poster i kategorin utan underkategori'
+          : 'Använd bockrutan för att inkludera underkategorin i trend')
+        : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga (delvis = vissa valda)');
     const labelText = isEmptySub ? TREND_EMPTY_SUB_LABEL : item.name;
     const esc = escapeHtml(labelText);
+    const expandAttr = isBudget ? 'data-budget-expand' : 'data-trend-expand';
+    const toggleAttr = isBudget ? 'data-budget-toggle' : 'data-trend-toggle';
     let nameHtml = '';
     if(isSub){
       nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span>'
         + (isEmptySub ? '<em class="trend-empty-label">' + esc + '</em>' : esc);
     } else {
       const chev = item.expanded ? '▼' : '▶';
-      nameHtml = '<button type="button" class="trend-expand-btn" data-trend-expand="'
+      nameHtml = '<button type="button" class="trend-expand-btn" ' + expandAttr + '="'
         + idx + '" aria-expanded="' + (item.expanded ? 'true' : 'false')
         + '" title="Fäll ut/in underkategorier">' + chev + '</button>' + esc;
     }
-    const aria = isSub
-      ? (isEmptySub
-        ? 'Räkna poster utan underkategori under ' + escapeHtml(item.parent) + ' i trend'
-        : 'Räkna underkategori ' + esc + ' under ' + escapeHtml(item.parent) + ' i trend')
-      : 'Räkna ' + esc + ' i trend'
-        + (checkState === 'some' ? ' (vissa underkategorier valda)' : '');
+    const aria = isBudget
+      ? (isSub
+        ? (isEmptySub
+          ? 'Räkna poster utan underkategori under ' + escapeHtml(item.parent) + ' i budget'
+          : 'Räkna underkategori ' + esc + ' under ' + escapeHtml(item.parent) + ' i budget')
+        : 'Räkna ' + esc + ' i budget'
+          + (checkState === 'some' ? ' (vissa underkategorier valda)' : ''))
+      : (isSub
+        ? (isEmptySub
+          ? 'Räkna poster utan underkategori under ' + escapeHtml(item.parent) + ' i trend'
+          : 'Räkna underkategori ' + esc + ' under ' + escapeHtml(item.parent) + ' i trend')
+        : 'Räkna ' + esc + ' i trend'
+          + (checkState === 'some' ? ' (vissa underkategorier valda)' : ''));
     const checkedAttr = (!isSub && checkState === 'all') || (isSub && on) ? ' checked' : '';
+    const midCell = isBudget
+      ? ('<td class="cl-budget-amt"><input type="text" class="budget-amt-input" data-budget-amt="'
+        + idx + '" value="' + escapeHtml(formatBudgetAmtEdit(item.monthAmt))
+        + '" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false"'
+        + ' aria-label="Månadsbelopp ' + esc + '"></td>')
+      : ('<td class="cl-count">' + formatCount(item.count) + '</td>');
     return '<tr data-idx="' + idx + '" class="' + rowCls.trim() + '" title="' + tip + '">'
       + '<td class="cl-name">' + nameHtml + '</td>'
-      + '<td class="cl-count">' + formatCount(item.count) + '</td>'
-      + '<td class="cl-trend"><input type="checkbox" data-trend-toggle="' + idx + '"'
+      + midCell
+      + '<td class="cl-trend"><input type="checkbox" ' + toggleAttr + '="' + idx + '"'
       + checkedAttr + ' aria-label="' + aria + '"></td>'
       + '</tr>';
   }
@@ -13623,6 +13947,14 @@ function renderCareListHead(){
       + '</tr>';
     return;
   }
+  if(careListKind === 'budget'){
+    careListHead.innerHTML = '<tr>'
+      + '<th>Kategori</th>'
+      + '<th class="cl-budget-amt num">Månad</th>'
+      + '<th class="cl-trend">I budget</th>'
+      + '</tr>';
+    return;
+  }
   const label = careListKind === 'kategori' ? 'Kategori'
     : careListKind === 'underkategori' ? 'Underkategori' : 'Payee';
   careListHead.innerHTML = '<tr>'
@@ -13646,11 +13978,17 @@ function renderCareList(){
   renderCareListHead();
   clear(careListBody);
 
+  const careListTable = el('careListTable');
+  if(careListTable){
+    careListTable.classList.toggle('budget-list', careListKind === 'budget');
+  }
+
   if(!careListItems.length){
     const cols = careListKind === 'bok' ? 2
-      : (careListKind === 'konto' || careListKind === 'trend' ? 3 : 2);
+      : (careListKind === 'konto' || careListKind === 'trend' || careListKind === 'budget' ? 3 : 2);
     careListBody.innerHTML = '<tr class="empty-row"><td colspan="' + cols
-      + '">Inga ' + (careListKind === 'trend' ? 'kategorier' : meta.title.toLowerCase())
+      + '">Inga ' + (careListKind === 'trend' || careListKind === 'budget'
+        ? 'kategorier' : meta.title.toLowerCase())
       + ' ännu.</td></tr>';
     careListHighlightIdx = -1;
   } else {
@@ -13666,6 +14004,7 @@ function renderCareList(){
     careListBody.innerHTML = html;
     updateCareListHighlight();
     applyTrendCheckboxIndeterminate();
+    wireBudgetAmtInputs();
   }
 }
 
@@ -13717,6 +14056,101 @@ async function setTrendIncludeForItem(idx, included){
   }
 }
 
+async function setBudgetIncludeForItem(idx, included){
+  const item = careListItems[idx];
+  if(!item || !book) return;
+  flushBudgetMonthInputs();
+  if(!book.budgetInclude || typeof book.budgetInclude !== 'object') book.budgetInclude = {};
+  const catSubs = buildTrendCategorySubsMap(book);
+  const next = !!included;
+
+  if(item.rowKind === 'sub'){
+    const key = item.emptySub
+      ? trendEmptySubKey(item.parent)
+      : trendIncludeSubKey(item.parent, item.name);
+    book.budgetInclude[key] = next;
+    const st = trendCategoryCheckState(item.parent, book.budgetInclude, catSubs);
+    book.budgetInclude[item.parent] = st !== 'none';
+  } else {
+    book.budgetInclude[item.name] = next;
+    for(const k of trendCategoryLeafKeys(item.name, catSubs)){
+      book.budgetInclude[k] = next;
+    }
+  }
+
+  clear(careListMessages);
+  const keepIdx = idx;
+  const keepName = item.rowKind === 'cat' ? item.name : item.parent;
+  const wasExpanded = item.rowKind === 'cat'
+    ? item.expanded
+    : budgetExpandedCats.has(item.parent);
+  if(wasExpanded && keepName) budgetExpandedCats.add(keepName);
+  renderCareList();
+  if(keepIdx >= 0 && keepIdx < careListItems.length){
+    careListHighlightIdx = keepIdx;
+    updateCareListHighlight();
+  }
+}
+
+function applyBudgetMonthFromInput(idx, raw){
+  const item = careListItems[idx];
+  if(!item || !book) return;
+  if(!book.budgetMonth || typeof book.budgetMonth !== 'object') book.budgetMonth = {};
+  const key = budgetMonthKeyForItem(item);
+  if(!key) return;
+  const text = String(raw == null ? '' : raw).trim();
+  if(!text){
+    delete book.budgetMonth[key];
+    item.monthAmt = null;
+    return;
+  }
+  try{
+    const n = parseAmount(text);
+    book.budgetMonth[key] = n;
+    item.monthAmt = n;
+  } catch(e){
+    /* ogiltigt — lämna som det stod i input tills blur/OK */
+  }
+}
+
+function flushBudgetMonthInputs(){
+  if(careListKind !== 'budget' || !careListBody) return;
+  const inputs = careListBody.querySelectorAll('input[data-budget-amt]');
+  for(const inp of inputs){
+    const idx = +inp.getAttribute('data-budget-amt');
+    applyBudgetMonthFromInput(idx, inp.value);
+  }
+}
+
+function wireBudgetAmtInputs(){
+  if(careListKind !== 'budget' || !careListBody) return;
+  const inputs = careListBody.querySelectorAll('input[data-budget-amt]');
+  for(const inp of inputs){
+    bindAmountInput(inp);
+    inp.addEventListener('click', e => e.stopPropagation());
+    inp.addEventListener('focus', e => {
+      e.stopPropagation();
+      const idx = +inp.getAttribute('data-budget-amt');
+      if(idx >= 0){
+        careListHighlightIdx = idx;
+        updateCareListHighlight();
+      }
+    });
+    inp.addEventListener('blur', () => {
+      applyBudgetMonthFromInput(+inp.getAttribute('data-budget-amt'), inp.value);
+      const item = careListItems[+inp.getAttribute('data-budget-amt')];
+      if(item) inp.value = formatBudgetAmtEdit(item.monthAmt);
+    });
+    inp.addEventListener('keydown', e => {
+      if(e.key === 'Enter'){
+        e.preventDefault();
+        e.stopPropagation();
+        inp.blur();
+      }
+    });
+  }
+}
+
 function toggleTrendCategoryExpand(idx){
   const item = careListItems[idx];
   if(!item || item.rowKind !== 'cat') return;
@@ -13731,11 +14165,30 @@ function toggleTrendCategoryExpand(idx){
   }
 }
 
+function toggleBudgetCategoryExpand(idx){
+  const item = careListItems[idx];
+  if(!item || item.rowKind !== 'cat') return;
+  flushBudgetMonthInputs();
+  if(budgetExpandedCats.has(item.name)) budgetExpandedCats.delete(item.name);
+  else budgetExpandedCats.add(item.name);
+  const keep = item.name;
+  renderCareList();
+  const nextIdx = careListItems.findIndex(it => it.rowKind === 'cat' && it.name === keep);
+  if(nextIdx >= 0){
+    careListHighlightIdx = nextIdx;
+    updateCareListHighlight();
+  }
+}
+
 function applyTrendCheckboxIndeterminate(){
-  if(careListKind !== 'trend' || !careListBody) return;
-  const boxes = careListBody.querySelectorAll('input[data-trend-toggle]');
+  if((careListKind !== 'trend' && careListKind !== 'budget') || !careListBody) return;
+  const sel = careListKind === 'budget'
+    ? 'input[data-budget-toggle]'
+    : 'input[data-trend-toggle]';
+  const attr = careListKind === 'budget' ? 'data-budget-toggle' : 'data-trend-toggle';
+  const boxes = careListBody.querySelectorAll(sel);
   for(const box of boxes){
-    const idx = +box.getAttribute('data-trend-toggle');
+    const idx = +box.getAttribute(attr);
     const item = careListItems[idx];
     if(!item || item.rowKind !== 'cat'){
       box.indeterminate = false;
@@ -14177,19 +14630,22 @@ async function confirmCareListDelete(){
 }
 
 careListBody.addEventListener('click', e => {
-  const expandBtn = e.target.closest('[data-trend-expand]');
-  if(expandBtn && careListKind === 'trend'){
+  const expandBtn = e.target.closest('[data-trend-expand], [data-budget-expand]');
+  if(expandBtn && (careListKind === 'trend' || careListKind === 'budget')){
     e.preventDefault();
     e.stopPropagation();
-    const idx = +expandBtn.getAttribute('data-trend-expand');
+    const idx = +(expandBtn.getAttribute('data-trend-expand')
+      || expandBtn.getAttribute('data-budget-expand'));
     careListHighlightIdx = idx;
-    toggleTrendCategoryExpand(idx);
+    if(careListKind === 'budget') toggleBudgetCategoryExpand(idx);
+    else toggleTrendCategoryExpand(idx);
     return;
   }
-  const toggle = e.target.closest('input[data-trend-toggle]');
-  if(toggle && careListKind === 'trend'){
+  const toggle = e.target.closest('input[data-trend-toggle], input[data-budget-toggle]');
+  if(toggle && (careListKind === 'trend' || careListKind === 'budget')){
     e.stopPropagation();
-    const idx = +toggle.getAttribute('data-trend-toggle');
+    const idx = +(toggle.getAttribute('data-trend-toggle')
+      || toggle.getAttribute('data-budget-toggle'));
     careListHighlightIdx = idx;
     updateCareListHighlight();
     const item = careListItems[idx];
@@ -14198,9 +14654,11 @@ careListBody.addEventListener('click', e => {
     const next = item.rowKind === 'cat'
       ? item.checkState !== 'all'
       : toggle.checked;
-    setTrendIncludeForItem(idx, next);
+    if(careListKind === 'budget') setBudgetIncludeForItem(idx, next);
+    else setTrendIncludeForItem(idx, next);
     return;
   }
+  if(e.target.closest('input[data-budget-amt]')) return;
   const tr = e.target.closest('tr[data-idx]');
   if(!tr || careListIsEditOpen()) return;
   const idx = +tr.dataset.idx;
@@ -14211,11 +14669,11 @@ careListBody.addEventListener('click', e => {
   careListHighlightIdx = idx;
   updateCareListHighlight();
   if(careListScroll) careListScroll.focus();
-  // Trend: ingen toggle på radklick — bara pil (expand) och bockruta.
+  // Trend/Budget: ingen toggle på radklick — bara pil (expand) och bockruta.
 });
 
 careListBody.addEventListener('dblclick', e => {
-  if(careListKind === 'trend') return;
+  if(careListKind === 'trend' || careListKind === 'budget') return;
   const tr = e.target.closest('tr[data-idx]');
   if(!tr || careListIsEditOpen()) return;
   const idx = +tr.dataset.idx;
@@ -14235,9 +14693,7 @@ careListOkBtn.addEventListener('click', () => {
     return;
   }
   if(careListKind === 'budget'){
-    careHubMenu.selectedIndex = 0;
-    hideCareHubSection();
-    show('start');
+    confirmCareListBudget();
     return;
   }
   careListOpenHighlighted();
@@ -14826,6 +15282,36 @@ function rewriteCategoryInBook(draft, fromName, toName){
     }
     draft.trendInclude = next;
   }
+  if(draft.budgetInclude && typeof draft.budgetInclude === 'object'){
+    const next = {};
+    for(const key of Object.keys(draft.budgetInclude)){
+      const parsed = parseTrendIncludeKey(key);
+      if(parsed.cat.trim().toLowerCase() !== fromKey){
+        next[key] = draft.budgetInclude[key];
+        continue;
+      }
+      if(!to) continue;
+      if(parsed.kind === 'sub') next[trendIncludeSubKey(to, parsed.sub)] = draft.budgetInclude[key];
+      else if(parsed.kind === 'empty') next[trendEmptySubKey(to)] = draft.budgetInclude[key];
+      else next[to] = draft.budgetInclude[key];
+    }
+    draft.budgetInclude = next;
+  }
+  if(draft.budgetMonth && typeof draft.budgetMonth === 'object'){
+    const next = {};
+    for(const key of Object.keys(draft.budgetMonth)){
+      const parsed = parseTrendIncludeKey(key);
+      if(parsed.cat.trim().toLowerCase() !== fromKey){
+        next[key] = draft.budgetMonth[key];
+        continue;
+      }
+      if(!to) continue;
+      if(parsed.kind === 'sub') next[trendIncludeSubKey(to, parsed.sub)] = draft.budgetMonth[key];
+      else if(parsed.kind === 'empty') next[trendEmptySubKey(to)] = draft.budgetMonth[key];
+      else next[to] = draft.budgetMonth[key];
+    }
+    draft.budgetMonth = next;
+  }
   return n;
 }
 
@@ -14863,6 +15349,32 @@ function rewriteSubCategoryInBook(draft, fromName, toName){
       next[trendIncludeSubKey(parsed.cat, to)] = draft.trendInclude[key];
     }
     draft.trendInclude = next;
+  }
+  if(draft.budgetInclude && typeof draft.budgetInclude === 'object'){
+    const next = {};
+    for(const key of Object.keys(draft.budgetInclude)){
+      const parsed = parseTrendIncludeKey(key);
+      if(!parsed.sub || parsed.sub.trim().toLowerCase() !== fromKey){
+        next[key] = draft.budgetInclude[key];
+        continue;
+      }
+      if(!to) continue;
+      next[trendIncludeSubKey(parsed.cat, to)] = draft.budgetInclude[key];
+    }
+    draft.budgetInclude = next;
+  }
+  if(draft.budgetMonth && typeof draft.budgetMonth === 'object'){
+    const next = {};
+    for(const key of Object.keys(draft.budgetMonth)){
+      const parsed = parseTrendIncludeKey(key);
+      if(!parsed.sub || parsed.sub.trim().toLowerCase() !== fromKey){
+        next[key] = draft.budgetMonth[key];
+        continue;
+      }
+      if(!to) continue;
+      next[trendIncludeSubKey(parsed.cat, to)] = draft.budgetMonth[key];
+    }
+    draft.budgetMonth = next;
   }
   return n;
 }
