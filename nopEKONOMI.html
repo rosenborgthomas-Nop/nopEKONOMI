@@ -2766,7 +2766,7 @@ footer p{
 .care-list-stage{
   display:flex;
   flex-direction:column;
-  max-height:calc(100vh - 240px);
+  max-height:calc(100dvh - 220px);
   overflow:hidden;
 }
 .care-list-shell{
@@ -2781,11 +2781,36 @@ footer p{
   min-height:0;
 }
 .table-scroll.care-list-scroll{
-  flex:1;
-  min-height:0;
+  flex:1 1 auto;
+  min-height:7rem;
   max-height:none;
   overflow:auto;
   -webkit-overflow-scrolling:touch;
+}
+/* Liggande / kort höjd: ge listan plats — annars syns bara sticky-kolumnrubriker. */
+@media (max-height:520px){
+  #viewCareHub .wrap.medium{
+    max-width:none;
+  }
+  #viewCareHub .view-headline{
+    margin-bottom:10px;
+  }
+  #viewCareHub .care-section-title-row{
+    margin-bottom:4px;
+  }
+  #viewCareHub .panel{
+    padding-top:14px;
+    padding-bottom:14px;
+  }
+  #viewCareHub .care-list-actions{
+    margin-top:10px;
+  }
+  .care-list-stage{
+    max-height:calc(100dvh - 120px);
+  }
+  .table-scroll.care-list-scroll{
+    min-height:5.5rem;
+  }
 }
 .care-list-table{ width:100%; min-width:0; }
 .care-list-table th.cl-count,
@@ -4234,7 +4259,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v01';
+const APP_VERSION = '2026-09-23 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
