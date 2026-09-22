@@ -106,9 +106,13 @@ h1{
   font-size:clamp(22px, 3.5vw, 28px);
 }
 #viewSettings header h1{
-  /* Större än den borttagna lede-texten (~15.5px), men inte hero-storlek. */
+  /* Större än den borttagna lede-texten (~15.5px). */
   font-size:clamp(22px, 3.5vw, 28px);
   margin-bottom:0;
+}
+#viewSettings .quiet-row#bookActions{
+  margin-top:16px;
+  justify-content:flex-end;
 }
 .lede{
   font-size:15.5px;
@@ -4030,7 +4034,7 @@ td.num.dash .cell-content{
   <div class="wrap medium">
 
     <button class="nav-link nav-back" id="settingsBackBtn" type="button">← Start</button>
-    <p class="eyebrow view-headline" id="settingsViewHeadline">nopEKONOMI - — - Inställningar</p>
+    <p class="eyebrow view-headline" id="settingsViewHeadline" hidden>Inställningar</p>
 
     <header>
       <h1>Inställningar</h1>
@@ -4038,11 +4042,11 @@ td.num.dash .cell-content{
 
     <main class="panel">
       <h2>Underhåll</h2>
-      <p class="sub">Verktyg som håller data uppdaterad.</p>
 
       <section class="section">
-        <h3>Den här boken</h3>
-        <p>Namnet syns vid inloggningen och överst på varje sida.</p>
+        <h3>Böcker i den här programmappen</h3>
+        <p>Böcker som finns som JSON-filer i samma mapp som nopEKONOMI.html. Den öppna boken är markerad.</p>
+        <div id="bookList"></div>
 
         <div class="field" id="renameFieldWrap" hidden>
           <input type="text" id="renameInput" maxlength="40" autocomplete="off" spellcheck="false">
@@ -4050,6 +4054,7 @@ td.num.dash .cell-content{
         <p class="hint" id="renameHint"></p>
 
         <div class="quiet-row" id="bookActions">
+          <button class="btn-quiet" id="settingsCancelBtn" type="button">Avbryt</button>
           <button class="btn-quiet" id="renameBtn" type="button">Byt namn</button>
           <button class="btn-quiet danger" id="deleteBtn" type="button">Radera boken…</button>
         </div>
@@ -4068,12 +4073,6 @@ td.num.dash .cell-content{
             <button class="btn-cancel" id="cancelDeleteBtn" type="button">Avbryt</button>
           </div>
         </div>
-      </section>
-
-      <section class="section">
-        <h3>Böcker i den här programmappen</h3>
-        <p>Böcker som finns som JSON-filer i samma mapp som nopEKONOMI.html. Den öppna boken är markerad.</p>
-        <div id="bookList"></div>
       </section>
     </main>
 
@@ -4196,7 +4195,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v42';
+const APP_VERSION = '2026-09-22 v43';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -17495,6 +17494,21 @@ el('confirmDeleteBtn').addEventListener('click', async () => {
 });
 
 el('settingsBackBtn').addEventListener('click', () => show('start'));
+
+el('settingsCancelBtn').addEventListener('click', () => {
+  if(!renameFieldWrap.hidden){
+    hideRenameField();
+    setRenameHint('', false);
+    warnBox.hidden = true;
+    return;
+  }
+  if(!confirmBox.hidden){
+    confirmBox.hidden = true;
+    bookActions.hidden = false;
+    return;
+  }
+  show('start');
+});
 
 el('toImportBtn').addEventListener('click', async () => {
   if(!bookIsImportEmpty()) return;
