@@ -4259,7 +4259,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v02';
+const APP_VERSION = '2026-09-23 v03';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -13242,10 +13242,10 @@ const CARE_HUB_TREND_HELP =
   + 'värde. Ändringar sparas med OK och följer med i backupen.';
 
 const CARE_HUB_BUDGET_HELP =
-  'Här sätter du månadsbelopp per kategori/underkategori och bockar dem som ska '
-  + 'ingå i budgeten. Underkategorier summeras till kategorin (kategorin höjs '
-  + 'bara om summan blir högre). Kategoribeloppet får inte vara lägre än '
-  + 'underkategoriernas summa. Ändringar sparas med OK och följer med i backupen.';
+  'Här sätter du månadsbelopp per kategori och underkategori. Underkategorier '
+  + 'summeras till kategorin (kategorin höjs bara om summan blir högre). '
+  + 'Kategoribeloppet får inte vara lägre än underkategoriernas summa. '
+  + 'Ändringar sparas med OK och följer med i backupen.';
 
 function setCareHubTrendHelpOpen(on){
   if(!careHubTrendHelpBtn || !careHubTrendHelpPop) return;
@@ -13937,8 +13937,8 @@ function careListRowHtml(item, idx){
     const isEmptySub = !!(isSub && item.emptySub);
     const checkState = item.checkState || (item.included ? 'all' : 'none');
     const on = isSub ? !!item.included : checkState !== 'none';
-    const dim = !isSub && checkState === 'some';
-    const rowCls = (on && !dim ? '' : ' trend-off')
+    const dim = !isBudget && !isSub && checkState === 'some';
+    const rowCls = (isBudget || (on && !dim) ? '' : ' trend-off')
       + (dim ? ' trend-partial' : '')
       + (isSub ? ' trend-sub' : '')
       + (isEmptySub ? ' trend-empty-sub' : '');
@@ -13946,8 +13946,8 @@ function careListRowHtml(item, idx){
       ? (isSub
         ? (isEmptySub
           ? 'Månadsbelopp för poster i kategorin utan underkategori'
-          : 'Månadsbelopp och bockruta för underkategorin')
-        : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga. Skriv månadsbelopp i rutan.')
+          : 'Månadsbelopp för underkategorin')
+        : 'Pilen fäller ut underkategorier. Skriv månadsbelopp i rutan.')
       : (isSub
         ? (isEmptySub
           ? 'Poster i kategorin utan underkategori'
@@ -13956,7 +13956,6 @@ function careListRowHtml(item, idx){
     const labelText = isEmptySub ? TREND_EMPTY_SUB_LABEL : item.name;
     const esc = escapeHtml(labelText);
     const expandAttr = isBudget ? 'data-budget-expand' : 'data-trend-expand';
-    const toggleAttr = isBudget ? 'data-budget-toggle' : 'data-trend-toggle';
     let nameHtml = '';
     if(isSub){
       nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span>'
@@ -13967,30 +13966,26 @@ function careListRowHtml(item, idx){
         + idx + '" aria-expanded="' + (item.expanded ? 'true' : 'false')
         + '" title="Fäll ut/in underkategorier">' + chev + '</button>' + esc;
     }
-    const aria = isBudget
-      ? (isSub
-        ? (isEmptySub
-          ? 'Räkna poster utan underkategori under ' + escapeHtml(item.parent) + ' i budget'
-          : 'Räkna underkategori ' + esc + ' under ' + escapeHtml(item.parent) + ' i budget')
-        : 'Räkna ' + esc + ' i budget'
-          + (checkState === 'some' ? ' (vissa underkategorier valda)' : ''))
-      : (isSub
-        ? (isEmptySub
-          ? 'Räkna poster utan underkategori under ' + escapeHtml(item.parent) + ' i trend'
-          : 'Räkna underkategori ' + esc + ' under ' + escapeHtml(item.parent) + ' i trend')
-        : 'Räkna ' + esc + ' i trend'
-          + (checkState === 'some' ? ' (vissa underkategorier valda)' : ''));
-    const checkedAttr = (!isSub && checkState === 'all') || (isSub && on) ? ' checked' : '';
-    const midCell = isBudget
-      ? ('<td class="cl-budget-amt"><input type="text" class="budget-amt-input" data-budget-amt="'
+    if(isBudget){
+      return '<tr data-idx="' + idx + '" class="' + rowCls.trim() + '" title="' + tip + '">'
+        + '<td class="cl-name">' + nameHtml + '</td>'
+        + '<td class="cl-budget-amt"><input type="text" class="budget-amt-input" data-budget-amt="'
         + idx + '" value="' + escapeHtml(formatBudgetAmtEdit(item.monthAmt))
         + '" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false"'
-        + ' aria-label="Månadsbelopp ' + esc + '"></td>')
-      : ('<td class="cl-count">' + formatCount(item.count) + '</td>');
+        + ' aria-label="Månadsbelopp ' + esc + '"></td>'
+        + '</tr>';
+    }
+    const aria = isSub
+      ? (isEmptySub
+        ? 'Räkna poster utan underkategori under ' + escapeHtml(item.parent) + ' i trend'
+        : 'Räkna underkategori ' + esc + ' under ' + escapeHtml(item.parent) + ' i trend')
+      : 'Räkna ' + esc + ' i trend'
+        + (checkState === 'some' ? ' (vissa underkategorier valda)' : '');
+    const checkedAttr = (!isSub && checkState === 'all') || (isSub && on) ? ' checked' : '';
     return '<tr data-idx="' + idx + '" class="' + rowCls.trim() + '" title="' + tip + '">'
       + '<td class="cl-name">' + nameHtml + '</td>'
-      + midCell
-      + '<td class="cl-trend"><input type="checkbox" ' + toggleAttr + '="' + idx + '"'
+      + '<td class="cl-count">' + formatCount(item.count) + '</td>'
+      + '<td class="cl-trend"><input type="checkbox" data-trend-toggle="' + idx + '"'
       + checkedAttr + ' aria-label="' + aria + '"></td>'
       + '</tr>';
   }
@@ -14025,7 +14020,6 @@ function renderCareListHead(){
     careListHead.innerHTML = '<tr>'
       + '<th>Kategori</th>'
       + '<th class="cl-budget-amt num">Månad</th>'
-      + '<th class="cl-trend">I budget</th>'
       + '</tr>';
     return;
   }
@@ -14058,8 +14052,7 @@ function renderCareList(){
   }
 
   if(!careListItems.length){
-    const cols = careListKind === 'bok' ? 2
-      : (careListKind === 'konto' || careListKind === 'trend' || careListKind === 'budget' ? 3 : 2);
+    const cols = careListKind === 'konto' || careListKind === 'trend' ? 3 : 2;
     careListBody.innerHTML = '<tr class="empty-row"><td colspan="' + cols
       + '">Inga ' + (careListKind === 'trend' || careListKind === 'budget'
         ? 'kategorier' : meta.title.toLowerCase())
@@ -14327,14 +14320,10 @@ function toggleBudgetCategoryExpand(idx){
 }
 
 function applyTrendCheckboxIndeterminate(){
-  if((careListKind !== 'trend' && careListKind !== 'budget') || !careListBody) return;
-  const sel = careListKind === 'budget'
-    ? 'input[data-budget-toggle]'
-    : 'input[data-trend-toggle]';
-  const attr = careListKind === 'budget' ? 'data-budget-toggle' : 'data-trend-toggle';
-  const boxes = careListBody.querySelectorAll(sel);
+  if(careListKind !== 'trend' || !careListBody) return;
+  const boxes = careListBody.querySelectorAll('input[data-trend-toggle]');
   for(const box of boxes){
-    const idx = +box.getAttribute(attr);
+    const idx = +box.getAttribute('data-trend-toggle');
     const item = careListItems[idx];
     if(!item || item.rowKind !== 'cat'){
       box.indeterminate = false;
@@ -14787,11 +14776,10 @@ careListBody.addEventListener('click', e => {
     else toggleTrendCategoryExpand(idx);
     return;
   }
-  const toggle = e.target.closest('input[data-trend-toggle], input[data-budget-toggle]');
-  if(toggle && (careListKind === 'trend' || careListKind === 'budget')){
+  const toggle = e.target.closest('input[data-trend-toggle]');
+  if(toggle && careListKind === 'trend'){
     e.stopPropagation();
-    const idx = +(toggle.getAttribute('data-trend-toggle')
-      || toggle.getAttribute('data-budget-toggle'));
+    const idx = +toggle.getAttribute('data-trend-toggle');
     careListHighlightIdx = idx;
     updateCareListHighlight();
     const item = careListItems[idx];
@@ -14800,8 +14788,7 @@ careListBody.addEventListener('click', e => {
     const next = item.rowKind === 'cat'
       ? item.checkState !== 'all'
       : toggle.checked;
-    if(careListKind === 'budget') setBudgetIncludeForItem(idx, next);
-    else setTrendIncludeForItem(idx, next);
+    setTrendIncludeForItem(idx, next);
     return;
   }
   if(e.target.closest('input[data-budget-amt]')) return;
