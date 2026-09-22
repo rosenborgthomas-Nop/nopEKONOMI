@@ -4192,7 +4192,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v37';
+const APP_VERSION = '2026-09-22 v38';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11061,16 +11061,14 @@ function renderTrendNettoOverTid(){
   const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
   const catMode = trendCategoryMode();
 
-  // cleaned = bocklista (eller aktuell meny); real = verkligt saldo (alla).
-  let cleaned = null;
-  let real = null;
+  let data = null;
   let reconBlock = '';
   try{
-    cleaned = buildTrendNettoForecast(fromIso, toIso, horizon);
-    if(cleaned.ok && catMode === 'bocklista'){
+    data = buildTrendNettoForecast(fromIso, toIso, horizon);
+    if(data.ok && catMode === 'bocklista'){
       const recon = computeTrendNetReconciliation(toIso);
-      const cleanedFromSeries = cleaned.points.length
-        ? cleaned.points[cleaned.points.length - 1].value : 0;
+      const cleanedFromSeries = data.points.length
+        ? data.points[data.points.length - 1].value : 0;
       assertTrendNetReconciliation(recon, cleanedFromSeries);
       reconBlock = trendExcludedListHtml(recon);
       console.info('[Trend] Uteslutna poster (' + recon.excludedItems.length + ' st):',
@@ -11079,7 +11077,6 @@ function renderTrendNettoOverTid(){
         + ' − rensad ' + Math.round(recon.cleanedTotal)
         + ' = ' + Math.round(recon.rawTotal - recon.cleanedTotal)
         + ' (Σ uteslutna ' + Math.round(recon.excludedTotal) + ')');
-      real = buildTrendNettoForecast(fromIso, toIso, horizon, 'alla');
     }
   } catch(err){
     if(err && err.trendHandled){ clearTrendCanvas(); return; }
@@ -11099,23 +11096,15 @@ function renderTrendNettoOverTid(){
     + '<div class="report-table-title-row">'
     + '<p class="report-table-title">NETTO ÖVER TID</p>';
 
-  if(!cleaned || !cleaned.ok){
+  if(!data || !data.ok){
     head += updatedHtml + '</div></div>';
     wrap.innerHTML = head
       + '<p class="report-empty-note">'
-      + escapeHtml((cleaned && cleaned.reason) || 'Kunde inte beräkna trend.')
+      + escapeHtml((data && data.reason) || 'Kunde inte beräkna trend.')
       + '</p>';
     trendBody.appendChild(wrap);
     return;
   }
-
-  const showDual = catMode === 'bocklista' && real && real.ok;
-  // Primär serie i diagrammet = rensat; overlay = verkligt saldo (variant A).
-  const chartPrimary = showDual ? cleaned : cleaned;
-  const chartOverlay = showDual ? real : null;
-  // Tabeller: verkligt saldo som huvudhistorik när dual; annars den enda serien.
-  const mainTable = showDual ? real : cleaned;
-  const cleanedTable = showDual ? cleaned : null;
 
   const detailsId = 'trendPrognosDetails';
   head += '<button type="button" class="help-tip-btn trend-details-btn"'
@@ -11127,50 +11116,29 @@ function renderTrendNettoOverTid(){
 
   const basText = catMode === 'alla'
     ? 'Bas: kumulativt netto som i Rapport (alla belopp inkl. öppningsbalans). '
-    : (showDual
-      ? 'Diagram: två serier — verkligt saldo (alla poster) och rensat '
-        + '(ibockade kategorier i Registervård → Trend Bocklista). '
-        + 'Varje prognos är ankrad i respektive sista historikvärde. '
-      : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Trend Bocklista. ');
+    : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Trend Bocklista. ';
 
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
-    + 'Historik: ' + escapeHtml(mainTable.historyFrom) + ' – ' + escapeHtml(mainTable.historyTo)
-    + ' · ' + mainTable.months.length + ' fulländade månader'
+    + 'Historik: ' + escapeHtml(data.historyFrom) + ' – ' + escapeHtml(data.historyTo)
+    + ' · ' + data.months.length + ' fulländade månader'
     + ' (pågående månad ingår inte). '
     + basText
-    + (showDual
-      ? ('Verkligt sista: ' + escapeHtml(formatReportInt(Math.round(real.lastActual)))
-        + ' · Rensat sista: ' + escapeHtml(formatReportInt(Math.round(cleaned.lastActual)))
-        + ' · Lutning verkligt ' + escapeHtml(formatTrendSlope(real.fit.b))
-        + ', rensat ' + escapeHtml(formatTrendSlope(cleaned.fit.b))
-        + ' (OLS, lätt IQR-winsorize). ')
-      : ('Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(mainTable.opening))) + '. '
-        + 'Lutning ' + escapeHtml(formatTrendSlope(mainTable.fit.b))
-        + ' (OLS, lätt IQR-winsorize). '))
+    + 'Startvärde före perioden: ' + escapeHtml(formatReportInt(Math.round(data.opening))) + '. '
+    + 'Lutning ' + escapeHtml(formatTrendSlope(data.fit.b))
+    + ' (OLS, lätt IQR-winsorize). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
 
-  let historyBlock = '<p class="trend-section-title">'
-    + (showDual ? 'Historik — verkligt saldo' : 'Historik') + '</p>'
-    + trendNettoTableHtml(mainTable.points);
-  let forecastBlock = '<p class="trend-section-title">'
-    + (showDual ? 'Prognos — verkligt saldo (' : 'Prognos (')
+  const historyBlock = '<p class="trend-section-title">Historik</p>'
+    + trendNettoTableHtml(data.points);
+  const forecastBlock = '<p class="trend-section-title">Prognos ('
     + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
-    + trendNettoTableHtml(mainTable.forecast);
-  if(cleanedTable){
-    historyBlock += '<p class="trend-section-title">Historik — rensat (bocklista)</p>'
-      + trendNettoTableHtml(cleanedTable.points);
-    forecastBlock += '<p class="trend-section-title">Prognos — rensat (bocklista) ('
-      + escapeHtml(trendHorizonLabel(horizon)) + ')</p>'
-      + trendNettoTableHtml(cleanedTable.forecast);
-  }
+    + trendNettoTableHtml(data.forecast);
 
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
-    + buildTrendNettoLineChart(chartPrimary, {
-        primaryLabel: showDual ? 'Bocklista' : (catMode === 'alla' ? 'Verkligt saldo' : 'Netto'),
-        overlay: chartOverlay,
-        overlayLabel: 'Verkligt saldo'
+    + buildTrendNettoLineChart(data, {
+        primaryLabel: catMode === 'alla' ? 'Verkligt saldo' : 'Bocklista'
       })
     + '<div id="' + detailsId + '" class="trend-prognos-details" hidden>'
     + note
