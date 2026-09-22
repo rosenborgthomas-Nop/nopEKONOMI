@@ -4192,7 +4192,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v36';
+const APP_VERSION = '2026-09-22 v37';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9867,6 +9867,15 @@ function formatTrendSlope(b){
   return sign + formatAmount(v) + '/mån';
 }
 
+/** Procent av trenddiff mot sista historiska värdet, t.ex. " (+12 %)" eller "". */
+function formatTrendDeltaPct(delta, lastHist){
+  if(!Number.isFinite(delta) || !Number.isFinite(lastHist)) return '';
+  if(Math.abs(lastHist) < 0.5) return '';
+  const pct = Math.round((delta / Math.abs(lastHist)) * 100);
+  if(!Number.isFinite(pct)) return '';
+  return ' (' + (pct > 0 ? '+' : '') + pct + ' %)';
+}
+
 /** Vänstermarginal så y-axelns etiketter får plats även när mobilen förstorar texten. */
 function trendChartYAxisPad(ymin, ymax){
   let maxChars = 1;
@@ -10064,11 +10073,15 @@ function buildTrendInUtLineChart(data, opts){
   // Skillnad = trendens slut − trenden vid sista historikmånad (inte sista faktiska punkten,
   // som kan vara en outlier och ge fel tecken när lutningen är tydlig).
   const trendAtHistEnd = histN > 0 ? fitNetAll[histN - 1] : fitNetAll[0];
+  const lastHistNet = histN > 0 ? histNet[histN - 1] : 0;
+  const lastHistIn = histN > 0 ? data.incomeSeries[histN - 1] : 0;
+  const lastHistUt = histN > 0 ? data.expenseSeries[histN - 1] : 0;
   if(onlyNet){
     const slutdest = fitNetAll[lastT];
     const dd = Math.round(slutdest - trendAtHistEnd);
     const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
-    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
+    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd)
+      + formatTrendDeltaPct(dd, lastHistNet);
     legend += '<span class="trend-legend-series">'
       + '<i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
       + '<span class="trend-legend-label">Netto</span>'
@@ -10077,16 +10090,22 @@ function buildTrendInUtLineChart(data, opts){
       + '<span class="trend-delta' + (cls ? ' ' + cls : '') + '">'
       + escapeHtml(txt) + '</span></span>';
   } else {
-    const deltaLabel = (name, delta, swatchClass) =>
-      '<span><i class="trend-line-chart-swatch ' + swatchClass + '" aria-hidden="true"></i>'
-      + '--- ' + escapeHtml(name) + ' <span class="trend-delta">('
-      + escapeHtml(formatReportInt(delta)) + ')</span></span>';
-    legend += deltaLabel('In', Math.round(fitInAll[lastT] - fitInAll[0]), 'is-in')
-      + deltaLabel('Ut', Math.round(fitUtAll[lastT] - fitUtAll[0]), 'is-ut');
+    const deltaLabel = (name, delta, lastHist, swatchClass) => {
+      const cls = delta < 0 ? 'is-neg' : (delta > 0 ? 'is-pos' : '');
+      const txt = (delta > 0 ? '+' : '') + formatReportInt(delta)
+        + formatTrendDeltaPct(delta, lastHist);
+      return '<span><i class="trend-line-chart-swatch ' + swatchClass + '" aria-hidden="true"></i>'
+        + '--- ' + escapeHtml(name) + ' <span class="trend-delta'
+        + (cls ? ' ' + cls : '') + '">('
+        + escapeHtml(txt) + ')</span></span>';
+    };
+    legend += deltaLabel('In', Math.round(fitInAll[lastT] - fitInAll[0]), lastHistIn, 'is-in')
+      + deltaLabel('Ut', Math.round(fitUtAll[lastT] - fitUtAll[0]), lastHistUt, 'is-ut');
     const slutdest = fitNetAll[lastT];
     const dd = Math.round(slutdest - trendAtHistEnd);
     const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
-    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
+    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd)
+      + formatTrendDeltaPct(dd, lastHistNet);
     legend += '<span class="trend-legend-series">'
       + '<i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
       + '<span class="trend-legend-label">Netto</span>'
@@ -10887,9 +10906,9 @@ function buildTrendNettoLineChart(data, opts){
       + '</div>';
   }
 
-  // Neonkontrast så linjerna skiljer sig tydligt på ljus bakgrund.
-  const colNet = '#FF2BD6';      // rensat/bocklista — neon magenta
-  const colReal = '#00D4FF';     // verkligt saldo — neon cyan
+  // Standardfärger (samma palett som övriga diagram).
+  const colNet = '#2B579A';       // bocklista / netto — teal
+  const colReal = '#3A8F5C';      // verkligt saldo — chart-positive
   const grid = '#A8BDD4';
   const axis = '#5A6F88';
 
@@ -10992,19 +11011,20 @@ function buildTrendNettoLineChart(data, opts){
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
   }
 
-  // Legend: Verkligt saldo först (Slutdest. + diff), därefter Bocklista (bara namn + skillnad).
+  // Legend: Verkligt saldo först (Slutdest. + diff + %), därefter Bocklista (namn + skillnad + %).
   const legendFor = s => {
     const last = s.forecastVals.length ? s.forecastVals[s.forecastVals.length - 1] : s.lastActual;
     const dd = Math.round(last - s.lastActual);
-    const cls = dd < 0 ? 'is-neg' : 'is-pos';
-    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd);
+    const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
+    const txt = (dd > 0 ? '+' : '') + formatReportInt(dd)
+      + formatTrendDeltaPct(dd, s.lastActual);
     const isBocklista = /bocklista/i.test(s.label || '');
     if(isBocklista){
       return '<span class="trend-legend-series" style="color:' + s.color + '">'
         + '<i class="trend-line-chart-swatch" aria-hidden="true"'
         + ' style="color:' + s.color + ';border-top-color:' + s.color + '"></i>'
         + '<span class="trend-legend-label">' + escapeHtml(s.label) + '</span>'
-        + '<span class="trend-legend-value trend-delta ' + cls + '">'
+        + '<span class="trend-legend-value trend-delta' + (cls ? ' ' + cls : '') + '">'
         + escapeHtml(txt) + '</span></span>';
     }
     return '<span class="trend-legend-series" style="color:' + s.color + '">'
@@ -11013,7 +11033,8 @@ function buildTrendNettoLineChart(data, opts){
       + '<span class="trend-legend-label">' + escapeHtml(s.label) + '</span>'
       + ' <span class="trend-delta">(Slutdest. '
       + escapeHtml(formatReportInt(Math.round(last))) + ')</span>'
-      + '<span class="trend-delta ' + cls + '">' + escapeHtml(txt) + '</span></span>';
+      + '<span class="trend-delta' + (cls ? ' ' + cls : '') + '">'
+      + escapeHtml(txt) + '</span></span>';
   };
   // seriesList är [verkligt, bocklista] — visa i den ordningen (inte omvänd).
   const legend = '<p class="trend-line-chart-legend">'
