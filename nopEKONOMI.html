@@ -4234,7 +4234,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-22 v46';
+const APP_VERSION = '2026-09-22 v47';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5962,6 +5962,54 @@ function budgetMonthKeyForItem(item){
       : trendIncludeSubKey(item.parent, item.name);
   }
   return item.name || '';
+}
+
+/** Summa av underkategori-belopp (inkl. tom underkategori) för en kategori. */
+function budgetSubMonthSum(cat){
+  if(!book || !cat) return 0;
+  const map = book.budgetMonth || {};
+  const catSubs = buildTrendCategorySubsMap(book);
+  let sum = 0;
+  const emptyKey = trendEmptySubKey(cat);
+  if(typeof map[emptyKey] === 'number' && Number.isFinite(map[emptyKey])){
+    sum += map[emptyKey];
+  }
+  for(const sub of (catSubs[cat] || [])){
+    const sk = trendIncludeSubKey(cat, sub);
+    if(typeof map[sk] === 'number' && Number.isFinite(map[sk])) sum += map[sk];
+  }
+  return sum;
+}
+
+/**
+ * Efter ändring i underkategori: lyft kategoribeloppet till minst underkategorisumman.
+ * Sänk aldrig ett redan högre kategoribelopp.
+ */
+function raiseBudgetCatToSubSum(cat){
+  if(!book || !cat) return;
+  if(!book.budgetMonth || typeof book.budgetMonth !== 'object') book.budgetMonth = {};
+  const subSum = budgetSubMonthSum(cat);
+  const cur = book.budgetMonth[cat];
+  const hasCur = typeof cur === 'number' && Number.isFinite(cur);
+  if(!hasCur){
+    if(subSum > 0) book.budgetMonth[cat] = subSum;
+    return;
+  }
+  if(subSum > cur) book.budgetMonth[cat] = subSum;
+}
+
+function syncBudgetCatAmtInUi(catName){
+  if(!careListBody || !catName) return;
+  const amt = book && book.budgetMonth && typeof book.budgetMonth[catName] === 'number'
+    ? book.budgetMonth[catName]
+    : null;
+  const catIdx = careListItems.findIndex(it => it.rowKind === 'cat' && it.name === catName);
+  if(catIdx < 0) return;
+  careListItems[catIdx].monthAmt = amt;
+  const inp = careListBody.querySelector('input[data-budget-amt="' + catIdx + '"]');
+  if(inp && document.activeElement !== inp){
+    inp.value = formatBudgetAmtEdit(amt);
+  }
 }
 
 function formatBudgetAmtEdit(v){
@@ -13170,8 +13218,9 @@ const CARE_HUB_TREND_HELP =
 
 const CARE_HUB_BUDGET_HELP =
   'Här sätter du månadsbelopp per kategori/underkategori och bockar dem som ska '
-  + 'ingå i budgeten. Skriv beloppet i rutan (Månad). Ibockade ingår; avbockade '
-  + 'räknas bort. Ändringar sparas med OK och följer med i backupen.';
+  + 'ingå i budgeten. Underkategorier summeras till kategorin (kategorin höjs '
+  + 'bara om summan blir högre). Kategoribeloppet får inte vara lägre än '
+  + 'underkategoriernas summa. Ändringar sparas med OK och följer med i backupen.';
 
 function setCareHubTrendHelpOpen(on){
   if(!careHubTrendHelpBtn || !careHubTrendHelpPop) return;
@@ -14094,31 +14143,89 @@ async function setBudgetIncludeForItem(idx, included){
 
 function applyBudgetMonthFromInput(idx, raw){
   const item = careListItems[idx];
-  if(!item || !book) return;
+  if(!item || !book) return { ok: true };
   if(!book.budgetMonth || typeof book.budgetMonth !== 'object') book.budgetMonth = {};
   const key = budgetMonthKeyForItem(item);
-  if(!key) return;
+  if(!key) return { ok: true };
   const text = String(raw == null ? '' : raw).trim();
+  const prev = typeof book.budgetMonth[key] === 'number' && Number.isFinite(book.budgetMonth[key])
+    ? book.budgetMonth[key]
+    : null;
+
+  if(item.rowKind === 'cat'){
+    const subSum = budgetSubMonthSum(item.name);
+    if(!text){
+      if(subSum > 0){
+        item.monthAmt = prev;
+        return {
+          ok: false,
+          message: 'Kategoribeloppet kan inte vara tomt medan underkategorierna summerar till '
+            + formatBudgetAmtEdit(subSum) + '.'
+        };
+      }
+      delete book.budgetMonth[key];
+      item.monthAmt = null;
+      return { ok: true };
+    }
+    let n;
+    try{ n = parseAmount(text); }
+    catch(e){
+      item.monthAmt = prev;
+      return { ok: false, message: 'Ogiltigt belopp.' };
+    }
+    if(n < subSum){
+      item.monthAmt = prev;
+      return {
+        ok: false,
+        message: 'Kategoribeloppet kan inte vara lägre än underkategorierna ('
+          + formatBudgetAmtEdit(subSum) + ').'
+      };
+    }
+    book.budgetMonth[key] = n;
+    item.monthAmt = n;
+    return { ok: true };
+  }
+
+  // Underkategori (inkl. tom underkategori)
   if(!text){
     delete book.budgetMonth[key];
     item.monthAmt = null;
-    return;
-  }
-  try{
-    const n = parseAmount(text);
+  } else {
+    let n;
+    try{ n = parseAmount(text); }
+    catch(e){
+      item.monthAmt = prev;
+      return { ok: false, message: 'Ogiltigt belopp.' };
+    }
     book.budgetMonth[key] = n;
     item.monthAmt = n;
-  } catch(e){
-    /* ogiltigt — lämna som det stod i input tills blur/OK */
   }
+  const parent = item.parent;
+  raiseBudgetCatToSubSum(parent);
+  syncBudgetCatAmtInUi(parent);
+  return { ok: true };
 }
 
 function flushBudgetMonthInputs(){
   if(careListKind !== 'budget' || !careListBody) return;
-  const inputs = careListBody.querySelectorAll('input[data-budget-amt]');
-  for(const inp of inputs){
+  const inputs = Array.from(careListBody.querySelectorAll('input[data-budget-amt]'));
+  // Först underkategorier (så rollup hinner ske), sedan kategorirader.
+  const ordered = inputs.slice().sort((a, b) => {
+    const ia = careListItems[+a.getAttribute('data-budget-amt')];
+    const ib = careListItems[+b.getAttribute('data-budget-amt')];
+    const ra = ia && ia.rowKind === 'cat' ? 1 : 0;
+    const rb = ib && ib.rowKind === 'cat' ? 1 : 0;
+    return ra - rb;
+  });
+  for(const inp of ordered){
     const idx = +inp.getAttribute('data-budget-amt');
-    applyBudgetMonthFromInput(idx, inp.value);
+    const res = applyBudgetMonthFromInput(idx, inp.value);
+    const item = careListItems[idx];
+    if(item) inp.value = formatBudgetAmtEdit(item.monthAmt);
+    if(res && !res.ok && res.message){
+      clear(careListMessages);
+      addBox(careListMessages, 'notice', res.message);
+    }
   }
 }
 
@@ -14137,9 +14244,16 @@ function wireBudgetAmtInputs(){
       }
     });
     inp.addEventListener('blur', () => {
-      applyBudgetMonthFromInput(+inp.getAttribute('data-budget-amt'), inp.value);
-      const item = careListItems[+inp.getAttribute('data-budget-amt')];
+      const idx = +inp.getAttribute('data-budget-amt');
+      const res = applyBudgetMonthFromInput(idx, inp.value);
+      const item = careListItems[idx];
       if(item) inp.value = formatBudgetAmtEdit(item.monthAmt);
+      if(res && !res.ok && res.message){
+        clear(careListMessages);
+        addBox(careListMessages, 'notice', res.message);
+      } else if(res && res.ok){
+        clear(careListMessages);
+      }
     });
     inp.addEventListener('keydown', e => {
       if(e.key === 'Enter'){
