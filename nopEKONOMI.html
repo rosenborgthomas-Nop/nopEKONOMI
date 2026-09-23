@@ -2901,10 +2901,11 @@ footer p{
   z-index:600;
   left:0;
   top:0;
-  min-width:10.5rem;
-  max-width:14rem;
+  width:max-content;
+  max-width:min(22rem, calc(100vw - 16px));
   text-align:left;
-  white-space:pre-line;
+  /* Bara radbryt vid \n — undvik soft-wrap mitt i "Förbrukat denna månad: …". */
+  white-space:pre;
   font-family:'JetBrains Mono', monospace;
   font-size:12px;
 }
@@ -4406,7 +4407,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v18';
+const APP_VERSION = '2026-09-23 v19';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6565,11 +6566,20 @@ function showBudgetAmtInfoForItem(btn, item){
   float.hidden = false;
   btn.setAttribute('aria-expanded', 'true');
 
-  // Mät efter synlig text så höjden stämmer.
+  // Låt innehållet styra bredden (ingen soft-wrap), sen kläm in i viewport.
+  float.style.width = 'auto';
   const r = btn.getBoundingClientRect();
   const pad = 8;
-  const popW = Math.min(224, Math.max(168, float.offsetWidth || 168));
-  float.style.width = popW + 'px';
+  const maxW = Math.max(120, window.innerWidth - pad * 2);
+  let popW = Math.ceil(float.offsetWidth || 168);
+  if(popW > maxW){
+    popW = maxW;
+    float.style.width = popW + 'px';
+    float.style.whiteSpace = 'pre-wrap';
+  } else {
+    float.style.whiteSpace = 'pre';
+    float.style.width = popW + 'px';
+  }
   let left = r.left;
   if(left + popW > window.innerWidth - pad) left = window.innerWidth - popW - pad;
   if(left < pad) left = pad;
