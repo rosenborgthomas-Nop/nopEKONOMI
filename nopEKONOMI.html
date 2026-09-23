@@ -4480,7 +4480,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v27';
+const APP_VERSION = '2026-09-23 v28';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8849,11 +8849,15 @@ function reportPayeeAmountFromRow(row){
   return Number.isFinite(amount) ? amount : 0;
 }
 
-function rowMatchesCategoryDrill(row, category, subCategory){
+function rowMatchesCategoryDrill(row, category, subCategory, emptyOnly){
   if(rowIsPureTransfer(row) && !rowHasSplits(row)) return false;
   for(const piece of reportPiecesFromRow(row)){
     if(isTransferCategory(piece.category)) continue;
     if(piece.category !== category) continue;
+    if(emptyOnly){
+      if(!(piece.subCategory || '').trim()) return true;
+      continue;
+    }
     if(subCategory){
       if(piece.subCategory === subCategory) return true;
     } else {
@@ -8956,13 +8960,15 @@ function collectReportDrillItems(meta){
       }
 
       if(meta.t === 'cat'){
-        if(rowMatchesCategoryDrill(row, meta.category, meta.sub || '')){
+        if(rowMatchesCategoryDrill(row, meta.category, meta.sub || '', !!meta.emptySub)){
           if(meta.view === 'toplist'){
-            const pieces = reportPiecesFromRow(row).filter(piece =>
-              !isTransferCategory(piece.category) &&
-              piece.category === meta.category &&
-              (!meta.sub || piece.subCategory === meta.sub)
-            );
+            const pieces = reportPiecesFromRow(row).filter(piece => {
+              if(isTransferCategory(piece.category)) return false;
+              if(piece.category !== meta.category) return false;
+              if(meta.emptySub) return !(piece.subCategory || '').trim();
+              if(meta.sub) return piece.subCategory === meta.sub;
+              return true;
+            });
             const displayTotal = pieces.reduce((sum, piece) => sum + (Number.isFinite(piece.amount) ? piece.amount : 0), 0);
             out.push({
               account: accountName,
@@ -9011,12 +9017,25 @@ function reportDrillHeadline(meta){
   const parts = [];
   if(meta.t === 'payee') parts.push(meta.payee || '');
   else if(meta.t === 'trend') parts.push(meta.side === 'in' ? 'Inkomst' : 'Utgift');
-  else if(meta.t === 'cat') parts.push(meta.category || meta.sub || '');
+  else if(meta.t === 'cat'){
+    if(meta.emptySub){
+      parts.push((meta.category || '') + ' · ' + TREND_EMPTY_SUB_LABEL);
+    } else if(meta.sub){
+      parts.push((meta.category || '') + ' · ' + meta.sub);
+    } else {
+      parts.push(meta.category || '');
+    }
+  }
   else if(meta.t === 'sub') parts.push(meta.sub || '');
   else if(meta.sub) parts.push(meta.sub);
   else parts.push('Total ' + (meta.category || ''));
-  if(meta.periodKey === '__total__') parts.push('Totalt');
-  else if(meta.periodKey) parts.push(meta.periodKey);
+  if(meta.returnView === 'budget' && meta.from && meta.to){
+    parts.push(budgetPeriodDateLabel(meta.from) + ' \u2013 ' + budgetPeriodDateLabel(meta.to));
+  } else if(meta.periodKey === '__total__'){
+    parts.push('Totalt');
+  } else if(meta.periodKey){
+    parts.push(meta.periodKey);
+  }
   return parts.filter(Boolean).join(' · ');
 }
 
@@ -14369,7 +14388,8 @@ function hideCareHubSection(){
   refreshViewHeadline('careHub', 'Registervård');
 }
 
-function showCareHubSection(key){
+function showCareHubSection(key, opts){
+  opts = opts || {};
   const cfg = CARE_HUB_SECTIONS[key];
   if(!cfg) return;
 
@@ -14402,7 +14422,8 @@ function showCareHubSection(key){
   else if(key === 'budget' && careHubMenu) careHubMenu.value = '';
   careListKind = key;
   if(key === 'trend') beginTrendIncludeEdit();
-  if(key === 'budget') beginBudgetEdit();
+  // keepBudgetEdit: åter från kontoutdrag — behåll osparade budgetändringar.
+  if(key === 'budget' && !opts.keepBudgetEdit) beginBudgetEdit();
   if(careHubListArea) careHubListArea.hidden = false;
   if(careHubListEditStage) careHubListEditStage.hidden = true;
   if(careHubListStage) careHubListStage.hidden = false;
@@ -14952,9 +14973,9 @@ function careListRowHtml(item, idx){
     const tip = isBudget
       ? (isSub
         ? (isEmptySub
-          ? 'Månadsbelopp för poster i kategorin utan underkategori'
-          : 'Månadsbelopp för underkategorin')
-        : 'Pilen fäller ut underkategorier. Skriv månadsbelopp i rutan.')
+          ? 'Dubbelklicka för transaktioner utan underkategori i vald period'
+          : 'Dubbelklicka för underkategorins transaktioner i vald period')
+        : 'Pilen fäller ut underkategorier. Dubbelklicka för kategorins transaktioner i vald period.')
       : (isSub
         ? (isEmptySub
           ? 'Poster i kategorin utan underkategori'
@@ -15885,8 +15906,39 @@ if(careListHead){
   });
 }
 
+/** Dubbelklick i Budget → kontoutdrag för kategori/underkategori i vald period. */
+function openBudgetItemLedger(idx){
+  const item = careListItems[idx];
+  if(!item || item.rowKind === 'total' || item.readOnly) return;
+  flushBudgetMonthInputs();
+  const range = budgetPeriodRange();
+  if(!range || !range.from || !range.to) return;
+  const isSub = item.rowKind === 'sub';
+  const emptySub = !!(isSub && item.emptySub);
+  openReportDrill({
+    t: 'cat',
+    category: isSub ? item.parent : item.name,
+    sub: isSub && !emptySub ? item.name : '',
+    emptySub: emptySub,
+    from: range.from,
+    to: range.to,
+    periodKey: '__total__',
+    returnView: 'budget'
+  });
+}
+
 careListBody.addEventListener('dblclick', e => {
-  if(careListKind === 'trend' || careListKind === 'budget') return;
+  if(careListKind === 'trend') return;
+  if(careListKind === 'budget'){
+    if(e.target.closest('input, button, [data-budget-info], [data-budget-expand]')) return;
+    const tr = e.target.closest('tr[data-idx]');
+    if(!tr || careListIsEditOpen()) return;
+    const idx = +tr.dataset.idx;
+    careListHighlightIdx = idx;
+    updateCareListHighlight();
+    openBudgetItemLedger(idx);
+    return;
+  }
   const tr = e.target.closest('tr[data-idx]');
   if(!tr || careListIsEditOpen()) return;
   const idx = +tr.dataset.idx;
@@ -20135,7 +20187,7 @@ const ledgerBackBtn = el('ledgerBackBtn');
 
 let ledgerMode = 'account';        // 'account' | 'reportDrill'
 let reportDrillMeta = null;        // aktiv rapportfilter
-let reportDrillReturnView = 'report'; // vy att återgå till från drill ('report' | 'trend')
+let reportDrillReturnView = 'report'; // vy att återgå till från drill ('report' | 'trend' | 'budget')
 let ledgerAccount = '';            // kontot vi tittar på
 const ledgerSort = {};             // visuell sortering, per bok och konto
 let ledgerHighlight = null;        // belyst rad — objektreferens, sparas inte
@@ -20296,6 +20348,7 @@ function syncLedgerChrome(){
   if(ledgerBackBtn){
     if(!drill) ledgerBackBtn.textContent = '← Start';
     else if(reportDrillReturnView === 'trend') ledgerBackBtn.textContent = '← Trend';
+    else if(reportDrillReturnView === 'budget') ledgerBackBtn.textContent = '← Budget';
     else ledgerBackBtn.textContent = '← Rapport';
   }
 }
@@ -20319,7 +20372,9 @@ function openReportDrill(drill){
   }
   if(!from || !to) return;
   reportDrillMeta = Object.assign({}, drill, { from: from, to: to });
-  reportDrillReturnView = drill.returnView === 'trend' ? 'trend' : 'report';
+  reportDrillReturnView = drill.returnView === 'trend'
+    ? 'trend'
+    : (drill.returnView === 'budget' ? 'budget' : 'report');
   ledgerMode = 'reportDrill';
   ledgerHighlight = null;
   ledgerPendingHighlightKey = '';
@@ -21190,11 +21245,15 @@ function positionTooltip(e){
 el('ledgerBackBtn').addEventListener('click', () => {
   hideLedgerDeleteConfirm();
   if(ledgerMode === 'reportDrill'){
-    const ret = reportDrillReturnView === 'trend' ? 'trend' : 'report';
+    const ret = reportDrillReturnView;
     ledgerMode = 'account';
     reportDrillMeta = null;
     reportDrillReturnView = 'report';
-    show(ret);
+    if(ret === 'budget'){
+      showCareHubSection('budget', { keepBudgetEdit: true });
+      return;
+    }
+    show(ret === 'trend' ? 'trend' : 'report');
     return;
   }
   show('start');
