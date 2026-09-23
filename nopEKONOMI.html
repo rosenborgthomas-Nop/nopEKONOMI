@@ -4480,7 +4480,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v30';
+const APP_VERSION = '2026-09-23 v31';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6576,16 +6576,14 @@ function budgetSignForItem(item, signMaps){
 }
 
 /**
- * Aktivitet i vald period per bocklista-blad: inkomst (positiva) och utgift (negativa abs).
- * fromIso/toIso använder samma intervalltolkning som Rapport.
+ * Aktivitet i vald period per bocklista-blad: netto per kategori/blad.
+ * (+ och − med samma kategori tar ut varandra; utfall = abs av netto åt rätt håll.)
  */
 function buildBudgetMonthActivityMap(fromIso, toIso){
-  const leafIn = Object.create(null);
-  const leafOut = Object.create(null);
-  const catIn = Object.create(null);
-  const catOut = Object.create(null);
+  const leafNet = Object.create(null);
+  const catNet = Object.create(null);
   if(!book || !book.order){
-    return { leafIn: leafIn, leafOut: leafOut, catIn: catIn, catOut: catOut };
+    return { leafNet: leafNet, catNet: catNet };
   }
   syncTrendIncludeMap(book);
   let from = fromIso;
@@ -6618,37 +6616,32 @@ function buildBudgetMonthActivityMap(fromIso, toIso){
         if(!isTrendPieceIncluded(cat, sub)) continue;
         const amount = piece.amount;
         if(!Number.isFinite(amount) || !amount) continue;
-        const lk = trendIncludeSubKey(cat, sub);
-        if(amount > 0){
-          leafIn[lk] = (leafIn[lk] || 0) + amount;
-          catIn[cat] = (catIn[cat] || 0) + amount;
-        } else {
-          const spent = -amount;
-          leafOut[lk] = (leafOut[lk] || 0) + spent;
-          catOut[cat] = (catOut[cat] || 0) + spent;
-        }
+        const lk = sub
+          ? trendIncludeSubKey(cat, sub)
+          : trendEmptySubKey(cat);
+        leafNet[lk] = (leafNet[lk] || 0) + amount;
+        catNet[cat] = (catNet[cat] || 0) + amount;
       }
     }
   }
-  return { leafIn: leafIn, leafOut: leafOut, catIn: catIn, catOut: catOut };
+  return { leafNet: leafNet, catNet: catNet };
 }
 
 function budgetActualForItem(item, activityMap, isIncome){
   if(!item || !activityMap) return 0;
+  let net = 0;
   if(item.rowKind === 'cat'){
-    return isIncome
-      ? (activityMap.catIn[item.name] || 0)
-      : (activityMap.catOut[item.name] || 0);
-  }
-  if(item.rowKind === 'sub'){
+    net = activityMap.catNet[item.name] || 0;
+  } else if(item.rowKind === 'sub'){
     const lk = item.emptySub
       ? trendEmptySubKey(item.parent)
       : trendIncludeSubKey(item.parent, item.name);
-    return isIncome
-      ? (activityMap.leafIn[lk] || 0)
-      : (activityMap.leafOut[lk] || 0);
+    net = activityMap.leafNet[lk] || 0;
+  } else {
+    return 0;
   }
-  return 0;
+  // Inkomst: positivt netto. Utgift: negativt netto som positiv förbrukning.
+  return isIncome ? Math.max(0, net) : Math.max(0, -net);
 }
 
 /** Utgift: röd om över budget. Inkomst: röd om under mål (tvärtom). */
