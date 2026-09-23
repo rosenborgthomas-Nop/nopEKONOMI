@@ -2035,6 +2035,40 @@ body.trend-view-active{
   #viewCareHub .care-list-table thead{
     display:none;
   }
+  /* Budget: visa BUDGET IN/UT även på mobil (kolumnrubriker dolda). */
+  #viewCareHub .care-list-table.budget-list thead{
+    display:table-header-group;
+  }
+  #viewCareHub .care-list-table.budget-list thead tr:first-child{
+    display:none;
+  }
+  #viewCareHub .care-list-table.budget-list thead tr.budget-summary-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:10px 8px;
+    border-bottom:1px solid var(--paper-line-strong);
+    background:var(--paper-alt);
+  }
+  #viewCareHub .care-list-table.budget-list thead tr.budget-summary-row th{
+    display:block;
+    width:auto;
+    max-width:none;
+    min-width:0;
+    border-bottom:none;
+    padding:0;
+    position:static;
+    background:transparent;
+  }
+  #viewCareHub .care-list-table.budget-list thead tr.budget-summary-row th.budget-summary-label{
+    flex:1 1 auto;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  #viewCareHub .care-list-table.budget-list thead tr.budget-summary-row th.cl-budget-amt{
+    flex:0 0 auto;
+  }
   #viewCareHub .care-list-table tbody tr[data-idx]{
     display:flex;
     align-items:baseline;
@@ -2075,7 +2109,8 @@ body.trend-view-active{
     padding-top:12px;
     padding-bottom:12px;
   }
-  #viewCareHub .care-list-table td.cl-budget-amt input.budget-amt-input{
+  #viewCareHub .care-list-table td.cl-budget-amt input.budget-amt-input,
+  #viewCareHub .care-list-table th.cl-budget-amt input.budget-amt-input{
     max-width:5.5rem;
     font-size:14px;
   }
@@ -2901,7 +2936,8 @@ footer p{
   background:#E03131;
   opacity:0.62;
 }
-.care-list-table td.cl-budget-amt input.budget-amt-input{
+.care-list-table td.cl-budget-amt input.budget-amt-input,
+.care-list-table th.cl-budget-amt input.budget-amt-input{
   position:relative;
   z-index:1;
   width:100%;
@@ -2921,11 +2957,49 @@ footer p{
 .care-list-table tr.budget-total-row td.cl-name{
   font-weight:700;
 }
-.care-list-table td.cl-budget-amt input.budget-amt-input[readonly]{
+.care-list-table td.cl-budget-amt input.budget-amt-input[readonly],
+.care-list-table th.cl-budget-amt input.budget-amt-input[readonly]{
   cursor:default;
   color:var(--ink, #1a3050);
   opacity:1;
   font-weight:600;
+}
+/* BUDGET IN/UT: översiktsrader i thead — samma bakgrund som kolumnrubriker, ej valbara. */
+.care-list-table.budget-list thead tr.budget-summary-row th{
+  cursor:default;
+  text-transform:none;
+  letter-spacing:0.04em;
+  font-weight:700;
+  color:var(--ink, #1a3050);
+  padding-top:0.55rem;
+  padding-bottom:0.55rem;
+  border-bottom:1px solid var(--paper-line-strong);
+  vertical-align:middle;
+}
+.care-list-table.budget-list thead tr.budget-summary-row th.budget-summary-label{
+  text-align:left;
+  font-size:12px;
+}
+.care-list-table.budget-list thead tr.budget-summary-row th.cl-budget-amt{
+  font-weight:600;
+  text-transform:none;
+  letter-spacing:0;
+}
+.care-list-table.budget-list thead tr.budget-summary-row th:hover{
+  color:var(--ink, #1a3050);
+}
+/* Sticky-stack: kolumnrubrik, sedan BUDGET IN, sedan BUDGET UT. */
+.care-list-table.budget-list thead tr:first-child th{
+  top:0;
+  z-index:8;
+}
+.care-list-table.budget-list thead tr.budget-summary-row:nth-child(2) th{
+  top:2.35rem;
+  z-index:7;
+}
+.care-list-table.budget-list thead tr.budget-summary-row:nth-child(3) th{
+  top:calc(2.35rem + 2.85rem);
+  z-index:6;
 }
 .care-list-table tr.trend-off td.cl-budget-amt input.budget-amt-input{
   opacity:0.55;
@@ -4332,7 +4406,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v17';
+const APP_VERSION = '2026-09-23 v18';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6129,7 +6203,53 @@ function syncBudgetAmtBarUi(idx){
   const item = careListItems[idx];
   if(!item || !careListBody) return;
   const inp = careListBody.querySelector('input[data-budget-amt="' + idx + '"]');
-  if(!inp) return;
+  syncBudgetAmtBarForItem(item, inp);
+}
+
+/** Summera inkomst- respektive utgiftskategorier för totalraderna. */
+function computeBudgetSideTotals(items){
+  let inBudget = 0;
+  let outBudget = 0;
+  let inActual = 0;
+  let outActual = 0;
+  for(const it of items){
+    if(it.rowKind !== 'cat') continue;
+    const b = typeof it.monthAmt === 'number' && Number.isFinite(it.monthAmt) ? it.monthAmt : 0;
+    const a = typeof it.spentAmt === 'number' && Number.isFinite(it.spentAmt) ? it.spentAmt : 0;
+    if(it.isIncome){
+      if(b > 0) inBudget += b;
+      inActual += a;
+    } else {
+      if(b > 0) outBudget += b;
+      outActual += a;
+    }
+  }
+  return { inBudget, outBudget, inActual, outActual };
+}
+
+function makeBudgetTotalItem(side, totals){
+  const isIn = side === 'in';
+  const budget = isIn ? totals.inBudget : totals.outBudget;
+  const actual = isIn ? totals.inActual : totals.outActual;
+  return {
+    rowKind: 'total',
+    totalSide: side,
+    name: isIn ? 'BUDGET IN' : 'BUDGET UT',
+    parent: '',
+    count: 0,
+    monthAmt: budget > 0 ? budget : null,
+    spentAmt: actual,
+    isIncome: isIn,
+    included: true,
+    checkState: 'all',
+    hasSubs: false,
+    expanded: false,
+    readOnly: true
+  };
+}
+
+function syncBudgetAmtBarForItem(item, inp){
+  if(!item || !inp) return;
   let wrap = inp.closest('.budget-amt-wrap');
   if(!wrap){
     wrap = document.createElement('span');
@@ -6166,63 +6286,32 @@ function syncBudgetAmtBarUi(idx){
   bar.style.width = (Math.round(pct * 10) / 10) + '%';
 }
 
-/** Summera inkomst- respektive utgiftskategorier för totalraderna. */
-function computeBudgetSideTotals(items){
-  let inBudget = 0;
-  let outBudget = 0;
-  let inActual = 0;
-  let outActual = 0;
-  for(const it of items){
-    if(it.rowKind !== 'cat') continue;
-    const b = typeof it.monthAmt === 'number' && Number.isFinite(it.monthAmt) ? it.monthAmt : 0;
-    const a = typeof it.spentAmt === 'number' && Number.isFinite(it.spentAmt) ? it.spentAmt : 0;
-    if(it.isIncome){
-      if(b > 0) inBudget += b;
-      inActual += a;
-    } else {
-      if(b > 0) outBudget += b;
-      outActual += a;
+/** Uppdatera BUDGET IN / BUDGET UT i thead utan att bygga om listan. */
+function refreshBudgetTotalRow(){
+  if(careListKind !== 'budget') return;
+  const totals = computeBudgetSideTotals(careListItems);
+  budgetSummaryItems = [
+    makeBudgetTotalItem('in', totals),
+    makeBudgetTotalItem('out', totals)
+  ];
+  if(!careListHead) return;
+  for(const item of budgetSummaryItems){
+    const side = item.totalSide;
+    const inp = careListHead.querySelector('input[data-budget-summary="' + side + '"]');
+    if(inp) inp.value = formatBudgetAmtEdit(item.monthAmt);
+    syncBudgetAmtBarForItem(item, inp);
+    const float = el('budgetAmtInfoFloat');
+    if(float && !float.hidden){
+      const openBtn = careListHead.querySelector(
+        '.budget-amt-info-btn[data-budget-summary-info="' + side + '"][aria-expanded="true"]'
+      );
+      if(openBtn) float.textContent = budgetAmtInfoText(item);
     }
   }
-  return { inBudget, outBudget, inActual, outActual };
 }
 
-function makeBudgetTotalItem(side, totals){
-  const isIn = side === 'in';
-  const budget = isIn ? totals.inBudget : totals.outBudget;
-  const actual = isIn ? totals.inActual : totals.outActual;
-  return {
-    rowKind: 'total',
-    totalSide: side,
-    name: isIn ? 'Budget Inkomster' : 'Budget Utgifter',
-    parent: '',
-    count: 0,
-    monthAmt: budget > 0 ? budget : null,
-    spentAmt: actual,
-    isIncome: isIn,
-    included: true,
-    checkState: 'all',
-    hasSubs: false,
-    expanded: false,
-    readOnly: true
-  };
-}
-
-/** Uppdatera Budget Inkomster / Budget Utgifter utan att bygga om hela listan. */
-function refreshBudgetTotalRow(){
-  if(careListKind !== 'budget' || !careListItems.length) return;
-  const totals = computeBudgetSideTotals(careListItems);
-  for(let i = 0; i < careListItems.length; i++){
-    const item = careListItems[i];
-    if(item.rowKind !== 'total') continue;
-    const fresh = makeBudgetTotalItem(item.totalSide === 'out' ? 'out' : 'in', totals);
-    careListItems[i] = fresh;
-    if(!careListBody) continue;
-    const inp = careListBody.querySelector('input[data-budget-amt="' + i + '"]');
-    if(inp) inp.value = formatBudgetAmtEdit(fresh.monthAmt);
-    syncBudgetAmtBarUi(i);
-    syncBudgetAmtInfoUi(i);
-  }
+function budgetSummaryItemBySide(side){
+  return budgetSummaryItems.find(it => it.totalSide === side) || null;
 }
 
 function formatBudgetAmtEdit(v){
@@ -6452,12 +6541,17 @@ function budgetAmtInfoText(item){
 function hideBudgetAmtInfoPops(){
   const float = el('budgetAmtInfoFloat');
   if(float) float.hidden = true;
-  if(!careListBody) return;
-  const btns = careListBody.querySelectorAll('.budget-amt-info-btn[aria-expanded="true"]');
+  const root = el('careListTable') || careListBody;
+  if(!root) return;
+  const btns = root.querySelectorAll('.budget-amt-info-btn[aria-expanded="true"]');
   for(const btn of btns) btn.setAttribute('aria-expanded', 'false');
 }
 
 function showBudgetAmtInfoAt(btn, idx){
+  showBudgetAmtInfoForItem(btn, careListItems[idx]);
+}
+
+function showBudgetAmtInfoForItem(btn, item){
   let float = el('budgetAmtInfoFloat');
   if(!float){
     float = document.createElement('div');
@@ -6467,7 +6561,6 @@ function showBudgetAmtInfoAt(btn, idx){
     float.hidden = true;
     document.body.appendChild(float);
   }
-  const item = careListItems[idx];
   float.textContent = budgetAmtInfoText(item);
   float.hidden = false;
   btn.setAttribute('aria-expanded', 'true');
@@ -6492,6 +6585,24 @@ function showBudgetAmtInfoAt(btn, idx){
 }
 
 function budgetAmtCellHtml(item, idx){
+  return budgetAmtFieldHtml(item, {
+    infoAttr: 'data-budget-info="' + idx + '"',
+    inputAttr: 'data-budget-amt="' + idx + '"',
+    tag: 'td'
+  });
+}
+
+/** Samma månadsruta som listan, men för thead-översikt (BUDGET IN/UT). */
+function budgetSummaryAmtCellHtml(item){
+  const side = item.totalSide === 'out' ? 'out' : 'in';
+  return budgetAmtFieldHtml(item, {
+    infoAttr: 'data-budget-summary-info="' + side + '"',
+    inputAttr: 'data-budget-summary="' + side + '"',
+    tag: 'th'
+  });
+}
+
+function budgetAmtFieldHtml(item, opts){
   const escLabel = escapeHtml(item.emptySub ? TREND_EMPTY_SUB_LABEL : item.name);
   const barBudget = typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
     ? item.monthAmt
@@ -6501,6 +6612,7 @@ function budgetAmtCellHtml(item, idx){
     : 0;
   const isIncome = !!item.isIncome;
   const readOnly = !!item.readOnly || item.rowKind === 'total';
+  const tag = opts.tag || 'td';
   let wrapAttrs = '';
   let barHtml = '';
   if(barBudget != null){
@@ -6513,17 +6625,18 @@ function budgetAmtCellHtml(item, idx){
     barHtml = '<span class="budget-amt-bar" style="width:'
       + (Math.round(pct * 10) / 10) + '%" aria-hidden="true"></span>';
   }
-  return '<td class="cl-budget-amt"><span class="budget-amt-cell">'
-    + '<button type="button" class="help-tip-btn budget-amt-info-btn" data-budget-info="'
-    + idx + '" aria-label="Aktuella värden för ' + escLabel + '"'
+  return '<' + tag + ' class="cl-budget-amt"><span class="budget-amt-cell">'
+    + '<button type="button" class="help-tip-btn budget-amt-info-btn" ' + opts.infoAttr
+    + ' aria-label="Aktuella värden för ' + escLabel + '"'
     + ' aria-expanded="false">?</button>'
     + '<span class="budget-amt-wrap"' + wrapAttrs + '>'
     + barHtml
-    + '<input type="text" class="budget-amt-input" data-budget-amt="'
-    + idx + '" value="' + escapeHtml(formatBudgetAmtEdit(item.monthAmt))
+    + '<input type="text" class="budget-amt-input" ' + opts.inputAttr
+    + ' value="' + escapeHtml(formatBudgetAmtEdit(item.monthAmt))
     + '" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false"'
     + (readOnly ? ' readonly tabindex="-1"' : '')
-    + ' aria-label="' + (readOnly ? 'Summa ' : 'Månadsbelopp ') + escLabel + '"></span></span></td>';
+    + ' aria-label="' + (readOnly ? 'Summa ' : 'Månadsbelopp ') + escLabel
+    + '"></span></span></' + tag + '>';
 }
 
 async function persistBudgetEdit(){
@@ -14084,6 +14197,8 @@ const careListDeleteOkBtn = el('careListDeleteOkBtn');
 
 let careListKind = 'konto';
 let careListItems = [];
+/** BUDGET IN / BUDGET UT — separat från listan (thead-översikt). */
+let budgetSummaryItems = [];
 let careListHighlightIdx = -1;
 let careListEditMode = '';
 let careListEditOriginal = '';
@@ -14316,11 +14431,12 @@ function buildCareListItems(){
     }
     if(isBudget){
       const totals = computeBudgetSideTotals(items);
-      // Högst upp: Budget Inkomster, sedan Budget Utgifter (ej redigerbara).
-      items.unshift(
+      budgetSummaryItems = [
         makeBudgetTotalItem('in', totals),
         makeBudgetTotalItem('out', totals)
-      );
+      ];
+    } else {
+      budgetSummaryItems = [];
     }
     return items;
   }
@@ -14496,7 +14612,6 @@ function careListRowHtml(item, idx){
   }
   if(careListKind === 'trend' || careListKind === 'budget'){
     const isBudget = careListKind === 'budget';
-    const isTotal = isBudget && item.rowKind === 'total';
     const isSub = item.rowKind === 'sub';
     const isEmptySub = !!(isSub && item.emptySub);
     const checkState = item.checkState || (item.included ? 'all' : 'none');
@@ -14505,31 +14620,23 @@ function careListRowHtml(item, idx){
     const rowCls = (isBudget || (on && !dim) ? '' : ' trend-off')
       + (dim ? ' trend-partial' : '')
       + (isSub ? ' trend-sub' : '')
-      + (isEmptySub ? ' trend-empty-sub' : '')
-      + (isTotal ? ' budget-total-row' : '');
-    const tip = isTotal
-      ? (item.totalSide === 'in'
-        ? 'Summa av alla inkomstkategoriers budget (ej redigerbar)'
-        : 'Summa av alla utgiftskategoriers budget (ej redigerbar)')
-      : (isBudget
-        ? (isSub
-          ? (isEmptySub
-            ? 'Månadsbelopp för poster i kategorin utan underkategori'
-            : 'Månadsbelopp för underkategorin')
-          : 'Pilen fäller ut underkategorier. Skriv månadsbelopp i rutan.')
-        : (isSub
-          ? (isEmptySub
-            ? 'Poster i kategorin utan underkategori'
-            : 'Använd bockrutan för att inkludera underkategorin i trend')
-          : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga (delvis = vissa valda)'));
+      + (isEmptySub ? ' trend-empty-sub' : '');
+    const tip = isBudget
+      ? (isSub
+        ? (isEmptySub
+          ? 'Månadsbelopp för poster i kategorin utan underkategori'
+          : 'Månadsbelopp för underkategorin')
+        : 'Pilen fäller ut underkategorier. Skriv månadsbelopp i rutan.')
+      : (isSub
+        ? (isEmptySub
+          ? 'Poster i kategorin utan underkategori'
+          : 'Använd bockrutan för att inkludera underkategorin i trend')
+        : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga (delvis = vissa valda)');
     const labelText = isEmptySub ? TREND_EMPTY_SUB_LABEL : item.name;
     const esc = escapeHtml(labelText);
     const expandAttr = isBudget ? 'data-budget-expand' : 'data-trend-expand';
     let nameHtml = '';
-    if(isTotal){
-      nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span><strong>'
-        + esc + '</strong>';
-    } else if(isSub){
+    if(isSub){
       nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span>'
         + (isEmptySub ? '<em class="trend-empty-label">' + esc + '</em>' : esc);
     } else {
@@ -14565,6 +14672,7 @@ function careListRowHtml(item, idx){
 }
 
 function renderCareListHead(){
+  if(careListKind !== 'budget') budgetSummaryItems = [];
   if(careListKind === 'bok'){
     careListHead.innerHTML = '<tr><th>Bok</th><th class="cl-backup num">Backup</th></tr>';
     return;
@@ -14586,10 +14694,26 @@ function renderCareListHead(){
     return;
   }
   if(careListKind === 'budget'){
-    careListHead.innerHTML = '<tr>'
+    const totals = computeBudgetSideTotals(careListItems);
+    budgetSummaryItems = [
+      makeBudgetTotalItem('in', totals),
+      makeBudgetTotalItem('out', totals)
+    ];
+    let html = '<tr>'
       + '<th>Kategori</th>'
       + '<th class="cl-budget-amt num">Månad</th>'
       + '</tr>';
+    for(const item of budgetSummaryItems){
+      const tip = item.totalSide === 'in'
+        ? 'Summa av alla inkomstkategoriers budget'
+        : 'Summa av alla utgiftskategoriers budget';
+      html += '<tr class="budget-summary-row" data-budget-summary-row="'
+        + item.totalSide + '" title="' + tip + '">'
+        + '<th scope="row" class="budget-summary-label">' + escapeHtml(item.name) + '</th>'
+        + budgetSummaryAmtCellHtml(item)
+        + '</tr>';
+    }
+    careListHead.innerHTML = html;
     return;
   }
   const label = careListKind === 'kategori' ? 'Kategori'
@@ -15404,6 +15528,26 @@ careListBody.addEventListener('click', e => {
   if(careListScroll) careListScroll.focus();
   // Trend/Budget: ingen toggle på radklick — bara pil (expand) och bockruta.
 });
+
+if(careListHead){
+  careListHead.addEventListener('click', e => {
+    if(careListKind !== 'budget') return;
+    const infoBtn = e.target.closest('[data-budget-summary-info]');
+    if(infoBtn){
+      e.preventDefault();
+      e.stopPropagation();
+      const side = infoBtn.getAttribute('data-budget-summary-info');
+      const item = budgetSummaryItemBySide(side);
+      const wasOpen = infoBtn.getAttribute('aria-expanded') === 'true';
+      hideBudgetAmtInfoPops();
+      if(!wasOpen && item) showBudgetAmtInfoForItem(infoBtn, item);
+      return;
+    }
+    if(e.target.closest('input[data-budget-summary]')){
+      e.stopPropagation();
+    }
+  });
+}
 
 careListBody.addEventListener('dblclick', e => {
   if(careListKind === 'trend' || careListKind === 'budget') return;
