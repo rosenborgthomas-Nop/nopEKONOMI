@@ -204,6 +204,92 @@ h1{
   font-weight:700;
 }
 .summary-row.total .label{ font-weight:700; }
+
+/* Start: periodrullgardin med budgetstapel över kontoöversikten */
+.start-period-bar{
+  margin:0 0 14px;
+  max-width:28rem;
+}
+.start-period-bar[hidden]{
+  display:none !important;
+}
+.start-period-wrap{
+  position:relative;
+  display:flex;
+  align-items:stretch;
+  width:100%;
+  max-width:100%;
+  margin:0;
+  flex:none;
+  border:1px solid var(--paper-line-strong, #b8c4d4);
+  border-radius:7px;
+  overflow:hidden;
+  background:color-mix(in srgb, var(--paper-surface, #E8EFF7) 55%, transparent);
+  box-sizing:border-box;
+  min-height:2.6rem;
+}
+.start-period-wrap .budget-amt-bar{
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:0;
+  max-width:100%;
+  border-radius:0;
+  pointer-events:none;
+  z-index:0;
+  opacity:0.55;
+}
+.start-period-wrap[data-budget-over="0"] .budget-amt-bar{
+  background:#1FAE55;
+  opacity:0.58;
+}
+.start-period-wrap[data-budget-over="1"] .budget-amt-bar{
+  background:#E03131;
+  opacity:0.62;
+}
+.start-period-wrap[data-budget-unbudgeted="out"]{
+  background:color-mix(in srgb, #E03131 16%, var(--paper-surface, #E8EFF7));
+  border-color:color-mix(in srgb, #E03131 28%, var(--paper-line, #b8c4d4));
+}
+.start-period-wrap .start-period-select{
+  position:relative;
+  z-index:1;
+  flex:1 1 auto;
+  min-width:0;
+  max-width:none;
+  width:auto;
+  margin:0;
+  border:none;
+  border-radius:0;
+  background-color:transparent;
+  box-shadow:none;
+  color:var(--ink, #1a3050);
+  font-size:14px;
+  padding:8px 2.4em 8px 10px;
+}
+.start-period-wrap .start-period-select:focus{
+  outline:none;
+  box-shadow:none;
+}
+.start-period-wrap:focus-within{
+  border-color:var(--gold);
+  box-shadow:0 0 0 2px rgba(201,162,39,0.25);
+}
+.start-period-value{
+  position:relative;
+  z-index:1;
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  padding:0 12px 0 8px;
+  font-family:'JetBrains Mono', monospace;
+  font-size:13.5px;
+  font-weight:600;
+  color:var(--ink, #1a3050);
+  white-space:nowrap;
+  border-left:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 55%, transparent);
+}
 /* --- 5. Meddelanden -------------------------------------------------- */
 .notice{
   font-family:'JetBrains Mono', monospace;
@@ -1378,6 +1464,16 @@ body.trend-view-active{
 .panel .menu-select:focus{
   border-color:var(--gold);
   box-shadow:0 0 0 2px rgba(201,162,39,0.25);
+}
+#viewStart .start-period-wrap .start-period-select{
+  background-color:transparent;
+  border:none;
+  border-radius:0;
+  box-shadow:none;
+}
+#viewStart .start-period-wrap .start-period-select:focus{
+  border:none;
+  box-shadow:none;
 }
 .btn-ok{
   font-family:'JetBrains Mono', monospace;
@@ -3516,6 +3612,17 @@ td.num.dash .cell-content{
     </div>
 
     <main class="panel">
+      <div id="startPeriodBar" class="start-period-bar" hidden>
+        <span class="start-period-wrap" id="startPeriodWrap">
+          <span class="budget-amt-bar" id="startPeriodAmtBar" aria-hidden="true"></span>
+          <select id="startPeriodMenu" class="menu-select start-period-select" title="Budgetperiod" aria-label="Budgetperiod">
+            <option value="currentMonth">Pågående månad</option>
+            <option value="last30">Senaste 30 dagarna</option>
+            <option value="currentYear">Pågående år</option>
+          </select>
+          <span id="startPeriodValue" class="start-period-value" aria-live="polite"></span>
+        </span>
+      </div>
       <div id="startAccountsOverviewHead">
         <h2>Kontoöversikt</h2>
         <p class="sub">Saldon för dina konton. Dubbelklicka på ett konto för att öppna dess kontoutdrag.</p>
@@ -4497,7 +4604,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v38';
+const APP_VERSION = '2026-09-23 v39';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6729,6 +6836,102 @@ function budgetAmtBarTip(isIncome, actual, budget){
   return tip;
 }
 
+/**
+ * Start-översikt: summerad BUDGET UT (utgifter) för vald period —
+ * samma tecken/utfall som Budget-listan.
+ */
+function computeStartBudgetUtTotals(mode){
+  const empty = { budget: null, actual: 0 };
+  if(!book || !book.order || !book.order.length) return empty;
+  syncTrendIncludeMap(book);
+  syncBudgetMonthMap(book);
+  rebuildBookLookup();
+  const range = datesForTimePreset(mode) || datesForTimePreset('currentMonth');
+  if(!range || !range.from || !range.to) return empty;
+  const activityMap = buildBudgetMonthActivityMap(range.from, range.to);
+  const signMaps = buildBudgetSignMaps();
+  const monthMap = book.budgetMonth || {};
+  const catSubs = buildTrendCategorySubsMap(book);
+  const includeMap = book.trendInclude || {};
+  const scale = budgetPeriodScale(mode);
+  let outBudget = 0;
+  let outActual = 0;
+  let hasBudget = false;
+  const cats = (bookLookup.categories || []).slice();
+  for(const name of cats){
+    if(trendCategoryCheckState(name, includeMap, catSubs) === 'none') continue;
+    const isIncome = budgetSignForItem({ rowKind: 'cat', name: name }, signMaps) === 'in';
+    if(isIncome) continue;
+    const monthly = Object.prototype.hasOwnProperty.call(monthMap, name)
+      && typeof monthMap[name] === 'number'
+      && Number.isFinite(monthMap[name])
+      ? monthMap[name]
+      : null;
+    if(monthly != null && monthly > 0){
+      outBudget += Math.round(monthly * scale);
+      hasBudget = true;
+    }
+    outActual += budgetActualForItem({ rowKind: 'cat', name: name }, activityMap, false);
+  }
+  return { budget: hasBudget ? outBudget : null, actual: outActual };
+}
+
+let startPeriodMode = 'currentMonth';
+
+function paintStartPeriodBar(){
+  const barEl = el('startPeriodBar');
+  const wrap = el('startPeriodWrap');
+  const menu = el('startPeriodMenu');
+  const valueEl = el('startPeriodValue');
+  const amtBar = el('startPeriodAmtBar');
+  if(!barEl || !wrap || !menu || !valueEl) return;
+
+  if(!book || !book.order || !book.order.length){
+    barEl.hidden = true;
+    return;
+  }
+  barEl.hidden = false;
+  if(menu.value !== startPeriodMode){
+    menu.value = startPeriodMode;
+  }
+  const totals = computeStartBudgetUtTotals(startPeriodMode);
+  const budget = totals.budget;
+  const actual = totals.actual;
+  let bar = amtBar;
+  if(budget == null || !(budget > 0)){
+    wrap.removeAttribute('data-budget-over');
+    if(actual > 0){
+      wrap.setAttribute('data-budget-unbudgeted', 'out');
+      wrap.setAttribute('data-budget-side', 'out');
+      wrap.title = 'Förbrukat ' + formatBudgetAmtEdit(actual)
+        + ' utan budget i vald period';
+      valueEl.textContent = formatBudgetAmtEdit(actual);
+    } else {
+      wrap.removeAttribute('data-budget-unbudgeted');
+      wrap.removeAttribute('data-budget-side');
+      wrap.removeAttribute('title');
+      valueEl.textContent = '';
+    }
+    if(bar) bar.style.width = '0';
+    return;
+  }
+  wrap.removeAttribute('data-budget-unbudgeted');
+  const pct = budgetBarWidthPct(false, actual, budget);
+  const red = budgetBarIsRed(false, actual, budget);
+  wrap.setAttribute('data-budget-over', red ? '1' : '0');
+  wrap.setAttribute('data-budget-side', 'out');
+  wrap.title = budgetAmtBarTip(false, actual, budget);
+  valueEl.textContent = formatBudgetAmtEdit(budget);
+  if(!bar){
+    bar = document.createElement('span');
+    bar.className = 'budget-amt-bar';
+    bar.id = 'startPeriodAmtBar';
+    bar.setAttribute('aria-hidden', 'true');
+    wrap.insertBefore(bar, menu);
+  }
+  bar.style.width = (Math.round(pct * 10) / 10) + '%';
+}
+
 /** Text till ?-knappen: aktuella värden för posten i vald period. */
 function budgetAmtInfoText(item){
   // Ren text (t.ex. title) — samma innehåll som tippen utan HTML.
@@ -8091,12 +8294,14 @@ function renderStart(){
     accountsEmptyBlock.hidden = false;
     accountsList.hidden = true;
     if(toImportBtn) toImportBtn.hidden = !bookIsImportEmpty();
+    paintStartPeriodBar();
     return;
   }
 
   if(startAccountsOverviewHead) startAccountsOverviewHead.hidden = false;
   accountsEmptyBlock.hidden = true;
   accountsList.hidden = false;
+  paintStartPeriodBar();
 
   let total = 0;
 
@@ -8137,6 +8342,14 @@ function summaryRow(labelText, value, isTotal){
 // Menyn ovanför kontokortet. Här fyller vi på med rapporter och grafer
 // när de finns — varje val är ett namn i listan och ett fall nedan.
 const startMenu = el('startMenu');
+
+const startPeriodMenu = el('startPeriodMenu');
+if(startPeriodMenu){
+  startPeriodMenu.addEventListener('change', () => {
+    startPeriodMode = startPeriodMenu.value || 'currentMonth';
+    paintStartPeriodBar();
+  });
+}
 
 function runStartMenu(){
   clear(startMessages);
