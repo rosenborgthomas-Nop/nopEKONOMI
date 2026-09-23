@@ -4486,7 +4486,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v36';
+const APP_VERSION = '2026-09-23 v37';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -13744,7 +13744,8 @@ function buildMonthSeriesChunkedHtml(series, opts){
   if(includeTotalMean) html += chartTotalMeanHeaderHtml(totalStats);
   const starts = [];
   for(let start = 0; start < points.length; start += NETTO_PRINT_CHUNK) starts.push(start);
-  // Äldsta året först; staplar L→H per år, ett år i taget.
+  // Nyaste året först i layouten; inom varje år staplar L→H kronologiskt.
+  starts.reverse();
   const yearAnimSpan = 0.03 * (NETTO_PRINT_CHUNK - 1) + 0.45 + 0.12;
   for(let s = 0; s < starts.length; s++){
     const start = starts[s];
