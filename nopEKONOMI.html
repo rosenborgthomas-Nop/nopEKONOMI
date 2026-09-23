@@ -2936,10 +2936,28 @@ footer p{
   width:max-content;
   max-width:min(22rem, calc(100vw - 16px));
   text-align:left;
-  /* Bara radbryt vid \n — undvik soft-wrap mitt i "Förbrukat denna månad: …". */
-  white-space:pre;
+  white-space:normal;
   font-family:'JetBrains Mono', monospace;
   font-size:12px;
+  line-height:1.45;
+}
+.budget-amt-info-float .budget-amt-fill-btn{
+  display:inline;
+  margin:0;
+  padding:0 1px;
+  border:none;
+  border-radius:0;
+  background:transparent;
+  color:var(--teal, #0d7a6a);
+  font:inherit;
+  font-weight:700;
+  text-decoration:underline;
+  text-underline-offset:2px;
+  cursor:pointer;
+}
+.budget-amt-info-float .budget-amt-fill-btn:hover,
+.budget-amt-info-float .budget-amt-fill-btn:focus-visible{
+  color:var(--ink, #1a3050);
 }
 .care-list-table .budget-amt-wrap{
   position:relative;
@@ -4453,7 +4471,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v24';
+const APP_VERSION = '2026-09-23 v25';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6243,7 +6261,10 @@ function syncBudgetAmtInfoUi(idx){
   if(!item) return;
   const float = el('budgetAmtInfoFloat');
   if(float && !float.hidden){
-    float.textContent = budgetAmtInfoText(item);
+    const openBtn = careListBody && careListBody.querySelector(
+      '.budget-amt-info-btn[data-budget-info="' + idx + '"][aria-expanded="true"]'
+    );
+    if(openBtn) float.innerHTML = budgetAmtInfoHtml(item, idx);
   }
 }
 
@@ -6353,7 +6374,7 @@ function refreshBudgetTotalRow(){
       const openBtn = careListHead.querySelector(
         '.budget-amt-info-btn[data-budget-summary-info="' + side + '"][aria-expanded="true"]'
       );
-      if(openBtn) float.textContent = budgetAmtInfoText(item);
+      if(openBtn) float.innerHTML = budgetAmtInfoHtml(item, null);
     }
   }
 }
@@ -6648,6 +6669,28 @@ function budgetAmtBarTip(isIncome, actual, budget){
 
 /** Text till ?-knappen: aktuella värden för posten i vald period. */
 function budgetAmtInfoText(item){
+  // Ren text (t.ex. title) — samma innehåll som tippen utan HTML.
+  if(!item) return '';
+  const tmp = document.createElement('div');
+  tmp.innerHTML = budgetAmtInfoHtml(item, null);
+  return (tmp.textContent || '').replace(/\n{2,}/g, '\n').trim();
+}
+
+/** Kan Förbrukat/Inkommit sättas som budget? (ej under underkategorisumma). */
+function canOfferBudgetFillFromActual(item, actualPeriod){
+  if(!item || item.readOnly || item.rowKind === 'total') return false;
+  if(item.rowKind === 'sub') return true;
+  if(item.rowKind !== 'cat') return false;
+  const subSumMonthly = budgetSubMonthSum(item.name);
+  if(!(subSumMonthly > 0)) return true;
+  const actual = typeof actualPeriod === 'number' && Number.isFinite(actualPeriod)
+    ? actualPeriod
+    : 0;
+  const actualMonthly = budgetPeriodToMonthly(actual);
+  return actualMonthly + 1e-9 >= subSumMonthly;
+}
+
+function budgetAmtInfoHtml(item, fillIdx){
   if(!item) return '';
   const isIncome = !!item.isIncome;
   const actual = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
@@ -6661,23 +6704,75 @@ function budgetAmtInfoText(item){
     ? item.name
     : (isIncome ? 'Inkomst' : 'Utgift');
   const when = budgetPeriodLabel();
-  let text = side + '\n' + verb + ' (' + when + '): ' + (formatBudgetAmtEdit(actual) || '0');
+  const amtStr = formatBudgetAmtEdit(actual) || '0';
+  const offerFill = typeof fillIdx === 'number' && fillIdx >= 0
+    && canOfferBudgetFillFromActual(item, actual);
+  let actualLine = escapeHtml(verb + ' (' + when + '): ');
+  if(offerFill){
+    actualLine += '<button type="button" class="budget-amt-fill-btn" data-budget-fill="'
+      + fillIdx + '" title="Sätt beloppet som budget">'
+      + escapeHtml(amtStr) + '</button>';
+  } else {
+    actualLine += escapeHtml(amtStr);
+  }
+  const lines = [escapeHtml(side), actualLine];
   if(budget != null){
     const share = budgetBarSharePct(actual, budget);
-    text += '\nBudget: ' + formatBudgetAmtEdit(budget)
-      + '\nAndel: ' + Math.round(share) + ' %';
+    lines.push(escapeHtml('Budget: ' + formatBudgetAmtEdit(budget)));
+    lines.push(escapeHtml('Andel: ' + Math.round(share) + ' %'));
     if(budgetBarIsRed(isIncome, actual, budget)){
       const err = isIncome
         ? ((budget - actual) / budget) * 100
         : ((actual - budget) / budget) * 100;
-      text += isIncome
-        ? '\nSaknas: ' + Math.round(Math.max(0, err)) + ' %'
-        : '\nÖver: ' + Math.round(Math.max(0, err)) + ' %';
+      lines.push(escapeHtml(isIncome
+        ? 'Saknas: ' + Math.round(Math.max(0, err)) + ' %'
+        : 'Över: ' + Math.round(Math.max(0, err)) + ' %'));
     }
   } else {
-    text += '\nBudget: (ej satt)';
+    lines.push(escapeHtml('Budget: (ej satt)'));
   }
-  return text;
+  return lines.join('<br>');
+}
+
+function applyBudgetFillFromActual(idx){
+  const item = careListItems[idx];
+  if(!item || !book || careListKind !== 'budget') return;
+  if(item.readOnly || item.rowKind === 'total') return;
+  const actual = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
+    ? item.spentAmt
+    : 0;
+  if(!canOfferBudgetFillFromActual(item, actual)){
+    clear(careListMessages);
+    const subSumPeriod = budgetMonthlyToPeriod(budgetSubMonthSum(item.name)) || 0;
+    addBox(careListMessages, 'notice',
+      'Beloppet kan inte sättas lägre än underkategorierna ('
+      + formatBudgetAmtEdit(subSumPeriod) + ').');
+    hideBudgetAmtInfoPops();
+    return;
+  }
+  const res = applyBudgetMonthFromInput(idx, formatBudgetAmtEdit(actual) || '0');
+  const inp = careListBody && careListBody.querySelector('input[data-budget-amt="' + idx + '"]');
+  if(item) {
+    if(inp) inp.value = formatBudgetAmtEdit(item.monthAmt);
+  }
+  syncBudgetAmtBarUi(idx);
+  if(item.rowKind === 'sub' && item.parent){
+    const catIdx = careListItems.findIndex(it => it.rowKind === 'cat' && it.name === item.parent);
+    if(catIdx >= 0){
+      syncBudgetAmtBarUi(catIdx);
+      syncBudgetAmtInfoUi(catIdx);
+    }
+  }
+  hideBudgetAmtInfoPops();
+  if(res && !res.ok && res.message){
+    clear(careListMessages);
+    addBox(careListMessages, 'notice', res.message);
+  } else if(res && res.ok){
+    clear(careListMessages);
+    refreshBudgetTotalRow();
+    careListHighlightIdx = idx;
+    updateCareListHighlight();
+  }
 }
 
 function hideBudgetAmtInfoPops(){
@@ -6690,10 +6785,10 @@ function hideBudgetAmtInfoPops(){
 }
 
 function showBudgetAmtInfoAt(btn, idx){
-  showBudgetAmtInfoForItem(btn, careListItems[idx]);
+  showBudgetAmtInfoForItem(btn, careListItems[idx], idx);
 }
 
-function showBudgetAmtInfoForItem(btn, item){
+function showBudgetAmtInfoForItem(btn, item, fillIdx){
   let float = el('budgetAmtInfoFloat');
   if(!float){
     float = document.createElement('div');
@@ -6703,12 +6798,12 @@ function showBudgetAmtInfoForItem(btn, item){
     float.hidden = true;
     document.body.appendChild(float);
   }
-  float.textContent = budgetAmtInfoText(item);
+  float.innerHTML = budgetAmtInfoHtml(item, fillIdx);
   float.hidden = false;
   btn.setAttribute('aria-expanded', 'true');
 
-  // Låt innehållet styra bredden (ingen soft-wrap), sen kläm in i viewport.
   float.style.width = 'auto';
+  float.style.whiteSpace = 'normal';
   const r = btn.getBoundingClientRect();
   const pad = 8;
   const maxW = Math.max(120, window.innerWidth - pad * 2);
@@ -6716,9 +6811,7 @@ function showBudgetAmtInfoForItem(btn, item){
   if(popW > maxW){
     popW = maxW;
     float.style.width = popW + 'px';
-    float.style.whiteSpace = 'pre-wrap';
   } else {
-    float.style.whiteSpace = 'pre';
     float.style.width = popW + 'px';
   }
   let left = r.left;
@@ -15798,7 +15891,16 @@ if(careListScroll){
   careListScroll.addEventListener('scroll', hideBudgetAmtInfoPops, { passive: true });
 }
 document.addEventListener('click', e => {
-  if(e.target.closest('[data-budget-info]') || e.target.closest('#budgetAmtInfoFloat')) return;
+  const fillBtn = e.target.closest('[data-budget-fill]');
+  if(fillBtn){
+    e.preventDefault();
+    e.stopPropagation();
+    applyBudgetFillFromActual(+fillBtn.getAttribute('data-budget-fill'));
+    return;
+  }
+  if(e.target.closest('[data-budget-info]')
+    || e.target.closest('[data-budget-summary-info]')
+    || e.target.closest('#budgetAmtInfoFloat')) return;
   hideBudgetAmtInfoPops();
 });
 window.addEventListener('resize', hideBudgetAmtInfoPops);
