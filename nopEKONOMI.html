@@ -3526,7 +3526,7 @@ td.num.dash .cell-content{
         <option value="payee">Payee</option>
         <option value="kategori">Kategori</option>
         <option value="underkategori">Underkategori</option>
-        <option value="trend" id="careHubTrendOpt">Trend Bocklista</option>
+        <option value="trend" id="careHubTrendOpt">Bocklista</option>
         <option value="" disabled class="menu-sep" id="careHubBookSep">────────</option>
         <option value="bok">Bok (backup)</option>
       </select>
@@ -4266,7 +4266,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v05';
+const APP_VERSION = '2026-09-23 v06';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11433,7 +11433,7 @@ function renderTrendNettoOverTid(){
 
   const basText = catMode === 'alla'
     ? 'Bas: kumulativt netto som i Rapport (alla belopp inkl. öppningsbalans/startsaldo). '
-    : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Trend Bocklista'
+    : 'Bas: kumulativt netto från ibockade kategorier i Registervård → Bocklista'
       + ' plus öppningsbalans (startsaldo). ';
 
   const note = '<p class="report-empty-note" style="margin:0 0 10px">'
@@ -11631,17 +11631,17 @@ function renderTrendDetailPrognos(kind, itemName){
   if(kind === 'kategori'){
     basText = catMode === 'alla'
       ? 'Bas: alla poster i denna kategori (ej överföringar). '
-      : ('Bas: ibockade underkategorier i denna kategori via Trend Bocklista'
+      : ('Bas: ibockade underkategorier i denna kategori via Bocklista'
         + ' (' + data.includedCats + ' med, ' + data.excludedCats + ' utan). ');
   } else if(kind === 'underkategori'){
     basText = catMode === 'alla'
       ? 'Bas: alla poster med denna underkategori. '
-      : ('Bas: ibockade poster med denna underkategori via Trend Bocklista'
+      : ('Bas: ibockade poster med denna underkategori via Bocklista'
         + ' (' + data.includedCats + ' med, ' + data.excludedCats + ' utan). ');
   } else {
     basText = catMode === 'alla'
       ? 'Bas: alla kategorier (ej överföringar) för denna payee. '
-      : ('Bas: ibockade kategorier i Registervård → Trend Bocklista'
+      : ('Bas: ibockade kategorier i Registervård → Bocklista'
         + ' för denna payee (' + data.includedCats + ' med, '
         + data.excludedCats + ' utan). ');
   }
@@ -13271,7 +13271,7 @@ if(careHubTrendHelpBtn){
 
 function syncCareHubSectionTitle(key){
   if(!careHubSectionTitle) return;
-  if(key === 'trend') careHubSectionTitle.textContent = 'Trend Bocklista';
+  if(key === 'trend') careHubSectionTitle.textContent = 'Bocklista';
   else if(key === 'budget') careHubSectionTitle.textContent = 'Budget';
   else careHubSectionTitle.textContent = 'Registervård';
   if(careHubTrendHelpBtn && careHubTrendHelpPop){
@@ -13283,7 +13283,7 @@ function syncCareHubSectionTitle(key){
         ? CARE_HUB_BUDGET_HELP
         : CARE_HUB_TREND_HELP;
       careHubTrendHelpBtn.setAttribute('aria-label',
-        key === 'budget' ? 'Hjälp om Budget' : 'Hjälp om Trend Bocklista');
+        key === 'budget' ? 'Hjälp om Budget' : 'Hjälp om Bocklista');
     }
   }
 }
@@ -13444,7 +13444,7 @@ const CARE_HUB_SECTIONS = {
   payee: { title: 'Payee', kind: 'list' },
   kategori: { title: 'Kategori', kind: 'list' },
   underkategori: { title: 'Underkategori', kind: 'list' },
-  trend: { title: 'Trend Bocklista', kind: 'list' },
+  trend: { title: 'Bocklista', kind: 'list' },
   budget: { title: 'Budget', kind: 'list' },
   bok: { title: 'Bok (backup)', kind: 'list' }
 };
@@ -13560,7 +13560,7 @@ const CARE_LIST_KINDS = {
     maxLen: 60
   },
   trend: {
-    title: 'Trend Bocklista',
+    title: 'Bocklista',
     newLabel: '',
     nameLabel: 'Kategori',
     deleteLabel: '',
@@ -13877,7 +13877,7 @@ function careListKindLabel(){
   if(careListKind === 'underkategori') return 'Underkategori';
   if(careListKind === 'payee') return 'Payee';
   if(careListKind === 'konto') return 'Konto';
-  if(careListKind === 'trend') return 'Trend Bocklista';
+  if(careListKind === 'trend') return 'Bocklista';
   if(careListKind === 'budget') return 'Budget';
   if(careListKind === 'bok') return 'Bok';
   return '';
