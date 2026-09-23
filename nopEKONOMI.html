@@ -2987,6 +2987,15 @@ footer p{
   background:#E03131;
   opacity:0.62;
 }
+/* Ingen budget men har utfall — dämpad ruta (inte lika klar som stapelfärgerna). */
+.care-list-table .budget-amt-wrap[data-budget-unbudgeted="out"] input.budget-amt-input{
+  background:color-mix(in srgb, #E03131 16%, var(--paper-surface, #E8EFF7));
+  border-color:color-mix(in srgb, #E03131 28%, var(--paper-line, #b8c4d4));
+}
+.care-list-table .budget-amt-wrap[data-budget-unbudgeted="in"] input.budget-amt-input{
+  background:color-mix(in srgb, #1FAE55 16%, var(--paper-surface, #E8EFF7));
+  border-color:color-mix(in srgb, #1FAE55 28%, var(--paper-line, #b8c4d4));
+}
 .care-list-table td.cl-budget-amt input.budget-amt-input,
 .care-list-table th.cl-budget-amt input.budget-amt-input{
   position:relative;
@@ -4471,7 +4480,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v25';
+const APP_VERSION = '2026-09-23 v26';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6336,11 +6345,21 @@ function syncBudgetAmtBarForItem(item, inp){
   let bar = wrap.querySelector('.budget-amt-bar');
   if(budget == null){
     wrap.removeAttribute('data-budget-over');
-    wrap.removeAttribute('data-budget-side');
-    wrap.removeAttribute('title');
+    if(actual > 0){
+      wrap.setAttribute('data-budget-unbudgeted', isIncome ? 'in' : 'out');
+      wrap.setAttribute('data-budget-side', isIncome ? 'in' : 'out');
+      wrap.title = (isIncome ? 'Inkommit' : 'Förbrukat')
+        + ' ' + formatBudgetAmtEdit(actual)
+        + ' utan budget i vald period';
+    } else {
+      wrap.removeAttribute('data-budget-unbudgeted');
+      wrap.removeAttribute('data-budget-side');
+      wrap.removeAttribute('title');
+    }
     if(bar) bar.remove();
     return;
   }
+  wrap.removeAttribute('data-budget-unbudgeted');
   const pct = budgetBarWidthPct(isIncome, actual, budget);
   const red = budgetBarIsRed(isIncome, actual, budget);
   wrap.setAttribute('data-budget-over', red ? '1' : '0');
@@ -6868,6 +6887,13 @@ function budgetAmtFieldHtml(item, opts){
       + '" title="' + escapeHtml(tip) + '"';
     barHtml = '<span class="budget-amt-bar" style="width:'
       + (Math.round(pct * 10) / 10) + '%" aria-hidden="true"></span>';
+  } else if(actual > 0){
+    const tip = (isIncome ? 'Inkommit' : 'Förbrukat')
+      + ' ' + formatBudgetAmtEdit(actual)
+      + ' utan budget i vald period';
+    wrapAttrs = ' data-budget-unbudgeted="' + (isIncome ? 'in' : 'out')
+      + '" data-budget-side="' + (isIncome ? 'in' : 'out')
+      + '" title="' + escapeHtml(tip) + '"';
   }
   return '<' + tag + ' class="cl-budget-amt"><span class="budget-amt-cell">'
     + '<button type="button" class="help-tip-btn budget-amt-info-btn" ' + opts.infoAttr
