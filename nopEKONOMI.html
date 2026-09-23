@@ -4610,7 +4610,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v01';
+const APP_VERSION = '2026-09-24 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6235,18 +6235,46 @@ async function persistTrendInclude(){
 
 /**
  * Spegla bocklista → budgetInclude. Avbockat rensar budgetMonth-värde
- * (även om belopp finns).
+ * (även om belopp finns) och drar bort beloppet från kategorisumman.
  */
 function mirrorTrendKeysToBudget(keys){
   if(!book || !keys || !keys.length) return;
   if(!book.budgetInclude || typeof book.budgetInclude !== 'object') book.budgetInclude = {};
   if(!book.budgetMonth || typeof book.budgetMonth !== 'object') book.budgetMonth = {};
   const trend = book.trendInclude || {};
+  const catSubs = buildTrendCategorySubsMap(book);
+  const removedAmtByCat = Object.create(null);
+  const touchCats = new Set();
+
   for(const key of keys){
     if(!key) continue;
     const on = Object.prototype.hasOwnProperty.call(trend, key) ? !!trend[key] : true;
     book.budgetInclude[key] = on;
-    if(!on) delete book.budgetMonth[key];
+    const parsed = parseTrendIncludeKey(key);
+    if(parsed.cat) touchCats.add(parsed.cat);
+    if(on) continue;
+    const prev = book.budgetMonth[key];
+    const amt = typeof prev === 'number' && Number.isFinite(prev) ? prev : 0;
+    delete book.budgetMonth[key];
+    // Underkategori/tom-blad: minska föräldrakategorins sammanslagna belopp.
+    if(parsed.kind !== 'cat' && parsed.cat && amt > 0){
+      removedAmtByCat[parsed.cat] = (removedAmtByCat[parsed.cat] || 0) + amt;
+    }
+  }
+
+  for(const cat of touchCats){
+    if(trendCategoryCheckState(cat, trend, catSubs) === 'none'){
+      delete book.budgetMonth[cat];
+      continue;
+    }
+    const removed = removedAmtByCat[cat] || 0;
+    const cur = book.budgetMonth[cat];
+    if(removed > 0 && typeof cur === 'number' && Number.isFinite(cur)){
+      const next = cur - removed;
+      if(next > 0) book.budgetMonth[cat] = next;
+      else delete book.budgetMonth[cat];
+    }
+    raiseBudgetCatToSubSum(cat);
   }
 }
 
@@ -6258,16 +6286,9 @@ function syncBudgetFromTrendInclude(){
   syncBudgetMonthMap(book);
   const trend = book.trendInclude || {};
   const keys = new Set(Object.keys(book.budgetInclude || {}).concat(Object.keys(trend)));
+  // Även befintliga budgetMonth-nycklar som kan saknas i include-mapparna.
+  for(const key of Object.keys(book.budgetMonth || {})) keys.add(key);
   mirrorTrendKeysToBudget([...keys]);
-  // Kvarvarande månadsbelopp utan inkluderad nyckel.
-  for(const key of Object.keys(book.budgetMonth || {})){
-    const on = Object.prototype.hasOwnProperty.call(trend, key)
-      ? !!trend[key]
-      : (Object.prototype.hasOwnProperty.call(book.budgetInclude, key)
-        ? !!book.budgetInclude[key]
-        : true);
-    if(!on) delete book.budgetMonth[key];
-  }
 }
 
 /** Budget-inkluderingsregister: samma nyckelstruktur som trendInclude. */
