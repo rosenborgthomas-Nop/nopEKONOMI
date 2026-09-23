@@ -4327,7 +4327,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v11';
+const APP_VERSION = '2026-09-23 v12';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6057,17 +6057,21 @@ function budgetMonthKeyForItem(item){
   return item.name || '';
 }
 
-/** Summa av underkategori-belopp (inkl. tom underkategori) för en kategori. */
+/** Summa av underkategori-belopp som ingår i Bocklistan (inkl. tom underkategori). */
 function budgetSubMonthSum(cat){
   if(!book || !cat) return 0;
+  syncTrendIncludeMap(book);
   const map = book.budgetMonth || {};
   const catSubs = buildTrendCategorySubsMap(book);
   let sum = 0;
-  const emptyKey = trendEmptySubKey(cat);
-  if(typeof map[emptyKey] === 'number' && Number.isFinite(map[emptyKey])){
-    sum += map[emptyKey];
+  if(isTrendLeafIncluded(cat, '')){
+    const emptyKey = trendEmptySubKey(cat);
+    if(typeof map[emptyKey] === 'number' && Number.isFinite(map[emptyKey])){
+      sum += map[emptyKey];
+    }
   }
   for(const sub of (catSubs[cat] || [])){
+    if(!isTrendLeafIncluded(cat, sub)) continue;
     const sk = trendIncludeSubKey(cat, sub);
     if(typeof map[sk] === 'number' && Number.isFinite(map[sk])) sum += map[sk];
   }
@@ -6182,6 +6186,7 @@ function buildBudgetSignMaps(){
   const catNet = Object.create(null);
   const leafNet = Object.create(null);
   if(!book || !book.order) return { cat: Object.create(null), leaf: Object.create(null) };
+  syncTrendIncludeMap(book);
 
   for(const name of book.order){
     const acc = book.accounts[name];
@@ -6194,6 +6199,7 @@ function buildBudgetSignMaps(){
         const cat = (piece.category || '').trim();
         const sub = (piece.subCategory || '').trim();
         if(!cat || isTransferCategory(cat)) continue;
+        if(!isTrendPieceIncluded(cat, sub)) continue;
         const amount = piece.amount;
         if(!Number.isFinite(amount) || !amount) continue;
         catNet[cat] = (catNet[cat] || 0) + amount;
