@@ -3620,7 +3620,11 @@ td.num.dash .cell-content{
           <select id="startPeriodMenu" class="menu-select start-period-select" title="Budgetperiod" aria-label="Budgetperiod">
             <option value="currentMonth">Pågående månad</option>
             <option value="last30">Senaste 30 dagarna</option>
-            <option value="currentYear">Pågående år</option>
+            <option value="last3m">Senaste 3 månader</option>
+            <option value="last6m">Senaste 6 månader</option>
+            <option value="last12m">Senaste 12 månader</option>
+            <option value="last24m">Senaste 24 månader</option>
+            <option value="allt">Allt</option>
           </select>
           <span id="startPeriodValue" class="start-period-value" aria-live="polite"></span>
         </span>
@@ -4606,7 +4610,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v40';
+const APP_VERSION = '2026-09-23 v41';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6902,6 +6906,10 @@ function paintStartPeriodBar(){
     return;
   }
   barEl.hidden = false;
+  const allowed = {
+    currentMonth: 1, last30: 1, last3m: 1, last6m: 1, last12m: 1, last24m: 1, allt: 1
+  };
+  if(!allowed[startPeriodMode]) startPeriodMode = 'currentMonth';
   if(menu.value !== startPeriodMode){
     menu.value = startPeriodMode;
   }
