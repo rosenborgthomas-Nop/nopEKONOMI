@@ -4480,7 +4480,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v29';
+const APP_VERSION = '2026-09-23 v30';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6404,13 +6404,11 @@ function budgetSummaryItemBySide(side){
 
 function formatBudgetAmtEdit(v){
   if(typeof v !== 'number' || !Number.isFinite(v)) return '';
-  const neg = v < 0;
-  const abs = Math.abs(v);
-  if(Math.abs(abs - Math.round(abs)) < 1e-9){
-    const intPart = String(Math.round(abs)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-    return (neg ? '-' : '') + intPart;
-  }
-  return formatAmount(v);
+  const n = Math.round(v);
+  const neg = n < 0;
+  const abs = Math.abs(n);
+  const intPart = String(abs).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return (neg ? '-' : '') + intPart;
 }
 
 /** Aktuell kalendermånad YYYY-MM (pågående månad för budgetstapel). */
@@ -6446,17 +6444,16 @@ function budgetPeriodScale(mode){
 function budgetMonthlyToPeriod(monthly){
   if(typeof monthly !== 'number' || !Number.isFinite(monthly)) return null;
   const s = budgetPeriodScale();
-  // Visa periodbelopp avrundat till öre.
-  return Math.round(monthly * s * 100) / 100;
+  // Hela kronor i periodvisningen.
+  return Math.round(monthly * s);
 }
 
 function budgetPeriodToMonthly(periodAmt){
   if(typeof periodAmt !== 'number' || !Number.isFinite(periodAmt)) return periodAmt;
   const s = budgetPeriodScale();
-  if(!(s > 0)) return periodAmt;
-  // Full precision — öre-avrundning av månadsbelopp (t.ex. 1012/12 → 84,33)
-  // ger synlig drift (1011,96) och osynlig röd stapel.
-  return periodAmt / s;
+  if(!(s > 0)) return Math.round(periodAmt);
+  // Periodbelopp i hela kronor → månadsbelopp med full precision.
+  return Math.round(periodAmt) / s;
 }
 
 /**
@@ -6465,9 +6462,10 @@ function budgetPeriodToMonthly(periodAmt){
  */
 function budgetAmountsNearlyEqual(a, b){
   if(!Number.isFinite(a) || !Number.isFinite(b)) return false;
-  if(Math.round(a * 100) === Math.round(b * 100)) return true;
+  // Budget visas i hela kronor.
+  if(Math.round(a) === Math.round(b)) return true;
   if(!(b > 0) && !(a > 0)) return true;
-  if(!(b > 0)) return Math.abs(a - b) < 0.05;
+  if(!(b > 0)) return Math.abs(a - b) < 0.5;
   const share = (Math.max(0, a) / b) * 100;
   const err = (Math.abs(a - b) / b) * 100;
   return Math.round(share) === 100 && Math.round(err) === 0;
@@ -15247,7 +15245,7 @@ function applyBudgetMonthFromInput(idx, raw){
       return { ok: true };
     }
     let nPeriod;
-    try{ nPeriod = parseAmount(text); }
+    try{ nPeriod = Math.round(parseAmount(text)); }
     catch(e){
       item.monthAmt = prevPeriod;
       return { ok: false, message: 'Ogiltigt belopp.' };
@@ -15272,7 +15270,7 @@ function applyBudgetMonthFromInput(idx, raw){
     item.monthAmt = null;
   } else {
     let nPeriod;
-    try{ nPeriod = parseAmount(text); }
+    try{ nPeriod = Math.round(parseAmount(text)); }
     catch(e){
       item.monthAmt = prevPeriod;
       return { ok: false, message: 'Ogiltigt belopp.' };
