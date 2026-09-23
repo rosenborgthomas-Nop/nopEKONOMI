@@ -4486,7 +4486,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v35';
+const APP_VERSION = '2026-09-23 v36';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -13624,10 +13624,12 @@ function buildMonthSeriesVerticalChartBlock(pointsSlice, allPoints, startIdx, op
   const forPrint = !!opts.forPrint;
   const animate = opts.animate !== false && !forPrint;
   const mobileFit = forPrint ? false : isReportMobileLayout();
-  const newestFirst = opts.newestFirst !== false;
+  // Äldst till vänster → nyast till höger (kronologisk L→H).
+  const newestFirst = !!opts.newestFirst;
   const showMean = opts.showMean !== false;
   const tone = opts.tone || 'income';
   const title = opts.title || 'Fördelning';
+  const animBeginOffset = Number(opts.animBeginOffset) || 0;
   const n = pointsSlice.length;
   const order = [];
   for(let i = 0; i < n; i++) order.push(newestFirst ? (n - 1 - i) : i);
@@ -13682,9 +13684,10 @@ function buildMonthSeriesVerticalChartBlock(pointsSlice, allPoints, startIdx, op
     bars += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + barMaxH + '" rx="3" fill="' + fillSoft + '"/>';
     if(h){
       if(animate){
+        const begin = (animBeginOffset + 0.03 * i).toFixed(2);
         bars += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + color + '">'
-          + '<animate attributeName="height" from="0" to="' + h + '" dur="0.45s" begin="' + (0.03 * i) + 's" fill="freeze"/>'
-          + '<animate attributeName="y" from="' + baselineY + '" to="' + y + '" dur="0.45s" begin="' + (0.03 * i) + 's" fill="freeze"/>'
+          + '<animate attributeName="height" from="0" to="' + h + '" dur="0.45s" begin="' + begin + 's" fill="freeze"/>'
+          + '<animate attributeName="y" from="' + baselineY + '" to="' + y + '" dur="0.45s" begin="' + begin + 's" fill="freeze"/>'
           + '</rect>';
       } else {
         bars += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="3" fill="' + color + '"/>';
@@ -13741,7 +13744,8 @@ function buildMonthSeriesChunkedHtml(series, opts){
   if(includeTotalMean) html += chartTotalMeanHeaderHtml(totalStats);
   const starts = [];
   for(let start = 0; start < points.length; start += NETTO_PRINT_CHUNK) starts.push(start);
-  starts.reverse();
+  // Äldsta året först; staplar L→H per år, ett år i taget.
+  const yearAnimSpan = 0.03 * (NETTO_PRINT_CHUNK - 1) + 0.45 + 0.12;
   for(let s = 0; s < starts.length; s++){
     const start = starts[s];
     const chunk = points.slice(start, start + NETTO_PRINT_CHUNK);
@@ -13751,9 +13755,10 @@ function buildMonthSeriesChunkedHtml(series, opts){
     html += chartChunkYearLabelHtml(yearLabel, chunkStats);
     html += buildMonthSeriesVerticalChartBlock(chunk, points, start, {
       forPrint: forPrint,
-      newestFirst: true,
+      newestFirst: false,
       showMean: false,
       animate: !forPrint,
+      animBeginOffset: forPrint ? 0 : s * yearAnimSpan,
       tone: tone,
       title: title,
       scale: series.scale
@@ -13786,7 +13791,7 @@ function buildMonthSeriesChart(series){
   return '<div class="payee-chart-panel is-' + tone + '">'
     + monthSeriesChartKickerHtml(false)
     + buildMonthSeriesVerticalChartBlock(points, points, 0, {
-      newestFirst: true,
+      newestFirst: false,
       showMean: true,
       animate: true,
       tone: tone,
