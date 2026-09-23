@@ -4610,7 +4610,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v41';
+const APP_VERSION = '2026-09-24 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6230,6 +6230,43 @@ async function persistTrendInclude(){
     await writeBookPreferGranted(bookId, book);
   } catch(e){
     /* ignore — UI visar fel vid behov */
+  }
+}
+
+/**
+ * Spegla bocklista → budgetInclude. Avbockat rensar budgetMonth-värde
+ * (även om belopp finns).
+ */
+function mirrorTrendKeysToBudget(keys){
+  if(!book || !keys || !keys.length) return;
+  if(!book.budgetInclude || typeof book.budgetInclude !== 'object') book.budgetInclude = {};
+  if(!book.budgetMonth || typeof book.budgetMonth !== 'object') book.budgetMonth = {};
+  const trend = book.trendInclude || {};
+  for(const key of keys){
+    if(!key) continue;
+    const on = Object.prototype.hasOwnProperty.call(trend, key) ? !!trend[key] : true;
+    book.budgetInclude[key] = on;
+    if(!on) delete book.budgetMonth[key];
+  }
+}
+
+/** Full synk: budgetInclude följer trendInclude; rensa budgetvärden för avbockade. */
+function syncBudgetFromTrendInclude(){
+  if(!book) return;
+  syncTrendIncludeMap(book);
+  syncBudgetIncludeMap(book);
+  syncBudgetMonthMap(book);
+  const trend = book.trendInclude || {};
+  const keys = new Set(Object.keys(book.budgetInclude || {}).concat(Object.keys(trend)));
+  mirrorTrendKeysToBudget([...keys]);
+  // Kvarvarande månadsbelopp utan inkluderad nyckel.
+  for(const key of Object.keys(book.budgetMonth || {})){
+    const on = Object.prototype.hasOwnProperty.call(trend, key)
+      ? !!trend[key]
+      : (Object.prototype.hasOwnProperty.call(book.budgetInclude, key)
+        ? !!book.budgetInclude[key]
+        : true);
+    if(!on) delete book.budgetMonth[key];
   }
 }
 
@@ -14533,6 +14570,9 @@ function syncCareHubSectionTitle(key){
 
 /** Snapshot av trendInclude medan Trend-listan är öppen (OK sparar, Avbryt återställer). */
 let trendIncludeEditSnapshot = null;
+/** Budget-spegel medan Trend-bocklistan redigeras (avbockning rensar värden). */
+let trendBudgetIncludeEditSnapshot = null;
+let trendBudgetMonthEditSnapshot = null;
 /** Snapshot av budgetInclude + budgetMonth medan Budget är öppen. */
 let budgetIncludeEditSnapshot = null;
 let budgetMonthEditSnapshot = null;
@@ -14587,23 +14627,42 @@ function budgetMonthMapsEqual(a, b){
 function beginTrendIncludeEdit(){
   if(!book){
     trendIncludeEditSnapshot = {};
+    trendBudgetIncludeEditSnapshot = {};
+    trendBudgetMonthEditSnapshot = {};
     return;
   }
   syncTrendIncludeMap(book);
+  syncBudgetIncludeMap(book);
+  syncBudgetMonthMap(book);
   trendIncludeEditSnapshot = cloneTrendIncludeMap(book.trendInclude);
+  trendBudgetIncludeEditSnapshot = cloneTrendIncludeMap(book.budgetInclude);
+  trendBudgetMonthEditSnapshot = cloneBudgetMonthMap(book.budgetMonth);
 }
 
 function discardTrendIncludeEdit(){
   if(!book || trendIncludeEditSnapshot == null){
     trendIncludeEditSnapshot = null;
+    trendBudgetIncludeEditSnapshot = null;
+    trendBudgetMonthEditSnapshot = null;
     return;
   }
   book.trendInclude = cloneTrendIncludeMap(trendIncludeEditSnapshot);
+  if(trendBudgetIncludeEditSnapshot != null){
+    book.budgetInclude = cloneTrendIncludeMap(trendBudgetIncludeEditSnapshot);
+  }
+  if(trendBudgetMonthEditSnapshot != null){
+    book.budgetMonth = cloneBudgetMonthMap(trendBudgetMonthEditSnapshot);
+  }
   trendIncludeEditSnapshot = null;
+  trendBudgetIncludeEditSnapshot = null;
+  trendBudgetMonthEditSnapshot = null;
 }
 
 async function commitTrendIncludeEdit(){
+  syncBudgetFromTrendInclude();
   trendIncludeEditSnapshot = null;
+  trendBudgetIncludeEditSnapshot = null;
+  trendBudgetMonthEditSnapshot = null;
   await persistTrendInclude();
 }
 
@@ -14613,8 +14672,7 @@ function beginBudgetEdit(){
     budgetMonthEditSnapshot = {};
     return;
   }
-  syncBudgetIncludeMap(book);
-  syncBudgetMonthMap(book);
+  syncBudgetFromTrendInclude();
   budgetIncludeEditSnapshot = cloneTrendIncludeMap(book.budgetInclude);
   budgetMonthEditSnapshot = cloneBudgetMonthMap(book.budgetMonth);
 }
@@ -15458,20 +15516,28 @@ async function setTrendIncludeForItem(idx, included){
   if(!book.trendInclude || typeof book.trendInclude !== 'object') book.trendInclude = {};
   const catSubs = buildTrendCategorySubsMap(book);
   const next = !!included;
+  const touched = [];
 
   if(item.rowKind === 'sub'){
     const key = item.emptySub
       ? trendEmptySubKey(item.parent)
       : trendIncludeSubKey(item.parent, item.name);
     book.trendInclude[key] = next;
+    touched.push(key);
     const st = trendCategoryCheckState(item.parent, book.trendInclude, catSubs);
     book.trendInclude[item.parent] = st !== 'none';
+    touched.push(item.parent);
   } else {
     book.trendInclude[item.name] = next;
+    touched.push(item.name);
     for(const k of trendCategoryLeafKeys(item.name, catSubs)){
       book.trendInclude[k] = next;
+      touched.push(k);
     }
   }
+
+  // Budget följer bocklistan — avbockat tar bort budgetvärde även om det finns.
+  mirrorTrendKeysToBudget(touched);
 
   clear(careListMessages);
   // Sparning sker vid OK — Avbryt återställer snapshot.
