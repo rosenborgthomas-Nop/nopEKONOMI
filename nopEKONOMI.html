@@ -2918,9 +2918,14 @@ footer p{
   text-align:right;
   line-height:1.2;
 }
-.care-list-table td.cl-budget-amt input.budget-amt-input:focus{
-  outline:2px solid var(--ink, #1a3050);
-  outline-offset:1px;
+.care-list-table tr.budget-total-row td.cl-name{
+  font-weight:700;
+}
+.care-list-table td.cl-budget-amt input.budget-amt-input[readonly]{
+  cursor:default;
+  color:var(--ink, #1a3050);
+  opacity:1;
+  font-weight:600;
 }
 .care-list-table tr.trend-off td.cl-budget-amt input.budget-amt-input{
   opacity:0.55;
@@ -4327,7 +4332,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v14';
+const APP_VERSION = '2026-09-23 v15';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6132,9 +6137,11 @@ function syncBudgetAmtBarUi(idx){
     inp.parentNode.insertBefore(wrap, inp);
     wrap.appendChild(inp);
   }
-  const budget = typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
-    ? item.monthAmt
-    : null;
+  const budget = item.rowKind === 'total'
+    ? (typeof item.barBudget === 'number' && item.barBudget > 0 ? item.barBudget : null)
+    : (typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
+      ? item.monthAmt
+      : null);
   const actual = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
     ? item.spentAmt
     : 0;
@@ -6151,7 +6158,10 @@ function syncBudgetAmtBarUi(idx){
   const red = budgetBarIsRed(isIncome, actual, budget);
   wrap.setAttribute('data-budget-over', red ? '1' : '0');
   wrap.setAttribute('data-budget-side', isIncome ? 'in' : 'out');
-  wrap.title = budgetAmtBarTip(isIncome, actual, budget);
+  wrap.title = item.rowKind === 'total'
+    ? ('Netto ' + formatBudgetAmtEdit(item.totalNetActual || 0)
+      + ' av planerat ' + formatBudgetAmtEdit(item.totalNetBudget || 0))
+    : budgetAmtBarTip(isIncome, actual, budget);
   if(!bar){
     bar = document.createElement('span');
     bar.className = 'budget-amt-bar';
@@ -6355,6 +6365,17 @@ function budgetAmtBarTip(isIncome, actual, budget){
 /** Text till ?-knappen: aktuella värden för posten i innevarande månad. */
 function budgetAmtInfoText(item){
   if(!item) return '';
+  if(item.rowKind === 'total'){
+    let text = 'Totalt\n'
+      + 'Budget: ' + (formatBudgetAmtEdit(item.monthAmt) || '0') + '\n'
+      + 'Inkomstbudget: ' + (formatBudgetAmtEdit(item.totalInBudget) || '0') + '\n'
+      + 'Utgiftsbudget: ' + (formatBudgetAmtEdit(item.totalOutBudget) || '0') + '\n'
+      + 'Netto budget (In−Ut): ' + formatBudgetAmtEdit(item.totalNetBudget || 0) + '\n'
+      + 'Inkommit denna månad: ' + (formatBudgetAmtEdit(item.totalInActual) || '0') + '\n'
+      + 'Förbrukat denna månad: ' + (formatBudgetAmtEdit(item.totalOutActual) || '0') + '\n'
+      + 'Netto denna månad: ' + formatBudgetAmtEdit(item.totalNetActual || 0);
+    return text;
+  }
   const isIncome = !!item.isIncome;
   const actual = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
     ? item.spentAmt
@@ -6426,20 +6447,30 @@ function showBudgetAmtInfoAt(btn, idx){
 }
 
 function budgetAmtCellHtml(item, idx){
-  const escLabel = escapeHtml(item.emptySub ? TREND_EMPTY_SUB_LABEL : item.name);
-  const budget = typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
+  const escLabel = escapeHtml(item.rowKind === 'total'
+    ? 'Totalt'
+    : (item.emptySub ? TREND_EMPTY_SUB_LABEL : item.name));
+  const displayBudget = typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
     ? item.monthAmt
     : null;
+  // Totalt: stapeln styrs av netto (barBudget), rutan visar budgetsumman.
+  const barBudget = item.rowKind === 'total'
+    ? (typeof item.barBudget === 'number' && item.barBudget > 0 ? item.barBudget : null)
+    : displayBudget;
   const actual = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
     ? item.spentAmt
     : 0;
   const isIncome = !!item.isIncome;
+  const readOnly = !!item.readOnly || item.rowKind === 'total';
   let wrapAttrs = '';
   let barHtml = '';
-  if(budget != null){
-    const pct = budgetBarWidthPct(isIncome, actual, budget);
-    const red = budgetBarIsRed(isIncome, actual, budget);
-    const tip = budgetAmtBarTip(isIncome, actual, budget);
+  if(barBudget != null){
+    const pct = budgetBarWidthPct(isIncome, actual, barBudget);
+    const red = budgetBarIsRed(isIncome, actual, barBudget);
+    const tip = item.rowKind === 'total'
+      ? ('Netto ' + formatBudgetAmtEdit(item.totalNetActual || 0)
+        + ' av planerat ' + formatBudgetAmtEdit(item.totalNetBudget || 0))
+      : budgetAmtBarTip(isIncome, actual, barBudget);
     wrapAttrs = ' data-budget-over="' + (red ? '1' : '0')
       + '" data-budget-side="' + (isIncome ? 'in' : 'out')
       + '" title="' + escapeHtml(tip) + '"';
@@ -6455,7 +6486,8 @@ function budgetAmtCellHtml(item, idx){
     + '<input type="text" class="budget-amt-input" data-budget-amt="'
     + idx + '" value="' + escapeHtml(formatBudgetAmtEdit(item.monthAmt))
     + '" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false"'
-    + ' aria-label="Månadsbelopp ' + escLabel + '"></span></span></td>';
+    + (readOnly ? ' readonly tabindex="-1"' : '')
+    + ' aria-label="' + (readOnly ? 'Totalt budget ' : 'Månadsbelopp ') + escLabel + '"></span></span></td>';
 }
 
 async function persistBudgetEdit(){
@@ -14246,6 +14278,51 @@ function buildCareListItems(){
         }
       }
     }
+    if(isBudget){
+      let budgetSum = 0;
+      let inBudget = 0;
+      let outBudget = 0;
+      let inActual = 0;
+      let outActual = 0;
+      for(const it of items){
+        if(it.rowKind !== 'cat') continue;
+        const b = typeof it.monthAmt === 'number' && Number.isFinite(it.monthAmt) ? it.monthAmt : 0;
+        const a = typeof it.spentAmt === 'number' && Number.isFinite(it.spentAmt) ? it.spentAmt : 0;
+        if(b > 0) budgetSum += b;
+        if(it.isIncome){
+          if(b > 0) inBudget += b;
+          inActual += a;
+        } else {
+          if(b > 0) outBudget += b;
+          outActual += a;
+        }
+      }
+      const netBudget = inBudget - outBudget;
+      const netActual = inActual - outActual;
+      items.unshift({
+        rowKind: 'total',
+        name: 'Totalt',
+        parent: '',
+        count: 0,
+        // Visat värde = summa av alla kategoribudgetar.
+        monthAmt: budgetSum > 0 ? budgetSum : null,
+        // Stapeln jämför planerat netto (In−Ut) med faktiskt netto.
+        spentAmt: netBudget >= 0 ? netActual : -netActual,
+        barBudget: Math.abs(netBudget) > 0 ? Math.abs(netBudget) : null,
+        isIncome: netBudget >= 0,
+        totalNetBudget: netBudget,
+        totalNetActual: netActual,
+        totalInBudget: inBudget,
+        totalOutBudget: outBudget,
+        totalInActual: inActual,
+        totalOutActual: outActual,
+        included: true,
+        checkState: 'all',
+        hasSubs: false,
+        expanded: false,
+        readOnly: true
+      });
+    }
     return items;
   }
   const source = careListKind === 'kategori' ? bookLookup.categories : bookLookup.subCategories;
@@ -14420,6 +14497,7 @@ function careListRowHtml(item, idx){
   }
   if(careListKind === 'trend' || careListKind === 'budget'){
     const isBudget = careListKind === 'budget';
+    const isTotal = isBudget && item.rowKind === 'total';
     const isSub = item.rowKind === 'sub';
     const isEmptySub = !!(isSub && item.emptySub);
     const checkState = item.checkState || (item.included ? 'all' : 'none');
@@ -14428,23 +14506,29 @@ function careListRowHtml(item, idx){
     const rowCls = (isBudget || (on && !dim) ? '' : ' trend-off')
       + (dim ? ' trend-partial' : '')
       + (isSub ? ' trend-sub' : '')
-      + (isEmptySub ? ' trend-empty-sub' : '');
-    const tip = isBudget
-      ? (isSub
-        ? (isEmptySub
-          ? 'Månadsbelopp för poster i kategorin utan underkategori'
-          : 'Månadsbelopp för underkategorin')
-        : 'Pilen fäller ut underkategorier. Skriv månadsbelopp i rutan.')
-      : (isSub
-        ? (isEmptySub
-          ? 'Poster i kategorin utan underkategori'
-          : 'Använd bockrutan för att inkludera underkategorin i trend')
-        : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga (delvis = vissa valda)');
-    const labelText = isEmptySub ? TREND_EMPTY_SUB_LABEL : item.name;
+      + (isEmptySub ? ' trend-empty-sub' : '')
+      + (isTotal ? ' budget-total-row' : '');
+    const tip = isTotal
+      ? 'Summa av alla kategoribudgetar (ej redigerbar)'
+      : (isBudget
+        ? (isSub
+          ? (isEmptySub
+            ? 'Månadsbelopp för poster i kategorin utan underkategori'
+            : 'Månadsbelopp för underkategorin')
+          : 'Pilen fäller ut underkategorier. Skriv månadsbelopp i rutan.')
+        : (isSub
+          ? (isEmptySub
+            ? 'Poster i kategorin utan underkategori'
+            : 'Använd bockrutan för att inkludera underkategorin i trend')
+          : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga (delvis = vissa valda)'));
+    const labelText = isTotal ? 'Totalt' : (isEmptySub ? TREND_EMPTY_SUB_LABEL : item.name);
     const esc = escapeHtml(labelText);
     const expandAttr = isBudget ? 'data-budget-expand' : 'data-trend-expand';
     let nameHtml = '';
-    if(isSub){
+    if(isTotal){
+      nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span><strong>'
+        + esc + '</strong>';
+    } else if(isSub){
       nameHtml = '<span class="trend-expand-spacer" aria-hidden="true"></span>'
         + (isEmptySub ? '<em class="trend-empty-label">' + esc + '</em>' : esc);
     } else {
@@ -14648,6 +14732,7 @@ async function setBudgetIncludeForItem(idx, included){
 function applyBudgetMonthFromInput(idx, raw){
   const item = careListItems[idx];
   if(!item || !book) return { ok: true };
+  if(item.rowKind === 'total' || item.readOnly) return { ok: true };
   if(!book.budgetMonth || typeof book.budgetMonth !== 'object') book.budgetMonth = {};
   const key = budgetMonthKeyForItem(item);
   if(!key) return { ok: true };
@@ -14735,6 +14820,10 @@ function wireBudgetAmtInputs(){
   if(careListKind !== 'budget' || !careListBody) return;
   const inputs = careListBody.querySelectorAll('input[data-budget-amt]');
   for(const inp of inputs){
+    if(inp.readOnly){
+      inp.addEventListener('click', e => e.stopPropagation());
+      continue;
+    }
     bindAmountInput(inp);
     inp.addEventListener('click', e => e.stopPropagation());
     inp.addEventListener('focus', e => {
@@ -14766,13 +14855,20 @@ function wireBudgetAmtInputs(){
         addBox(careListMessages, 'notice', res.message);
       } else if(res && res.ok){
         clear(careListMessages);
+        // Uppdatera Totalt-raden efter ändring.
+        const keepIdx = idx;
+        renderCareList();
+        if(keepIdx >= 0 && keepIdx < careListItems.length){
+          careListHighlightIdx = keepIdx;
+          updateCareListHighlight();
+        }
       }
     });
     inp.addEventListener('keydown', e => {
       if(e.key !== 'Enter') return;
       e.preventDefault();
       e.stopPropagation();
-      const list = Array.from(careListBody.querySelectorAll('input[data-budget-amt]'));
+      const list = Array.from(careListBody.querySelectorAll('input[data-budget-amt]:not([readonly])'));
       const at = list.indexOf(inp);
       const next = at >= 0 ? list[at + 1] : null;
       if(next){
