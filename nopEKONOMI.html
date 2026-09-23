@@ -4332,7 +4332,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v16';
+const APP_VERSION = '2026-09-23 v17';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6137,11 +6137,9 @@ function syncBudgetAmtBarUi(idx){
     inp.parentNode.insertBefore(wrap, inp);
     wrap.appendChild(inp);
   }
-  const budget = item.rowKind === 'total'
-    ? (typeof item.barBudget === 'number' && item.barBudget > 0 ? item.barBudget : null)
-    : (typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
-      ? item.monthAmt
-      : null);
+  const budget = typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
+    ? item.monthAmt
+    : null;
   const actual = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
     ? item.spentAmt
     : 0;
@@ -6158,10 +6156,7 @@ function syncBudgetAmtBarUi(idx){
   const red = budgetBarIsRed(isIncome, actual, budget);
   wrap.setAttribute('data-budget-over', red ? '1' : '0');
   wrap.setAttribute('data-budget-side', isIncome ? 'in' : 'out');
-  wrap.title = item.rowKind === 'total'
-    ? ('Netto ' + formatBudgetAmtEdit(item.totalNetActual || 0)
-      + ' av planerat ' + formatBudgetAmtEdit(item.totalNetBudget || 0))
-    : budgetAmtBarTip(isIncome, actual, budget);
+  wrap.title = budgetAmtBarTip(isIncome, actual, budget);
   if(!bar){
     bar = document.createElement('span');
     bar.className = 'budget-amt-bar';
@@ -6171,20 +6166,16 @@ function syncBudgetAmtBarUi(idx){
   bar.style.width = (Math.round(pct * 10) / 10) + '%';
 }
 
-/** Uppdatera Totalt-raden från aktuella kategorivärden utan att bygga om hela listan. */
-function refreshBudgetTotalRow(){
-  if(careListKind !== 'budget' || !careListItems.length) return;
-  if(careListItems[0].rowKind !== 'total') return;
-  let budgetSum = 0;
+/** Summera inkomst- respektive utgiftskategorier för totalraderna. */
+function computeBudgetSideTotals(items){
   let inBudget = 0;
   let outBudget = 0;
   let inActual = 0;
   let outActual = 0;
-  for(const it of careListItems){
+  for(const it of items){
     if(it.rowKind !== 'cat') continue;
     const b = typeof it.monthAmt === 'number' && Number.isFinite(it.monthAmt) ? it.monthAmt : 0;
     const a = typeof it.spentAmt === 'number' && Number.isFinite(it.spentAmt) ? it.spentAmt : 0;
-    if(b > 0) budgetSum += b;
     if(it.isIncome){
       if(b > 0) inBudget += b;
       inActual += a;
@@ -6193,24 +6184,45 @@ function refreshBudgetTotalRow(){
       outActual += a;
     }
   }
-  const netBudget = inBudget - outBudget;
-  const netActual = inActual - outActual;
-  const total = careListItems[0];
-  total.monthAmt = budgetSum > 0 ? budgetSum : null;
-  total.spentAmt = netBudget >= 0 ? netActual : -netActual;
-  total.barBudget = Math.abs(netBudget) > 0 ? Math.abs(netBudget) : null;
-  total.isIncome = netBudget >= 0;
-  total.totalNetBudget = netBudget;
-  total.totalNetActual = netActual;
-  total.totalInBudget = inBudget;
-  total.totalOutBudget = outBudget;
-  total.totalInActual = inActual;
-  total.totalOutActual = outActual;
-  if(!careListBody) return;
-  const inp = careListBody.querySelector('input[data-budget-amt="0"]');
-  if(inp) inp.value = formatBudgetAmtEdit(total.monthAmt);
-  syncBudgetAmtBarUi(0);
-  syncBudgetAmtInfoUi(0);
+  return { inBudget, outBudget, inActual, outActual };
+}
+
+function makeBudgetTotalItem(side, totals){
+  const isIn = side === 'in';
+  const budget = isIn ? totals.inBudget : totals.outBudget;
+  const actual = isIn ? totals.inActual : totals.outActual;
+  return {
+    rowKind: 'total',
+    totalSide: side,
+    name: isIn ? 'Budget Inkomster' : 'Budget Utgifter',
+    parent: '',
+    count: 0,
+    monthAmt: budget > 0 ? budget : null,
+    spentAmt: actual,
+    isIncome: isIn,
+    included: true,
+    checkState: 'all',
+    hasSubs: false,
+    expanded: false,
+    readOnly: true
+  };
+}
+
+/** Uppdatera Budget Inkomster / Budget Utgifter utan att bygga om hela listan. */
+function refreshBudgetTotalRow(){
+  if(careListKind !== 'budget' || !careListItems.length) return;
+  const totals = computeBudgetSideTotals(careListItems);
+  for(let i = 0; i < careListItems.length; i++){
+    const item = careListItems[i];
+    if(item.rowKind !== 'total') continue;
+    const fresh = makeBudgetTotalItem(item.totalSide === 'out' ? 'out' : 'in', totals);
+    careListItems[i] = fresh;
+    if(!careListBody) continue;
+    const inp = careListBody.querySelector('input[data-budget-amt="' + i + '"]');
+    if(inp) inp.value = formatBudgetAmtEdit(fresh.monthAmt);
+    syncBudgetAmtBarUi(i);
+    syncBudgetAmtInfoUi(i);
+  }
 }
 
 function formatBudgetAmtEdit(v){
@@ -6407,17 +6419,6 @@ function budgetAmtBarTip(isIncome, actual, budget){
 /** Text till ?-knappen: aktuella värden för posten i innevarande månad. */
 function budgetAmtInfoText(item){
   if(!item) return '';
-  if(item.rowKind === 'total'){
-    let text = 'Totalt\n'
-      + 'Budget: ' + (formatBudgetAmtEdit(item.monthAmt) || '0') + '\n'
-      + 'Inkomstbudget: ' + (formatBudgetAmtEdit(item.totalInBudget) || '0') + '\n'
-      + 'Utgiftsbudget: ' + (formatBudgetAmtEdit(item.totalOutBudget) || '0') + '\n'
-      + 'Netto budget (In−Ut): ' + formatBudgetAmtEdit(item.totalNetBudget || 0) + '\n'
-      + 'Inkommit denna månad: ' + (formatBudgetAmtEdit(item.totalInActual) || '0') + '\n'
-      + 'Förbrukat denna månad: ' + (formatBudgetAmtEdit(item.totalOutActual) || '0') + '\n'
-      + 'Netto denna månad: ' + formatBudgetAmtEdit(item.totalNetActual || 0);
-    return text;
-  }
   const isIncome = !!item.isIncome;
   const actual = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
     ? item.spentAmt
@@ -6426,7 +6427,9 @@ function budgetAmtInfoText(item){
     ? item.monthAmt
     : null;
   const verb = isIncome ? 'Inkommit' : 'Förbrukat';
-  const side = isIncome ? 'Inkomst' : 'Utgift';
+  const side = item.rowKind === 'total'
+    ? item.name
+    : (isIncome ? 'Inkomst' : 'Utgift');
   let text = side + '\n' + verb + ' denna månad: ' + (formatBudgetAmtEdit(actual) || '0');
   if(budget != null){
     const share = budgetBarSharePct(actual, budget);
@@ -6489,16 +6492,10 @@ function showBudgetAmtInfoAt(btn, idx){
 }
 
 function budgetAmtCellHtml(item, idx){
-  const escLabel = escapeHtml(item.rowKind === 'total'
-    ? 'Totalt'
-    : (item.emptySub ? TREND_EMPTY_SUB_LABEL : item.name));
-  const displayBudget = typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
+  const escLabel = escapeHtml(item.emptySub ? TREND_EMPTY_SUB_LABEL : item.name);
+  const barBudget = typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
     ? item.monthAmt
     : null;
-  // Totalt: stapeln styrs av netto (barBudget), rutan visar budgetsumman.
-  const barBudget = item.rowKind === 'total'
-    ? (typeof item.barBudget === 'number' && item.barBudget > 0 ? item.barBudget : null)
-    : displayBudget;
   const actual = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
     ? item.spentAmt
     : 0;
@@ -6509,10 +6506,7 @@ function budgetAmtCellHtml(item, idx){
   if(barBudget != null){
     const pct = budgetBarWidthPct(isIncome, actual, barBudget);
     const red = budgetBarIsRed(isIncome, actual, barBudget);
-    const tip = item.rowKind === 'total'
-      ? ('Netto ' + formatBudgetAmtEdit(item.totalNetActual || 0)
-        + ' av planerat ' + formatBudgetAmtEdit(item.totalNetBudget || 0))
-      : budgetAmtBarTip(isIncome, actual, barBudget);
+    const tip = budgetAmtBarTip(isIncome, actual, barBudget);
     wrapAttrs = ' data-budget-over="' + (red ? '1' : '0')
       + '" data-budget-side="' + (isIncome ? 'in' : 'out')
       + '" title="' + escapeHtml(tip) + '"';
@@ -6529,7 +6523,7 @@ function budgetAmtCellHtml(item, idx){
     + idx + '" value="' + escapeHtml(formatBudgetAmtEdit(item.monthAmt))
     + '" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false"'
     + (readOnly ? ' readonly tabindex="-1"' : '')
-    + ' aria-label="' + (readOnly ? 'Totalt budget ' : 'Månadsbelopp ') + escLabel + '"></span></span></td>';
+    + ' aria-label="' + (readOnly ? 'Summa ' : 'Månadsbelopp ') + escLabel + '"></span></span></td>';
 }
 
 async function persistBudgetEdit(){
@@ -14321,49 +14315,12 @@ function buildCareListItems(){
       }
     }
     if(isBudget){
-      let budgetSum = 0;
-      let inBudget = 0;
-      let outBudget = 0;
-      let inActual = 0;
-      let outActual = 0;
-      for(const it of items){
-        if(it.rowKind !== 'cat') continue;
-        const b = typeof it.monthAmt === 'number' && Number.isFinite(it.monthAmt) ? it.monthAmt : 0;
-        const a = typeof it.spentAmt === 'number' && Number.isFinite(it.spentAmt) ? it.spentAmt : 0;
-        if(b > 0) budgetSum += b;
-        if(it.isIncome){
-          if(b > 0) inBudget += b;
-          inActual += a;
-        } else {
-          if(b > 0) outBudget += b;
-          outActual += a;
-        }
-      }
-      const netBudget = inBudget - outBudget;
-      const netActual = inActual - outActual;
-      items.unshift({
-        rowKind: 'total',
-        name: 'Totalt',
-        parent: '',
-        count: 0,
-        // Visat värde = summa av alla kategoribudgetar.
-        monthAmt: budgetSum > 0 ? budgetSum : null,
-        // Stapeln jämför planerat netto (In−Ut) med faktiskt netto.
-        spentAmt: netBudget >= 0 ? netActual : -netActual,
-        barBudget: Math.abs(netBudget) > 0 ? Math.abs(netBudget) : null,
-        isIncome: netBudget >= 0,
-        totalNetBudget: netBudget,
-        totalNetActual: netActual,
-        totalInBudget: inBudget,
-        totalOutBudget: outBudget,
-        totalInActual: inActual,
-        totalOutActual: outActual,
-        included: true,
-        checkState: 'all',
-        hasSubs: false,
-        expanded: false,
-        readOnly: true
-      });
+      const totals = computeBudgetSideTotals(items);
+      // Högst upp: Budget Inkomster, sedan Budget Utgifter (ej redigerbara).
+      items.unshift(
+        makeBudgetTotalItem('in', totals),
+        makeBudgetTotalItem('out', totals)
+      );
     }
     return items;
   }
@@ -14551,7 +14508,9 @@ function careListRowHtml(item, idx){
       + (isEmptySub ? ' trend-empty-sub' : '')
       + (isTotal ? ' budget-total-row' : '');
     const tip = isTotal
-      ? 'Summa av alla kategoribudgetar (ej redigerbar)'
+      ? (item.totalSide === 'in'
+        ? 'Summa av alla inkomstkategoriers budget (ej redigerbar)'
+        : 'Summa av alla utgiftskategoriers budget (ej redigerbar)')
       : (isBudget
         ? (isSub
           ? (isEmptySub
@@ -14563,7 +14522,7 @@ function careListRowHtml(item, idx){
             ? 'Poster i kategorin utan underkategori'
             : 'Använd bockrutan för att inkludera underkategorin i trend')
           : 'Pilen fäller ut underkategorier. Bockrutan: alla / inga (delvis = vissa valda)'));
-    const labelText = isTotal ? 'Totalt' : (isEmptySub ? TREND_EMPTY_SUB_LABEL : item.name);
+    const labelText = isEmptySub ? TREND_EMPTY_SUB_LABEL : item.name;
     const esc = escapeHtml(labelText);
     const expandAttr = isBudget ? 'data-budget-expand' : 'data-trend-expand';
     let nameHtml = '';
