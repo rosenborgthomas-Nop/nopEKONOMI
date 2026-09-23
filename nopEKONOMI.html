@@ -4610,7 +4610,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v04';
+const APP_VERSION = '2026-09-24 v05';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6914,13 +6914,10 @@ function budgetAmtBarTip(isIncome, actual, budget){
 }
 
 /**
- * Start-översikt: BUDGET UT-stapel + värde = budgetnetto (In − Ut).
+ * Start-teaser: bara utgifter — värde = BUDGET UT, stapel = förbrukat/budget.
  */
 function computeStartBudgetUtTotals(mode){
-  const empty = {
-    outBudget: null, inBudget: null, budgetNet: 0,
-    outActual: 0, inActual: 0, actualNet: 0
-  };
+  const empty = { outBudget: null, outActual: 0 };
   if(!book || !book.order || !book.order.length) return empty;
   syncTrendIncludeMap(book);
   syncBudgetMonthMap(book);
@@ -6934,29 +6931,19 @@ function computeStartBudgetUtTotals(mode){
   const includeMap = book.trendInclude || {};
   const scale = budgetPeriodScale(mode);
   let outBudget = 0;
-  let inBudget = 0;
   let outActual = 0;
-  let inActual = 0;
   let hasOutBudget = false;
-  let hasInBudget = false;
   const cats = (bookLookup.categories || []).slice();
   for(const name of cats){
     if(trendCategoryCheckState(name, includeMap, catSubs) === 'none') continue;
     const isIncome = budgetSignForItem({ rowKind: 'cat', name: name }, signMaps) === 'in';
-    const actual = budgetActualForItem({ rowKind: 'cat', name: name }, activityMap, isIncome);
+    if(isIncome) continue;
+    const actual = budgetActualForItem({ rowKind: 'cat', name: name }, activityMap, false);
     const monthly = Object.prototype.hasOwnProperty.call(monthMap, name)
       && typeof monthMap[name] === 'number'
       && Number.isFinite(monthMap[name])
       ? monthMap[name]
       : null;
-    if(isIncome){
-      inActual += actual;
-      if(monthly != null && monthly > 0){
-        inBudget += Math.round(monthly * scale);
-        hasInBudget = true;
-      }
-      continue;
-    }
     if(monthly != null && monthly > 0){
       outBudget += Math.round(monthly * scale);
       hasOutBudget = true;
@@ -6965,12 +6952,7 @@ function computeStartBudgetUtTotals(mode){
   }
   return {
     outBudget: hasOutBudget ? outBudget : null,
-    inBudget: hasInBudget ? inBudget : null,
-    budgetNet: (hasInBudget ? inBudget : 0) - (hasOutBudget ? outBudget : 0),
-    outActual: outActual,
-    inActual: inActual,
-    actualNet: inActual - outActual,
-    hasBudget: hasInBudget || hasOutBudget
+    outActual: outActual
   };
 }
 
@@ -6999,29 +6981,21 @@ function paintStartPeriodBar(){
   const totals = computeStartBudgetUtTotals(startPeriodMode);
   const budget = totals.outBudget;
   const actual = totals.outActual;
-  // Värde = budgetnetto (In − Ut); saknas budget → utfallsnetto.
-  const net = totals.hasBudget ? totals.budgetNet : totals.actualNet;
-  valueEl.textContent = formatBudgetAmtEdit(net);
-  valueEl.classList.toggle('pos', net >= 0);
-  valueEl.classList.toggle('neg', net < 0);
-  const valueTip = totals.hasBudget
-    ? ('Budgetnetto ' + formatBudgetAmtEdit(net)
-      + ' (In ' + formatBudgetAmtEdit(totals.inBudget || 0)
-      + ' − Ut ' + formatBudgetAmtEdit(totals.outBudget || 0) + ')')
-    : ('Utfallsnetto ' + formatBudgetAmtEdit(totals.actualNet)
-      + ' (In ' + formatBudgetAmtEdit(totals.inActual)
-      + ' − Ut ' + formatBudgetAmtEdit(actual) + ')');
+  valueEl.classList.remove('pos', 'neg');
   let bar = amtBar;
   if(budget == null || !(budget > 0)){
     wrap.removeAttribute('data-budget-over');
     if(actual > 0){
       wrap.setAttribute('data-budget-unbudgeted', 'out');
       wrap.setAttribute('data-budget-side', 'out');
-      wrap.title = valueTip + '\nFörbrukat utan budget i vald period';
+      wrap.title = 'Förbrukat ' + formatBudgetAmtEdit(actual)
+        + ' utan budget i vald period';
+      valueEl.textContent = formatBudgetAmtEdit(actual);
     } else {
       wrap.removeAttribute('data-budget-unbudgeted');
       wrap.removeAttribute('data-budget-side');
-      wrap.title = valueTip;
+      wrap.removeAttribute('title');
+      valueEl.textContent = '';
     }
     if(bar) bar.style.width = '0';
     return;
@@ -7031,7 +7005,8 @@ function paintStartPeriodBar(){
   const red = budgetBarIsRed(false, actual, budget);
   wrap.setAttribute('data-budget-over', red ? '1' : '0');
   wrap.setAttribute('data-budget-side', 'out');
-  wrap.title = valueTip + '\n' + budgetAmtBarTip(false, actual, budget);
+  wrap.title = budgetAmtBarTip(false, actual, budget);
+  valueEl.textContent = formatBudgetAmtEdit(budget);
   if(!bar){
     bar = document.createElement('span');
     bar.className = 'budget-amt-bar';
