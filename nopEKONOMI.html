@@ -2804,6 +2804,24 @@ footer p{
   max-height:calc(100dvh - 220px);
   overflow:hidden;
 }
+.budget-period-bar{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex:0 0 auto;
+  margin:0 0 10px;
+  min-width:0;
+}
+.budget-period-bar .report-col-label{
+  flex:0 0 auto;
+  margin:0;
+  white-space:nowrap;
+}
+.budget-period-bar .menu-select{
+  flex:1 1 auto;
+  min-width:0;
+  max-width:22rem;
+}
 .care-list-shell{
   background:var(--paper);
   color:var(--text-on-paper);
@@ -3679,6 +3697,19 @@ td.num.dash .cell-content{
       <div id="careHubListStage">
         <main class="panel">
           <div id="careListStageList" class="care-list-stage">
+            <div id="budgetPeriodBar" class="budget-period-bar" hidden>
+              <label class="report-col-label" for="budgetPeriodMenu">Period</label>
+              <select id="budgetPeriodMenu" class="menu-select" title="Budgetperiod" aria-label="Budgetperiod">
+                <option value="currentMonth">Pågående månad</option>
+                <option value="currentYear">Pågående år</option>
+                <option value="prevMonth">Föregående månad</option>
+                <option value="prevYear">Föregående år</option>
+                <option value="last30">Senaste 30 dagarna</option>
+                <option value="last3m">Senaste 3 månaderna</option>
+                <option value="last6m">Senaste 6 månaderna</option>
+                <option value="last12m">Senaste 12 månaderna</option>
+              </select>
+            </div>
             <div class="care-list-shell">
               <div class="table-scroll care-list-scroll" id="careListScroll" tabindex="0">
                 <table class="care-list-table" id="careListTable">
@@ -4407,7 +4438,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v19';
+const APP_VERSION = '2026-09-23 v20';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6177,9 +6208,10 @@ function raiseBudgetCatToSubSum(cat){
 
 function syncBudgetCatAmtInUi(catName){
   if(!careListBody || !catName) return;
-  const amt = book && book.budgetMonth && typeof book.budgetMonth[catName] === 'number'
+  const monthly = book && book.budgetMonth && typeof book.budgetMonth[catName] === 'number'
     ? book.budgetMonth[catName]
     : null;
+  const amt = budgetMonthlyToPeriod(monthly);
   const catIdx = careListItems.findIndex(it => it.rowKind === 'cat' && it.name === catName);
   if(catIdx < 0) return;
   careListItems[catIdx].monthAmt = amt;
@@ -6332,6 +6364,63 @@ function budgetCurrentMonthKey(){
   return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0');
 }
 
+/** Datumintervall för vald budgetperiod (samma tolkning som Rapport → Period). */
+function budgetPeriodRange(mode){
+  const m = mode || budgetPeriodMode || 'currentMonth';
+  return datesForTimePreset(m) || datesForTimePreset('currentMonth');
+}
+
+/**
+ * Skalfaktor månadsbudget → periodbelopp.
+ * Pågående/föregående månad och senaste 30 dagar = 1× månad.
+ * Övriga = antal månader i valet (år = 12 / månader hittills i året).
+ */
+function budgetPeriodScale(mode){
+  const m = mode || budgetPeriodMode || 'currentMonth';
+  if(m === 'currentMonth' || m === 'prevMonth' || m === 'last30') return 1;
+  if(m === 'last3m') return 3;
+  if(m === 'last6m') return 6;
+  if(m === 'last12m' || m === 'prevYear') return 12;
+  if(m === 'currentYear'){
+    const today = todayIsoDate();
+    return Math.max(1, Number(today.slice(5, 7)));
+  }
+  return 1;
+}
+
+function budgetMonthlyToPeriod(monthly){
+  if(typeof monthly !== 'number' || !Number.isFinite(monthly)) return null;
+  return monthly * budgetPeriodScale();
+}
+
+function budgetPeriodToMonthly(periodAmt){
+  if(typeof periodAmt !== 'number' || !Number.isFinite(periodAmt)) return periodAmt;
+  const s = budgetPeriodScale();
+  return s > 0 ? periodAmt / s : periodAmt;
+}
+
+function budgetPeriodLabel(mode){
+  const m = mode || budgetPeriodMode || 'currentMonth';
+  const sel = el('budgetPeriodMenu');
+  if(sel){
+    for(const opt of sel.options){
+      if(opt.value === m) return (opt.textContent || '').trim();
+    }
+  }
+  return 'perioden';
+}
+
+function syncBudgetPeriodBar(){
+  const bar = el('budgetPeriodBar');
+  const menu = el('budgetPeriodMenu');
+  if(!bar) return;
+  const on = careListKind === 'budget';
+  bar.hidden = !on;
+  if(on && menu && menu.value !== budgetPeriodMode){
+    menu.value = budgetPeriodMode;
+  }
+}
+
 /**
  * Klassificera kategori/underkategori som inkomst eller utgift utifrån historiskt netto
  * (samma princip som Rapport: positivt netto → In, negativt → Ut).
@@ -6391,9 +6480,10 @@ function budgetSignForItem(item, signMaps){
 }
 
 /**
- * Aktivitet i aktuell månad per bocklista-blad: inkomst (positiva) och utgift (negativa abs).
+ * Aktivitet i vald period per bocklista-blad: inkomst (positiva) och utgift (negativa abs).
+ * fromIso/toIso använder samma intervalltolkning som Rapport.
  */
-function buildBudgetMonthActivityMap(monthKey){
+function buildBudgetMonthActivityMap(fromIso, toIso){
   const leafIn = Object.create(null);
   const leafOut = Object.create(null);
   const catIn = Object.create(null);
@@ -6402,7 +6492,18 @@ function buildBudgetMonthActivityMap(monthKey){
     return { leafIn: leafIn, leafOut: leafOut, catIn: catIn, catOut: catOut };
   }
   syncTrendIncludeMap(book);
-  const mkWant = monthKey || budgetCurrentMonthKey();
+  let from = fromIso;
+  let to = toIso;
+  if(!from || !to){
+    const range = budgetPeriodRange();
+    from = range && range.from;
+    to = range && range.to;
+  }
+  if(!from || !to){
+    const mk = budgetCurrentMonthKey();
+    from = mk + '-01';
+    to = todayIsoDate();
+  }
 
   for(const name of book.order){
     const acc = book.accounts[name];
@@ -6412,7 +6513,7 @@ function buildBudgetMonthActivityMap(monthKey){
       if(isReportExcludedRow(r)) continue;
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
-      if(monthKeyFromIso(d) !== mkWant) continue;
+      if(d < from || d > to) continue;
       if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
       for(const piece of reportPiecesFromRow(r)){
         const cat = (piece.category || '').trim();
@@ -6506,7 +6607,7 @@ function budgetAmtBarTip(isIncome, actual, budget){
   return tip;
 }
 
-/** Text till ?-knappen: aktuella värden för posten i innevarande månad. */
+/** Text till ?-knappen: aktuella värden för posten i vald period. */
 function budgetAmtInfoText(item){
   if(!item) return '';
   const isIncome = !!item.isIncome;
@@ -6520,7 +6621,8 @@ function budgetAmtInfoText(item){
   const side = item.rowKind === 'total'
     ? item.name
     : (isIncome ? 'Inkomst' : 'Utgift');
-  let text = side + '\n' + verb + ' denna månad: ' + (formatBudgetAmtEdit(actual) || '0');
+  const when = budgetPeriodLabel();
+  let text = side + '\n' + verb + ' (' + when + '): ' + (formatBudgetAmtEdit(actual) || '0');
   if(budget != null){
     const share = budgetBarSharePct(actual, budget);
     text += '\nBudget: ' + formatBudgetAmtEdit(budget)
@@ -14217,6 +14319,8 @@ let careListSaving = false;
 let trendExpandedCats = new Set();
 /** Expanderade kategorier i Budget (session). */
 let budgetExpandedCats = new Set();
+/** Vald budgetperiod (samma nycklar som Rapport → Period). */
+let budgetPeriodMode = 'currentMonth';
 
 bindSignedAmountInput(careListEditBalance);
 
@@ -14369,7 +14473,10 @@ function buildCareListItems(){
     const catSubs = buildTrendCategorySubsMap(book);
     const map = book.trendInclude || {};
     const monthMap = isBudget ? (book.budgetMonth || {}) : null;
-    const activityMap = isBudget ? buildBudgetMonthActivityMap(budgetCurrentMonthKey()) : null;
+    const range = isBudget ? budgetPeriodRange() : null;
+    const activityMap = isBudget
+      ? buildBudgetMonthActivityMap(range && range.from, range && range.to)
+      : null;
     const signMaps = isBudget ? buildBudgetSignMaps() : null;
     const expandedSet = isBudget ? budgetExpandedCats : trendExpandedCats;
     const items = [];
@@ -14393,9 +14500,10 @@ function buildCareListItems(){
       if(isBudget && !leafRows.length) continue;
 
       const expanded = expandedSet.has(name);
-      const catAmt = monthMap && Object.prototype.hasOwnProperty.call(monthMap, name)
+      const catMonthly = monthMap && Object.prototype.hasOwnProperty.call(monthMap, name)
         ? monthMap[name]
         : null;
+      const catAmt = isBudget ? budgetMonthlyToPeriod(catMonthly) : catMonthly;
       const catIsIncome = isBudget && budgetSignForItem({ rowKind: 'cat', name: name }, signMaps) === 'in';
       const catItem = {
         rowKind: 'cat',
@@ -14415,9 +14523,10 @@ function buildCareListItems(){
         for(const leaf of leafRows){
           const emptyKey = trendEmptySubKey(name);
           const sk = leaf.emptySub ? emptyKey : trendIncludeSubKey(name, leaf.name);
-          const leafAmt = monthMap && Object.prototype.hasOwnProperty.call(monthMap, sk)
+          const leafMonthly = monthMap && Object.prototype.hasOwnProperty.call(monthMap, sk)
             ? monthMap[sk]
             : null;
+          const leafAmt = isBudget ? budgetMonthlyToPeriod(leafMonthly) : leafMonthly;
           const leafItem = {
             rowKind: 'sub',
             name: leaf.name,
@@ -14742,6 +14851,7 @@ function renderCareList(){
   if(careListOkBtn) careListOkBtn.hidden = false;
   if(careListBackupBtn) careListBackupBtn.hidden = careListKind !== 'bok';
   syncCareHubMenuVisibility();
+  syncBudgetPeriodBar();
   clear(careListMessages);
   hideBudgetLeaveConfirm();
   hideBudgetAmtInfoPops();
@@ -14872,55 +14982,59 @@ function applyBudgetMonthFromInput(idx, raw){
   const key = budgetMonthKeyForItem(item);
   if(!key) return { ok: true };
   const text = String(raw == null ? '' : raw).trim();
-  const prev = typeof book.budgetMonth[key] === 'number' && Number.isFinite(book.budgetMonth[key])
+  const prevMonthly = typeof book.budgetMonth[key] === 'number' && Number.isFinite(book.budgetMonth[key])
     ? book.budgetMonth[key]
     : null;
+  const prevPeriod = budgetMonthlyToPeriod(prevMonthly);
 
   if(item.rowKind === 'cat'){
-    const subSum = budgetSubMonthSum(item.name);
+    const subSumMonthly = budgetSubMonthSum(item.name);
+    const subSumPeriod = budgetMonthlyToPeriod(subSumMonthly > 0 ? subSumMonthly : null) || 0;
     if(!text){
-      // Tom kategori + underkategorivärden → fyll i summan automatiskt.
-      if(subSum > 0){
-        book.budgetMonth[key] = subSum;
-        item.monthAmt = subSum;
+      // Tom kategori + underkategorivärden → fyll i summan automatiskt (periodbelopp i UI).
+      if(subSumMonthly > 0){
+        book.budgetMonth[key] = subSumMonthly;
+        item.monthAmt = budgetMonthlyToPeriod(subSumMonthly);
         return { ok: true, autofilled: true };
       }
       delete book.budgetMonth[key];
       item.monthAmt = null;
       return { ok: true };
     }
-    let n;
-    try{ n = parseAmount(text); }
+    let nPeriod;
+    try{ nPeriod = parseAmount(text); }
     catch(e){
-      item.monthAmt = prev;
+      item.monthAmt = prevPeriod;
       return { ok: false, message: 'Ogiltigt belopp.' };
     }
-    if(n < subSum){
-      item.monthAmt = prev;
+    const nMonthly = budgetPeriodToMonthly(nPeriod);
+    if(nMonthly < subSumMonthly){
+      item.monthAmt = prevPeriod;
       return {
         ok: false,
         message: 'Kategoribeloppet kan inte vara lägre än underkategorierna ('
-          + formatBudgetAmtEdit(subSum) + ').'
+          + formatBudgetAmtEdit(subSumPeriod) + ').'
       };
     }
-    book.budgetMonth[key] = n;
-    item.monthAmt = n;
+    book.budgetMonth[key] = nMonthly;
+    item.monthAmt = budgetMonthlyToPeriod(nMonthly);
     return { ok: true };
   }
 
-  // Underkategori (inkl. tom underkategori)
+  // Underkategori (inkl. tom underkategori) — inmatning i periodbelopp, lagras som månad.
   if(!text){
     delete book.budgetMonth[key];
     item.monthAmt = null;
   } else {
-    let n;
-    try{ n = parseAmount(text); }
+    let nPeriod;
+    try{ nPeriod = parseAmount(text); }
     catch(e){
-      item.monthAmt = prev;
+      item.monthAmt = prevPeriod;
       return { ok: false, message: 'Ogiltigt belopp.' };
     }
-    book.budgetMonth[key] = n;
-    item.monthAmt = n;
+    const nMonthly = budgetPeriodToMonthly(nPeriod);
+    book.budgetMonth[key] = nMonthly;
+    item.monthAmt = budgetMonthlyToPeriod(nMonthly);
   }
   const parent = item.parent;
   raiseBudgetCatToSubSum(parent);
@@ -15572,6 +15686,21 @@ careListBody.addEventListener('dblclick', e => {
   updateCareListHighlight();
   careListOpenHighlighted();
 });
+
+const budgetPeriodMenu = el('budgetPeriodMenu');
+if(budgetPeriodMenu){
+  budgetPeriodMenu.addEventListener('change', () => {
+    if(careListKind !== 'budget') return;
+    flushBudgetMonthInputs();
+    budgetPeriodMode = budgetPeriodMenu.value || 'currentMonth';
+    const keepIdx = careListHighlightIdx;
+    renderCareList();
+    if(keepIdx >= 0 && keepIdx < careListItems.length){
+      careListHighlightIdx = keepIdx;
+      updateCareListHighlight();
+    }
+  });
+}
 
 careListCancelBtn.addEventListener('click', closeCareList);
 careListOkBtn.addEventListener('click', () => {
