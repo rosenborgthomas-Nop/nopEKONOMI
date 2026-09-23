@@ -2859,14 +2859,15 @@ footer p{
   border-radius:4px;
   pointer-events:none;
   z-index:0;
-  opacity:0.30;
+  opacity:0.55;
 }
 .care-list-table .budget-amt-wrap[data-budget-over="0"] .budget-amt-bar{
-  background:var(--chart-positive, #3A8F5C);
+  background:#1FAE55;
+  opacity:0.58;
 }
 .care-list-table .budget-amt-wrap[data-budget-over="1"] .budget-amt-bar{
-  background:var(--wine, #A33B3B);
-  opacity:0.38;
+  background:#E03131;
+  opacity:0.62;
 }
 .care-list-table td.cl-budget-amt input.budget-amt-input{
   position:relative;
@@ -2878,7 +2879,7 @@ footer p{
   padding:0.28rem 0.4rem;
   border:1px solid var(--paper-line, #b8c4d4);
   border-radius:4px;
-  background:color-mix(in srgb, var(--paper-surface, #E8EFF7) 82%, transparent);
+  background:color-mix(in srgb, var(--paper-surface, #E8EFF7) 55%, transparent);
   color:var(--ink, #1a3050);
   font-family:'JetBrains Mono', monospace;
   font-size:13px;
@@ -4294,7 +4295,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v07';
+const APP_VERSION = '2026-09-23 v08';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6102,7 +6103,8 @@ function syncBudgetAmtBarUi(idx){
   const over = spent > budget;
   wrap.setAttribute('data-budget-over', over ? '1' : '0');
   wrap.title = 'Förbrukat ' + formatBudgetAmtEdit(spent)
-    + ' av ' + formatBudgetAmtEdit(budget) + ' i aktuell månad';
+    + ' av ' + formatBudgetAmtEdit(budget)
+    + ' (' + Math.round(pct) + ' %) i aktuell månad';
   if(!bar){
     bar = document.createElement('span');
     bar.className = 'budget-amt-bar';
@@ -6192,8 +6194,10 @@ function budgetAmtCellHtml(item, idx){
   if(budget != null){
     const pct = Math.min(100, (spent / budget) * 100);
     const over = spent > budget;
+    const pctLabel = Math.round(pct);
     const tip = 'Förbrukat ' + formatBudgetAmtEdit(spent)
-      + ' av ' + formatBudgetAmtEdit(budget) + ' i aktuell månad';
+      + ' av ' + formatBudgetAmtEdit(budget)
+      + ' (' + pctLabel + ' %) i aktuell månad';
     wrapAttrs = ' data-budget-over="' + (over ? '1' : '0') + '" title="' + escapeHtml(tip) + '"';
     barHtml = '<span class="budget-amt-bar" style="width:'
       + (Math.round(pct * 10) / 10) + '%" aria-hidden="true"></span>';
