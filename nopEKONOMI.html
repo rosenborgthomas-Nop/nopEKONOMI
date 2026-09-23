@@ -2821,9 +2821,20 @@ footer p{
   white-space:nowrap;
 }
 .budget-period-bar .menu-select{
+  flex:0 1 auto;
+  min-width:0;
+  max-width:18rem;
+}
+.budget-period-bar .budget-period-dates{
   flex:1 1 auto;
   min-width:0;
-  max-width:22rem;
+  font-family:'JetBrains Mono', monospace;
+  font-size:12px;
+  letter-spacing:0.02em;
+  color:var(--text-on-paper-soft, #5a6a7a);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .care-list-shell{
   background:var(--paper);
@@ -3712,6 +3723,7 @@ td.num.dash .cell-content{
                 <option value="last6m">Senaste 6 månaderna</option>
                 <option value="last12m">Senaste 12 månaderna</option>
               </select>
+              <span id="budgetPeriodDates" class="budget-period-dates" aria-live="polite"></span>
             </div>
             <div class="care-list-shell">
               <div class="table-scroll care-list-scroll" id="careListScroll" tabindex="0">
@@ -4441,7 +4453,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v21';
+const APP_VERSION = '2026-09-23 v22';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6413,14 +6425,38 @@ function budgetPeriodLabel(mode){
   return 'perioden';
 }
 
+function budgetPeriodDateLabel(iso){
+  if(!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+  const y = Number(iso.slice(0, 4));
+  const m = Number(iso.slice(5, 7));
+  const d = Number(iso.slice(8, 10));
+  return d + '/' + m + ' ' + y;
+}
+
 function syncBudgetPeriodBar(){
   const bar = el('budgetPeriodBar');
   const menu = el('budgetPeriodMenu');
+  const datesEl = el('budgetPeriodDates');
   if(!bar) return;
   const on = careListKind === 'budget';
   bar.hidden = !on;
-  if(on && menu && menu.value !== budgetPeriodMode){
+  if(!on){
+    if(datesEl) datesEl.textContent = '';
+    return;
+  }
+  if(menu && menu.value !== budgetPeriodMode){
     menu.value = budgetPeriodMode;
+  }
+  if(datesEl){
+    const range = budgetPeriodRange();
+    if(range && range.from && range.to){
+      datesEl.textContent = budgetPeriodDateLabel(range.from)
+        + ' \u2013 ' + budgetPeriodDateLabel(range.to);
+      datesEl.title = range.from + ' \u2013 ' + range.to;
+    } else {
+      datesEl.textContent = '';
+      datesEl.removeAttribute('title');
+    }
   }
 }
 
