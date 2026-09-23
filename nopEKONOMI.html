@@ -3635,7 +3635,6 @@ td.num.dash .cell-content{
 
     <div class="care-list-actions trend-page-actions">
       <div class="care-list-actions-right">
-        <button class="btn-cancel" id="trendCancelBtn" type="button">Avbryt</button>
         <button class="btn-ok" id="trendOkBtn" type="button">OK</button>
       </div>
     </div>
@@ -4482,7 +4481,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v32';
+const APP_VERSION = '2026-09-23 v33';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11417,7 +11416,7 @@ const trendBody = el('trendBody');
 const trendPlaceholder = el('trendPlaceholder');
 const trendBackBtn = el('trendBackBtn');
 const trendOkBtn = el('trendOkBtn');
-const trendCancelBtn = el('trendCancelBtn');
+const trendCancelBtn = null;
 
 function isTrendDetailType(val){
   return TREND_DETAIL_TYPES.has(val);
@@ -11533,6 +11532,39 @@ function leaveTrendPage(commit){
   else discardTrendPrefsSession();
   trendDetailDrill = null;
   show('start');
+}
+
+/** Tillbaka från detail-diagram → listan; annars lämna Trend. */
+function trendNavigateBack(){
+  if(trendDetailDrill && isTrendDetailType(trendDetailDrill.kind)){
+    const kind = trendDetailDrill.kind;
+    trendDetailDrill = null;
+    renderTrendDetailList(kind);
+    syncTrendNavChrome();
+    return;
+  }
+  leaveTrendPage(false);
+}
+
+function trendNavigateOk(){
+  if(trendDetailDrill && isTrendDetailType(trendDetailDrill.kind)){
+    const kind = trendDetailDrill.kind;
+    trendDetailDrill = null;
+    renderTrendDetailList(kind);
+    syncTrendNavChrome();
+    return;
+  }
+  leaveTrendPage(true);
+}
+
+function syncTrendNavChrome(){
+  if(trendBackBtn){
+    if(trendDetailDrill && isTrendDetailType(trendDetailDrill.kind)){
+      trendBackBtn.textContent = '← ' + trendDetailListLabel(trendDetailDrill.kind);
+    } else {
+      trendBackBtn.textContent = '← Start';
+    }
+  }
 }
 
 function clearTrendCanvas(){
@@ -12507,6 +12539,7 @@ function renderTrendDetailPrognos(kind, itemName){
   const goBack = () => {
     trendDetailDrill = null;
     renderTrendDetailList(kind);
+    syncTrendNavChrome();
   };
 
   if(!raw.ok){
@@ -12519,6 +12552,7 @@ function renderTrendDetailPrognos(kind, itemName){
     const back = wrap.querySelector('#' + backBtnId);
     if(back) back.addEventListener('click', goBack);
     resetTrendScroll();
+    syncTrendNavChrome();
     return;
   }
 
@@ -12653,6 +12687,7 @@ function renderTrendDetailPrognos(kind, itemName){
   trendBody.appendChild(wrap);
   sizeTrendChartText(wrap);
   resetTrendScroll();
+  syncTrendNavChrome();
 
   const back = wrap.querySelector('#' + backBtnId);
   if(back) back.addEventListener('click', goBack);
@@ -12753,6 +12788,7 @@ function renderTrendDetailList(kind){
     + '</div>';
   trendBody.appendChild(wrap);
   resetTrendScroll();
+  syncTrendNavChrome();
 }
 
 function renderTrendPage(){
@@ -12788,6 +12824,7 @@ function renderTrendPage(){
         + '<span class="report-placeholder-hint">Okänd trendtyp.</span>';
     }
   }
+  syncTrendNavChrome();
 }
 
 function refreshTrendPagePreview(){
@@ -12807,11 +12844,11 @@ function refreshTrendPagePreview(){
     renderTrendDetailPrognos(trendDetailDrill.kind, trendDetailDrill.name);
   }
   else if(isTrendDetailType(type)) renderTrendDetailList(type);
+  syncTrendNavChrome();
 }
 
-if(trendBackBtn) trendBackBtn.addEventListener('click', () => leaveTrendPage(false));
-if(trendCancelBtn) trendCancelBtn.addEventListener('click', () => leaveTrendPage(false));
-if(trendOkBtn) trendOkBtn.addEventListener('click', () => leaveTrendPage(true));
+if(trendBackBtn) trendBackBtn.addEventListener('click', trendNavigateBack);
+if(trendOkBtn) trendOkBtn.addEventListener('click', trendNavigateOk);
 if(trendBody){
   trendBody.addEventListener('dblclick', e => {
     const drillRow = e.target && e.target.closest
@@ -21438,7 +21475,7 @@ function triggerEscapeBack(){
       show('start');
       return true;
     case 'trend':
-      leaveTrendPage(false);
+      trendNavigateBack();
       return true;
     case 'start':
       leaveBook();
