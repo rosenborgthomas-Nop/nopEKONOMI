@@ -4480,7 +4480,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v28';
+const APP_VERSION = '2026-09-23 v29';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6446,7 +6446,7 @@ function budgetPeriodScale(mode){
 function budgetMonthlyToPeriod(monthly){
   if(typeof monthly !== 'number' || !Number.isFinite(monthly)) return null;
   const s = budgetPeriodScale();
-  // Öre-avrundning så ×N-perioder inte driver iväg i tipp/stapel.
+  // Visa periodbelopp avrundat till öre.
   return Math.round(monthly * s * 100) / 100;
 }
 
@@ -6454,13 +6454,23 @@ function budgetPeriodToMonthly(periodAmt){
   if(typeof periodAmt !== 'number' || !Number.isFinite(periodAmt)) return periodAmt;
   const s = budgetPeriodScale();
   if(!(s > 0)) return periodAmt;
-  return Math.round((periodAmt / s) * 100) / 100;
+  // Full precision — öre-avrundning av månadsbelopp (t.ex. 1012/12 → 84,33)
+  // ger synlig drift (1011,96) och osynlig röd stapel.
+  return periodAmt / s;
 }
 
-/** Jämförelse med öre-tolerans (undvik 100 % + osynlig röd stapel p.g.a. float). */
+/**
+ * "Samma" budget/utfall för stapel och tipp.
+ * Täcker både öre-likhet och fall där andelen avrundas till 100 % och felet till 0 %.
+ */
 function budgetAmountsNearlyEqual(a, b){
   if(!Number.isFinite(a) || !Number.isFinite(b)) return false;
-  return Math.abs(a - b) < 0.02;
+  if(Math.round(a * 100) === Math.round(b * 100)) return true;
+  if(!(b > 0) && !(a > 0)) return true;
+  if(!(b > 0)) return Math.abs(a - b) < 0.05;
+  const share = (Math.max(0, a) / b) * 100;
+  const err = (Math.abs(a - b) / b) * 100;
+  return Math.round(share) === 100 && Math.round(err) === 0;
 }
 
 function budgetPeriodLabel(mode){
@@ -6647,7 +6657,12 @@ function budgetActualForItem(item, activityMap, isIncome){
 function budgetBarIsRed(isIncome, actual, budget){
   if(!(budget > 0)) return false;
   if(budgetAmountsNearlyEqual(actual, budget)) return false;
-  return isIncome ? actual < budget : actual > budget;
+  if(isIncome){
+    if(!(actual < budget)) return false;
+    return Math.round(((budget - actual) / budget) * 100) > 0;
+  }
+  if(!(actual > budget)) return false;
+  return Math.round(((actual - budget) / budget) * 100) > 0;
 }
 
 /**
@@ -6658,19 +6673,16 @@ function budgetBarIsRed(isIncome, actual, budget){
 function budgetBarWidthPct(isIncome, actual, budget){
   if(!(budget > 0)) return 0;
   const a = Math.max(0, actual);
-  if(budgetAmountsNearlyEqual(a, budget)) return 100;
-  if(isIncome){
-    if(a < budget){
-      // Röd: hur stor del av målet som saknas.
-      return Math.min(100, ((budget - a) / budget) * 100);
-    }
-    return Math.min(100, (a / budget) * 100);
+  if(!budgetBarIsRed(isIncome, a, budget)){
+    if(budgetAmountsNearlyEqual(a, budget)) return 100;
+    const share = budgetBarSharePct(a, budget);
+    return Math.min(100, share);
   }
-  if(a <= budget){
-    return Math.min(100, (a / budget) * 100);
-  }
-  // Röd: hur mycket över budget i procent.
-  return Math.min(100, ((a - budget) / budget) * 100);
+  const err = isIncome
+    ? ((budget - a) / budget) * 100
+    : ((a - budget) / budget) * 100;
+  // Minst 2 % synlig röd remsa när felet räknas som rött.
+  return Math.min(100, Math.max(2, err));
 }
 
 /** Andel actual/budget (för text), kan vara över 100. */
@@ -6752,10 +6764,10 @@ function budgetAmtInfoHtml(item, fillIdx){
   }
   const lines = [escapeHtml(side), actualLine];
   if(budget != null){
-    const share = budgetAmountsNearlyEqual(actual, budget)
-      ? 100
-      : budgetBarSharePct(actual, budget);
-    lines.push(escapeHtml('Budget: ' + formatBudgetAmtEdit(budget)));
+    const onTarget = budgetAmountsNearlyEqual(actual, budget);
+    const share = onTarget ? 100 : budgetBarSharePct(actual, budget);
+    const budgetShow = onTarget ? actual : budget;
+    lines.push(escapeHtml('Budget: ' + formatBudgetAmtEdit(budgetShow)));
     lines.push(escapeHtml('Andel: ' + Math.round(share) + ' %'));
     if(budgetBarIsRed(isIncome, actual, budget)){
       const err = isIncome
