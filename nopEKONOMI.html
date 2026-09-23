@@ -4610,7 +4610,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v05';
+const APP_VERSION = '2026-09-24 v06';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6666,16 +6666,19 @@ function budgetPeriodToMonthly(periodAmt){
 
 /**
  * "Samma" budget/utfall för stapel och tipp.
- * Täcker både öre-likhet och fall där andelen avrundas till 100 % och felet till 0 %.
+ * Täcker hela kronor, avrundning till 100 %, och fel under 1 %
+ * (t.ex. 335 / 333 ≈ 0,6 % ska inte bli "Över: 1 %").
  */
 function budgetAmountsNearlyEqual(a, b){
   if(!Number.isFinite(a) || !Number.isFinite(b)) return false;
-  // Budget visas i hela kronor.
-  if(Math.round(a) === Math.round(b)) return true;
-  if(!(b > 0) && !(a > 0)) return true;
-  if(!(b > 0)) return Math.abs(a - b) < 0.5;
-  const share = (Math.max(0, a) / b) * 100;
-  const err = (Math.abs(a - b) / b) * 100;
+  const ra = Math.round(a);
+  const rb = Math.round(b);
+  if(ra === rb) return true;
+  if(!(rb > 0) && !(ra > 0)) return true;
+  if(!(rb > 0)) return Math.abs(ra - rb) < 1;
+  const share = (Math.max(0, ra) / rb) * 100;
+  const err = (Math.abs(ra - rb) / rb) * 100;
+  if(err < 1) return true;
   return Math.round(share) === 100 && Math.round(err) === 0;
 }
 
