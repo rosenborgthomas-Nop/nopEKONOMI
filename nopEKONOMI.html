@@ -4327,7 +4327,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v13';
+const APP_VERSION = '2026-09-23 v14';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6147,11 +6147,11 @@ function syncBudgetAmtBarUi(idx){
     if(bar) bar.remove();
     return;
   }
-  const pct = Math.min(100, (actual / budget) * 100);
+  const pct = budgetBarWidthPct(isIncome, actual, budget);
   const red = budgetBarIsRed(isIncome, actual, budget);
   wrap.setAttribute('data-budget-over', red ? '1' : '0');
   wrap.setAttribute('data-budget-side', isIncome ? 'in' : 'out');
-  wrap.title = budgetAmtBarTip(isIncome, actual, budget, pct);
+  wrap.title = budgetAmtBarTip(isIncome, actual, budget);
   if(!bar){
     bar = document.createElement('span');
     bar.className = 'budget-amt-bar';
@@ -6306,11 +6306,50 @@ function budgetBarIsRed(isIncome, actual, budget){
   return isIncome ? actual < budget : actual > budget;
 }
 
-function budgetAmtBarTip(isIncome, actual, budget, pct){
+/**
+ * Stapelbredd 0–100.
+ * Grön: andel av budget (förbrukat/inkommit).
+ * Röd: hur många procent felet är (utgift: överskott, inkomst: underskott).
+ */
+function budgetBarWidthPct(isIncome, actual, budget){
+  if(!(budget > 0)) return 0;
+  const a = Math.max(0, actual);
+  if(isIncome){
+    if(a < budget){
+      // Röd: hur stor del av målet som saknas.
+      return Math.min(100, ((budget - a) / budget) * 100);
+    }
+    return Math.min(100, (a / budget) * 100);
+  }
+  if(a <= budget){
+    return Math.min(100, (a / budget) * 100);
+  }
+  // Röd: hur mycket över budget i procent.
+  return Math.min(100, ((a - budget) / budget) * 100);
+}
+
+/** Andel actual/budget (för text), kan vara över 100. */
+function budgetBarSharePct(actual, budget){
+  if(!(budget > 0)) return 0;
+  return (Math.max(0, actual) / budget) * 100;
+}
+
+function budgetAmtBarTip(isIncome, actual, budget){
   const verb = isIncome ? 'Inkommit' : 'Förbrukat';
-  return verb + ' ' + formatBudgetAmtEdit(actual)
+  const share = budgetBarSharePct(actual, budget);
+  const red = budgetBarIsRed(isIncome, actual, budget);
+  let tip = verb + ' ' + formatBudgetAmtEdit(actual)
     + ' av ' + formatBudgetAmtEdit(budget)
-    + ' (' + Math.round(pct) + ' %) i aktuell månad';
+    + ' (' + Math.round(share) + ' %) i aktuell månad';
+  if(red){
+    const err = isIncome
+      ? ((budget - actual) / budget) * 100
+      : ((actual - budget) / budget) * 100;
+    tip += isIncome
+      ? '\n' + Math.round(Math.max(0, err)) + ' % under mål'
+      : '\n' + Math.round(Math.max(0, err)) + ' % över budget';
+  }
+  return tip;
 }
 
 /** Text till ?-knappen: aktuella värden för posten i innevarande månad. */
@@ -6327,9 +6366,17 @@ function budgetAmtInfoText(item){
   const side = isIncome ? 'Inkomst' : 'Utgift';
   let text = side + '\n' + verb + ' denna månad: ' + (formatBudgetAmtEdit(actual) || '0');
   if(budget != null){
-    const pct = Math.min(100, (actual / budget) * 100);
+    const share = budgetBarSharePct(actual, budget);
     text += '\nBudget: ' + formatBudgetAmtEdit(budget)
-      + '\nAndel: ' + Math.round(pct) + ' %';
+      + '\nAndel: ' + Math.round(share) + ' %';
+    if(budgetBarIsRed(isIncome, actual, budget)){
+      const err = isIncome
+        ? ((budget - actual) / budget) * 100
+        : ((actual - budget) / budget) * 100;
+      text += isIncome
+        ? '\nSaknas: ' + Math.round(Math.max(0, err)) + ' %'
+        : '\nÖver: ' + Math.round(Math.max(0, err)) + ' %';
+    }
   } else {
     text += '\nBudget: (ej satt)';
   }
@@ -6390,9 +6437,9 @@ function budgetAmtCellHtml(item, idx){
   let wrapAttrs = '';
   let barHtml = '';
   if(budget != null){
-    const pct = Math.min(100, (actual / budget) * 100);
+    const pct = budgetBarWidthPct(isIncome, actual, budget);
     const red = budgetBarIsRed(isIncome, actual, budget);
-    const tip = budgetAmtBarTip(isIncome, actual, budget, pct);
+    const tip = budgetAmtBarTip(isIncome, actual, budget);
     wrapAttrs = ' data-budget-over="' + (red ? '1' : '0')
       + '" data-budget-side="' + (isIncome ? 'in' : 'out')
       + '" title="' + escapeHtml(tip) + '"';
