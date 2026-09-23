@@ -3749,6 +3749,8 @@ td.num.dash .cell-content{
                 <option value="last3m">Senaste 3 månaderna</option>
                 <option value="last6m">Senaste 6 månaderna</option>
                 <option value="last12m">Senaste 12 månaderna</option>
+                <option value="last24m">Senaste 24 månaderna</option>
+                <option value="allt">Allt</option>
               </select>
               <span id="budgetPeriodDates" class="budget-period-dates" aria-live="polite"></span>
             </div>
@@ -4480,7 +4482,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v31';
+const APP_VERSION = '2026-09-23 v32';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6434,9 +6436,16 @@ function budgetPeriodScale(mode){
   if(m === 'last3m') return 3;
   if(m === 'last6m') return 6;
   if(m === 'last12m' || m === 'prevYear') return 12;
+  if(m === 'last24m') return 24;
   if(m === 'currentYear'){
     const today = todayIsoDate();
     return Math.max(1, Number(today.slice(5, 7)));
+  }
+  if(m === 'allt'){
+    const range = datesForTimePreset('allt');
+    if(!range || !range.from || !range.to) return 1;
+    const keys = monthKeysInRange(range.from, range.to);
+    return Math.max(1, keys.length);
   }
   return 1;
 }
@@ -8289,7 +8298,7 @@ function defaultReportToIso(){
 
 const REPORT_TIME_MODES = new Set([
   'currentMonth', 'currentYear', 'prevMonth', 'prevYear',
-  'last30', 'last3m', 'last6m', 'last12m', 'allt',
+  'last30', 'last3m', 'last6m', 'last12m', 'last24m', 'allt',
   'arsred', 'arsperioder'
 ]);
 
@@ -8526,6 +8535,12 @@ function datesForTimePreset(mode){
     }
     case 'last12m': {
       const r = rangeForLastMonthsPreset(today, 12);
+      from = r.from;
+      to = r.to;
+      break;
+    }
+    case 'last24m': {
+      const r = rangeForLastMonthsPreset(today, 24);
       from = r.from;
       to = r.to;
       break;
