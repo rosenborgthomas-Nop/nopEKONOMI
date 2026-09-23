@@ -4480,7 +4480,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v26';
+const APP_VERSION = '2026-09-23 v27';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6445,13 +6445,22 @@ function budgetPeriodScale(mode){
 
 function budgetMonthlyToPeriod(monthly){
   if(typeof monthly !== 'number' || !Number.isFinite(monthly)) return null;
-  return monthly * budgetPeriodScale();
+  const s = budgetPeriodScale();
+  // Öre-avrundning så ×N-perioder inte driver iväg i tipp/stapel.
+  return Math.round(monthly * s * 100) / 100;
 }
 
 function budgetPeriodToMonthly(periodAmt){
   if(typeof periodAmt !== 'number' || !Number.isFinite(periodAmt)) return periodAmt;
   const s = budgetPeriodScale();
-  return s > 0 ? periodAmt / s : periodAmt;
+  if(!(s > 0)) return periodAmt;
+  return Math.round((periodAmt / s) * 100) / 100;
+}
+
+/** Jämförelse med öre-tolerans (undvik 100 % + osynlig röd stapel p.g.a. float). */
+function budgetAmountsNearlyEqual(a, b){
+  if(!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) < 0.02;
 }
 
 function budgetPeriodLabel(mode){
@@ -6637,6 +6646,7 @@ function budgetActualForItem(item, activityMap, isIncome){
 /** Utgift: röd om över budget. Inkomst: röd om under mål (tvärtom). */
 function budgetBarIsRed(isIncome, actual, budget){
   if(!(budget > 0)) return false;
+  if(budgetAmountsNearlyEqual(actual, budget)) return false;
   return isIncome ? actual < budget : actual > budget;
 }
 
@@ -6648,6 +6658,7 @@ function budgetBarIsRed(isIncome, actual, budget){
 function budgetBarWidthPct(isIncome, actual, budget){
   if(!(budget > 0)) return 0;
   const a = Math.max(0, actual);
+  if(budgetAmountsNearlyEqual(a, budget)) return 100;
   if(isIncome){
     if(a < budget){
       // Röd: hur stor del av målet som saknas.
@@ -6670,18 +6681,23 @@ function budgetBarSharePct(actual, budget){
 
 function budgetAmtBarTip(isIncome, actual, budget){
   const verb = isIncome ? 'Inkommit' : 'Förbrukat';
-  const share = budgetBarSharePct(actual, budget);
+  const share = budgetAmountsNearlyEqual(actual, budget)
+    ? 100
+    : budgetBarSharePct(actual, budget);
   const red = budgetBarIsRed(isIncome, actual, budget);
   let tip = verb + ' ' + formatBudgetAmtEdit(actual)
     + ' av ' + formatBudgetAmtEdit(budget)
-    + ' (' + Math.round(share) + ' %) i aktuell månad';
+    + ' (' + Math.round(share) + ' %) i vald period';
   if(red){
     const err = isIncome
       ? ((budget - actual) / budget) * 100
       : ((actual - budget) / budget) * 100;
-    tip += isIncome
-      ? '\n' + Math.round(Math.max(0, err)) + ' % under mål'
-      : '\n' + Math.round(Math.max(0, err)) + ' % över budget';
+    const errRound = Math.round(Math.max(0, err));
+    if(errRound > 0){
+      tip += isIncome
+        ? '\n' + errRound + ' % under mål'
+        : '\n' + errRound + ' % över budget';
+    }
   }
   return tip;
 }
@@ -6736,16 +6752,22 @@ function budgetAmtInfoHtml(item, fillIdx){
   }
   const lines = [escapeHtml(side), actualLine];
   if(budget != null){
-    const share = budgetBarSharePct(actual, budget);
+    const share = budgetAmountsNearlyEqual(actual, budget)
+      ? 100
+      : budgetBarSharePct(actual, budget);
     lines.push(escapeHtml('Budget: ' + formatBudgetAmtEdit(budget)));
     lines.push(escapeHtml('Andel: ' + Math.round(share) + ' %'));
     if(budgetBarIsRed(isIncome, actual, budget)){
       const err = isIncome
         ? ((budget - actual) / budget) * 100
         : ((actual - budget) / budget) * 100;
-      lines.push(escapeHtml(isIncome
-        ? 'Saknas: ' + Math.round(Math.max(0, err)) + ' %'
-        : 'Över: ' + Math.round(Math.max(0, err)) + ' %'));
+      const errRound = Math.round(Math.max(0, err));
+      // Visa inte "Över: 0 %" / "Saknas: 0 %" (flyttalsbrus).
+      if(errRound > 0){
+        lines.push(escapeHtml(isIncome
+          ? 'Saknas: ' + errRound + ' %'
+          : 'Över: ' + errRound + ' %'));
+      }
     }
   } else {
     lines.push(escapeHtml('Budget: (ej satt)'));
