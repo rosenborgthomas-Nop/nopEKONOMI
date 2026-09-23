@@ -2838,19 +2838,47 @@ footer p{
 }
 .care-list-table th.cl-budget-amt,
 .care-list-table td.cl-budget-amt{
-  width:6.5rem;
+  width:7rem;
   text-align:right;
   vertical-align:middle;
 }
-.care-list-table td.cl-budget-amt input.budget-amt-input{
+.care-list-table .budget-amt-wrap{
+  position:relative;
+  display:block;
   width:100%;
-  max-width:6rem;
+  max-width:6.5rem;
+  margin-left:auto;
+}
+.care-list-table .budget-amt-bar{
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:0;
+  max-width:100%;
+  border-radius:4px;
+  pointer-events:none;
+  z-index:0;
+  opacity:0.30;
+}
+.care-list-table .budget-amt-wrap[data-budget-over="0"] .budget-amt-bar{
+  background:var(--chart-positive, #3A8F5C);
+}
+.care-list-table .budget-amt-wrap[data-budget-over="1"] .budget-amt-bar{
+  background:var(--wine, #A33B3B);
+  opacity:0.38;
+}
+.care-list-table td.cl-budget-amt input.budget-amt-input{
+  position:relative;
+  z-index:1;
+  width:100%;
+  max-width:6.5rem;
   box-sizing:border-box;
   margin:0;
   padding:0.28rem 0.4rem;
   border:1px solid var(--paper-line, #b8c4d4);
   border-radius:4px;
-  background:var(--paper, #eef3f8);
+  background:color-mix(in srgb, var(--paper-surface, #E8EFF7) 82%, transparent);
   color:var(--ink, #1a3050);
   font-family:'JetBrains Mono', monospace;
   font-size:13px;
@@ -4266,7 +4294,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-23 v06';
+const APP_VERSION = '2026-09-23 v07';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6042,6 +6070,46 @@ function syncBudgetCatAmtInUi(catName){
   if(inp && document.activeElement !== inp){
     inp.value = formatBudgetAmtEdit(amt);
   }
+  syncBudgetAmtBarUi(catIdx);
+}
+
+function syncBudgetAmtBarUi(idx){
+  const item = careListItems[idx];
+  if(!item || !careListBody) return;
+  const inp = careListBody.querySelector('input[data-budget-amt="' + idx + '"]');
+  if(!inp) return;
+  let wrap = inp.closest('.budget-amt-wrap');
+  if(!wrap){
+    wrap = document.createElement('span');
+    wrap.className = 'budget-amt-wrap';
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+  }
+  const budget = typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
+    ? item.monthAmt
+    : null;
+  const spent = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
+    ? item.spentAmt
+    : 0;
+  let bar = wrap.querySelector('.budget-amt-bar');
+  if(budget == null){
+    wrap.removeAttribute('data-budget-over');
+    wrap.removeAttribute('title');
+    if(bar) bar.remove();
+    return;
+  }
+  const pct = Math.min(100, (spent / budget) * 100);
+  const over = spent > budget;
+  wrap.setAttribute('data-budget-over', over ? '1' : '0');
+  wrap.title = 'Förbrukat ' + formatBudgetAmtEdit(spent)
+    + ' av ' + formatBudgetAmtEdit(budget) + ' i aktuell månad';
+  if(!bar){
+    bar = document.createElement('span');
+    bar.className = 'budget-amt-bar';
+    bar.setAttribute('aria-hidden', 'true');
+    wrap.insertBefore(bar, inp);
+  }
+  bar.style.width = (Math.round(pct * 10) / 10) + '%';
 }
 
 function formatBudgetAmtEdit(v){
@@ -6053,6 +6121,89 @@ function formatBudgetAmtEdit(v){
     return (neg ? '-' : '') + intPart;
   }
   return formatAmount(v);
+}
+
+/** Aktuell kalendermånad YYYY-MM (pågående månad för budgetstapel). */
+function budgetCurrentMonthKey(){
+  const n = new Date();
+  return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0');
+}
+
+/**
+ * Utgifter i aktuell månad per bocklista-blad (tom/namngiven underkategori)
+ * samt kategoritotal (__cat__).
+ */
+function buildBudgetMonthExpenseMap(monthKey){
+  const leaf = Object.create(null);
+  const catTot = Object.create(null);
+  if(!book || !book.order) return { leaf: leaf, cat: catTot };
+  syncTrendIncludeMap(book);
+  const mkWant = monthKey || budgetCurrentMonthKey();
+
+  for(const name of book.order){
+    const acc = book.accounts[name];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(isOpeningBalanceRow(r)) continue;
+      if(isReportExcludedRow(r)) continue;
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(monthKeyFromIso(d) !== mkWant) continue;
+      if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
+      for(const piece of reportPiecesFromRow(r)){
+        const cat = (piece.category || '').trim();
+        const sub = (piece.subCategory || '').trim();
+        if(!cat || isTransferCategory(cat)) continue;
+        if(!isTrendPieceIncluded(cat, sub)) continue;
+        const amount = piece.amount;
+        if(!Number.isFinite(amount) || amount >= 0) continue;
+        const spent = -amount;
+        const lk = trendIncludeSubKey(cat, sub);
+        leaf[lk] = (leaf[lk] || 0) + spent;
+        catTot[cat] = (catTot[cat] || 0) + spent;
+      }
+    }
+  }
+  return { leaf: leaf, cat: catTot };
+}
+
+function budgetSpentForItem(item, spendMap){
+  if(!item || !spendMap) return 0;
+  if(item.rowKind === 'cat') return spendMap.cat[item.name] || 0;
+  if(item.rowKind === 'sub'){
+    const lk = item.emptySub
+      ? trendEmptySubKey(item.parent)
+      : trendIncludeSubKey(item.parent, item.name);
+    return spendMap.leaf[lk] || 0;
+  }
+  return 0;
+}
+
+function budgetAmtCellHtml(item, idx){
+  const escLabel = escapeHtml(item.emptySub ? TREND_EMPTY_SUB_LABEL : item.name);
+  const budget = typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0
+    ? item.monthAmt
+    : null;
+  const spent = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
+    ? item.spentAmt
+    : 0;
+  let wrapAttrs = '';
+  let barHtml = '';
+  if(budget != null){
+    const pct = Math.min(100, (spent / budget) * 100);
+    const over = spent > budget;
+    const tip = 'Förbrukat ' + formatBudgetAmtEdit(spent)
+      + ' av ' + formatBudgetAmtEdit(budget) + ' i aktuell månad';
+    wrapAttrs = ' data-budget-over="' + (over ? '1' : '0') + '" title="' + escapeHtml(tip) + '"';
+    barHtml = '<span class="budget-amt-bar" style="width:'
+      + (Math.round(pct * 10) / 10) + '%" aria-hidden="true"></span>';
+  }
+  return '<td class="cl-budget-amt"><span class="budget-amt-wrap"' + wrapAttrs + '>'
+    + barHtml
+    + '<input type="text" class="budget-amt-input" data-budget-amt="'
+    + idx + '" value="' + escapeHtml(formatBudgetAmtEdit(item.monthAmt))
+    + '" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false"'
+    + ' aria-label="Månadsbelopp ' + escLabel + '"></span></td>';
 }
 
 async function persistBudgetEdit(){
@@ -13250,10 +13401,11 @@ const CARE_HUB_TREND_HELP =
   + 'värde. Ändringar sparas med OK och följer med i backupen.';
 
 const CARE_HUB_BUDGET_HELP =
-  'Här sätter du månadsbelopp per kategori och underkategori. Underkategorier '
-  + 'summeras till kategorin (kategorin höjs bara om summan blir högre). '
-  + 'Kategoribeloppet får inte vara lägre än underkategoriernas summa. '
-  + 'Ändringar sparas med OK och följer med i backupen.';
+  'Här sätter du månadsbelopp för kategorier och underkategorier som ingår i '
+  + 'Bocklistan. Underkategorier summeras till kategorin (kategorin höjs bara om '
+  + 'summan blir högre). Kategoribeloppet får inte vara lägre än underkategoriernas '
+  + 'summa. Stapeln i beloppsfältet visar hur mycket som förbrukats i aktuell månad '
+  + '(grön under budget, röd över). Ändringar sparas med OK och följer med i backupen.';
 
 function setCareHubTrendHelpOpen(on){
   if(!careHubTrendHelpBtn || !careHubTrendHelpPop) return;
@@ -13763,15 +13915,15 @@ function buildCareListItems(){
   }
   if(careListKind === 'trend' || careListKind === 'budget'){
     const isBudget = careListKind === 'budget';
+    syncTrendIncludeMap(book);
     if(isBudget){
       syncBudgetIncludeMap(book);
       syncBudgetMonthMap(book);
-    } else {
-      syncTrendIncludeMap(book);
     }
     const catSubs = buildTrendCategorySubsMap(book);
-    const map = isBudget ? (book.budgetInclude || {}) : (book.trendInclude || {});
+    const map = book.trendInclude || {};
     const monthMap = isBudget ? (book.budgetMonth || {}) : null;
+    const spendMap = isBudget ? buildBudgetMonthExpenseMap(budgetCurrentMonthKey()) : null;
     const expandedSet = isBudget ? budgetExpandedCats : trendExpandedCats;
     const items = [];
     const cats = bookLookup.categories
@@ -13779,55 +13931,55 @@ function buildCareListItems(){
       .sort((a, b) => a.localeCompare(b, 'sv'));
     for(const name of cats){
       const subs = catSubs[name] || [];
-      const expanded = expandedSet.has(name);
       const checkState = trendCategoryCheckState(name, map, catSubs);
+      if(isBudget && checkState === 'none') continue;
+
+      const leafRows = [];
+      if(!isBudget || isTrendLeafIncluded(name, '')){
+        leafRows.push({ emptySub: true, name: '' });
+      }
+      for(const sub of subs){
+        if(!isBudget || isTrendLeafIncluded(name, sub)){
+          leafRows.push({ emptySub: false, name: sub });
+        }
+      }
+      if(isBudget && !leafRows.length) continue;
+
+      const expanded = expandedSet.has(name);
       const catAmt = monthMap && Object.prototype.hasOwnProperty.call(monthMap, name)
         ? monthMap[name]
         : null;
-      items.push({
+      const catItem = {
         rowKind: 'cat',
         name,
         parent: '',
         count: countCategoryUsage(name),
         monthAmt: catAmt,
+        spentAmt: isBudget ? (spendMap.cat[name] || 0) : 0,
         included: checkState !== 'none',
         checkState: checkState,
-        hasSubs: true,
+        hasSubs: leafRows.length > 0,
         expanded: expanded
-      });
+      };
+      items.push(catItem);
       if(expanded){
-        const emptyKey = trendEmptySubKey(name);
-        const emptyAmt = monthMap && Object.prototype.hasOwnProperty.call(monthMap, emptyKey)
-          ? monthMap[emptyKey]
-          : null;
-        items.push({
-          rowKind: 'sub',
-          name: '',
-          emptySub: true,
-          parent: name,
-          count: countCategoryEmptySubUsage(name),
-          monthAmt: emptyAmt,
-          included: isBudget
-            ? isBudgetLeafIncluded(name, '')
-            : isTrendLeafIncluded(name, ''),
-          hasSubs: false,
-          expanded: false
-        });
-        for(const sub of subs){
-          const sk = trendIncludeSubKey(name, sub);
-          const subAmt = monthMap && Object.prototype.hasOwnProperty.call(monthMap, sk)
+        for(const leaf of leafRows){
+          const emptyKey = trendEmptySubKey(name);
+          const sk = leaf.emptySub ? emptyKey : trendIncludeSubKey(name, leaf.name);
+          const leafAmt = monthMap && Object.prototype.hasOwnProperty.call(monthMap, sk)
             ? monthMap[sk]
             : null;
           items.push({
             rowKind: 'sub',
-            name: sub,
-            emptySub: false,
+            name: leaf.name,
+            emptySub: leaf.emptySub,
             parent: name,
-            count: countCategorySubUsage(name, sub),
-            monthAmt: subAmt,
-            included: isBudget
-              ? isBudgetLeafIncluded(name, sub)
-              : isTrendLeafIncluded(name, sub),
+            count: leaf.emptySub
+              ? countCategoryEmptySubUsage(name)
+              : countCategorySubUsage(name, leaf.name),
+            monthAmt: leafAmt,
+            spentAmt: isBudget ? (spendMap.leaf[sk] || 0) : 0,
+            included: isTrendLeafIncluded(name, leaf.emptySub ? '' : leaf.name),
             hasSubs: false,
             expanded: false
           });
@@ -14044,10 +14196,7 @@ function careListRowHtml(item, idx){
     if(isBudget){
       return '<tr data-idx="' + idx + '" class="' + rowCls.trim() + '" title="' + tip + '">'
         + '<td class="cl-name">' + nameHtml + '</td>'
-        + '<td class="cl-budget-amt"><input type="text" class="budget-amt-input" data-budget-amt="'
-        + idx + '" value="' + escapeHtml(formatBudgetAmtEdit(item.monthAmt))
-        + '" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false"'
-        + ' aria-label="Månadsbelopp ' + esc + '"></td>'
+        + budgetAmtCellHtml(item, idx)
         + '</tr>';
     }
     const aria = isSub
@@ -14344,6 +14493,11 @@ function wireBudgetAmtInputs(){
       const res = applyBudgetMonthFromInput(idx, inp.value);
       const item = careListItems[idx];
       if(item) inp.value = formatBudgetAmtEdit(item.monthAmt);
+      syncBudgetAmtBarUi(idx);
+      if(item && item.rowKind === 'sub' && item.parent){
+        const catIdx = careListItems.findIndex(it => it.rowKind === 'cat' && it.name === item.parent);
+        if(catIdx >= 0) syncBudgetAmtBarUi(catIdx);
+      }
       if(res && !res.ok && res.message){
         clear(careListMessages);
         addBox(careListMessages, 'notice', res.message);
