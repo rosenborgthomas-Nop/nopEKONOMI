@@ -4680,7 +4680,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v15';
+const APP_VERSION = '2026-09-24 v16';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6511,6 +6511,100 @@ function budgetSubMonthSum(cat){
   return sum;
 }
 
+/** Leaf-nycklar (tom + namngivna) som ingår i Bocklistan för en kategori. */
+function budgetIncludedLeafKeys(cat){
+  const keys = [];
+  if(!book || !cat) return keys;
+  syncTrendIncludeMap(book);
+  const catSubs = buildTrendCategorySubsMap(book);
+  if(isTrendLeafIncluded(cat, '')) keys.push(trendEmptySubKey(cat));
+  for(const sub of (catSubs[cat] || [])){
+    if(isTrendLeafIncluded(cat, sub)) keys.push(trendIncludeSubKey(cat, sub));
+  }
+  return keys;
+}
+
+/**
+ * Sätt underkategoribelopp så de summerar till targetMonthly.
+ * Proportionalt mot nuvarande fördelning; vid 0 nollställs alla.
+ * Resten (avrundning) läggs på sista blad med värde, annars sista bladet.
+ */
+function scaleBudgetSubsToMonthly(cat, targetMonthly){
+  if(!book || !cat) return;
+  if(!book.budgetMonth || typeof book.budgetMonth !== 'object') book.budgetMonth = {};
+  const map = book.budgetMonth;
+  const keys = budgetIncludedLeafKeys(cat);
+  if(!keys.length) return;
+  const target = Number.isFinite(targetMonthly) ? Math.max(0, targetMonthly) : 0;
+  const parts = keys.map(key => {
+    const v = typeof map[key] === 'number' && Number.isFinite(map[key]) ? map[key] : 0;
+    return { key: key, v: v };
+  });
+  const sum = parts.reduce((s, p) => s + p.v, 0);
+
+  if(target <= 0){
+    for(const p of parts) delete map[p.key];
+    return;
+  }
+
+  if(sum <= 0){
+    // Jämn fördelning om alla var tomma/noll.
+    const n = parts.length;
+    let allocated = 0;
+    for(let i = 0; i < n; i++){
+      if(i === n - 1){
+        map[parts[i].key] = target - allocated;
+      } else {
+        const share = target / n;
+        map[parts[i].key] = share;
+        allocated += share;
+      }
+    }
+    return;
+  }
+
+  let allocated = 0;
+  let lastPos = -1;
+  for(let i = 0; i < parts.length; i++){
+    if(parts[i].v > 0) lastPos = i;
+  }
+  if(lastPos < 0) lastPos = parts.length - 1;
+  for(let i = 0; i < parts.length; i++){
+    if(i === lastPos){
+      map[parts[i].key] = target - allocated;
+      continue;
+    }
+    if(parts[i].v <= 0){
+      delete map[parts[i].key];
+      continue;
+    }
+    const share = (parts[i].v / sum) * target;
+    map[parts[i].key] = share;
+    allocated += share;
+  }
+}
+
+function syncBudgetLeafAmtsInUi(catName){
+  if(!careListBody || !catName || !book) return;
+  const map = book.budgetMonth || {};
+  for(let i = 0; i < careListItems.length; i++){
+    const it = careListItems[i];
+    if(!it || it.rowKind !== 'sub' || it.parent !== catName) continue;
+    const key = budgetMonthKeyForItem(it);
+    const monthly = key && typeof map[key] === 'number' && Number.isFinite(map[key])
+      ? map[key]
+      : null;
+    const amt = budgetMonthlyToPeriod(monthly);
+    it.monthAmt = amt;
+    const inp = careListBody.querySelector('input[data-budget-amt="' + i + '"]');
+    if(inp && document.activeElement !== inp){
+      inp.value = formatBudgetAmtEdit(amt);
+    }
+    syncBudgetAmtBarUi(i);
+    syncBudgetAmtInfoUi(i);
+  }
+}
+
 /**
  * Efter ändring i underkategori: lyft kategoribeloppet till minst underkategorisumman.
  * Sänk aldrig ett redan högre kategoribelopp.
@@ -7192,18 +7286,11 @@ function budgetAmtInfoText(item){
   return (tmp.textContent || '').replace(/\n{2,}/g, '\n').trim();
 }
 
-/** Kan Förbrukat/Inkommit sättas som budget? (ej under underkategorisumma). */
+/** Kan Förbrukat/Inkommit sättas som budget? (alltid för underkategori; kategori skalas vid behov). */
 function canOfferBudgetFillFromActual(item, actualPeriod){
   if(!item || item.readOnly || item.rowKind === 'total') return false;
-  if(item.rowKind === 'sub') return true;
-  if(item.rowKind !== 'cat') return false;
-  const subSumMonthly = budgetSubMonthSum(item.name);
-  if(!(subSumMonthly > 0)) return true;
-  const actual = typeof actualPeriod === 'number' && Number.isFinite(actualPeriod)
-    ? actualPeriod
-    : 0;
-  const actualMonthly = budgetPeriodToMonthly(actual);
-  return actualMonthly + 1e-9 >= subSumMonthly;
+  if(item.rowKind === 'sub' || item.rowKind === 'cat') return true;
+  return false;
 }
 
 function budgetAmtInfoHtml(item, fillIdx){
@@ -7264,11 +7351,6 @@ function applyBudgetFillFromActual(idx){
     ? item.spentAmt
     : 0;
   if(!canOfferBudgetFillFromActual(item, actual)){
-    clear(careListMessages);
-    const subSumPeriod = budgetMonthlyToPeriod(budgetSubMonthSum(item.name)) || 0;
-    addBox(careListMessages, 'notice',
-      'Beloppet kan inte sättas lägre än underkategorierna ('
-      + formatBudgetAmtEdit(subSumPeriod) + ').');
     hideBudgetAmtInfoPops();
     return;
   }
@@ -7278,6 +7360,9 @@ function applyBudgetFillFromActual(idx){
     if(inp) inp.value = formatBudgetAmtEdit(item.monthAmt);
   }
   syncBudgetAmtBarUi(idx);
+  if(item.rowKind === 'cat'){
+    syncBudgetLeafAmtsInUi(item.name);
+  }
   if(item.rowKind === 'sub' && item.parent){
     const catIdx = careListItems.findIndex(it => it.rowKind === 'cat' && it.name === item.parent);
     if(catIdx >= 0){
@@ -14751,8 +14836,9 @@ const CARE_HUB_TREND_HELP =
 const CARE_HUB_BUDGET_HELP =
   'Här sätter du månadsbelopp för kategorier och underkategorier som ingår i '
   + 'Bocklistan. Underkategorier summeras till kategorin (kategorin höjs bara om '
-  + 'summan blir högre). Kategoribeloppet får inte vara lägre än underkategoriernas '
-  + 'summa. Stapeln visar hur mycket som skett i aktuell månad: för utgifter grön '
+  + 'summan blir högre). Sänker du kategorin under underkategoriernas summa '
+  + '(t.ex. till 0) räknas underkategorierna om proportionellt. '
+  + 'Stapeln visar hur mycket som skett i aktuell månad: för utgifter grön '
   + 'under budget och röd över; för inkomster tvärtom (röd under mål, grön vid/över mål). '
   + 'Ändringar sparas med OK och följer med i backupen.';
 
@@ -15866,7 +15952,6 @@ function applyBudgetMonthFromInput(idx, raw){
 
   if(item.rowKind === 'cat'){
     const subSumMonthly = budgetSubMonthSum(item.name);
-    const subSumPeriod = budgetMonthlyToPeriod(subSumMonthly > 0 ? subSumMonthly : null) || 0;
     if(!text){
       // Tom kategori som hade eget belopp + underkategorivärden → fyll i summan.
       if(subSumMonthly > 0 && prevMonthly != null){
@@ -15885,13 +15970,10 @@ function applyBudgetMonthFromInput(idx, raw){
       return { ok: false, message: 'Ogiltigt belopp.' };
     }
     const nMonthly = budgetPeriodToMonthly(nPeriod);
-    if(nMonthly < subSumMonthly){
-      item.monthAmt = prevPeriod;
-      return {
-        ok: false,
-        message: 'Kategoribeloppet kan inte vara lägre än underkategorierna ('
-          + formatBudgetAmtEdit(subSumPeriod) + ').'
-      };
+    if(nMonthly + 1e-9 < subSumMonthly){
+      // Sänkning under underkategorisumman → skala om underkategorierna proportionellt.
+      scaleBudgetSubsToMonthly(item.name, nMonthly);
+      syncBudgetLeafAmtsInUi(item.name);
     }
     book.budgetMonth[key] = nMonthly;
     item.monthAmt = budgetMonthlyToPeriod(nMonthly);
