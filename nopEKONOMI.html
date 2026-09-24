@@ -4628,7 +4628,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v11';
+const APP_VERSION = '2026-09-24 v12';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6807,10 +6807,13 @@ function budgetSignForItem(item, signMaps){
 }
 
 /**
- * Aktivitet i vald period per bocklista-blad: netto per kategori/blad.
+ * Aktivitet i vald period per blad: netto per kategori/blad.
  * (+ och − med samma kategori tar ut varandra; utfall = abs av netto åt rätt håll.)
+ * opts.onlyIncluded (default true): bara bocklista; false = alla blad (för avbockade i Budget).
  */
-function buildBudgetMonthActivityMap(fromIso, toIso){
+function buildBudgetMonthActivityMap(fromIso, toIso, opts){
+  opts = opts || {};
+  const onlyIncluded = opts.onlyIncluded !== false;
   const leafNet = Object.create(null);
   const catNet = Object.create(null);
   if(!book || !book.order){
@@ -6844,7 +6847,7 @@ function buildBudgetMonthActivityMap(fromIso, toIso){
         const cat = (piece.category || '').trim();
         const sub = (piece.subCategory || '').trim();
         if(!cat || isTransferCategory(cat)) continue;
-        if(!isTrendPieceIncluded(cat, sub)) continue;
+        if(onlyIncluded && !isTrendPieceIncluded(cat, sub)) continue;
         const amount = piece.amount;
         if(!Number.isFinite(amount) || !amount) continue;
         const lk = sub
@@ -15155,7 +15158,10 @@ function buildCareListItems(){
     const monthMap = isBudget ? (book.budgetMonth || {}) : null;
     const range = isBudget ? budgetPeriodRange() : null;
     const activityMap = isBudget
-      ? buildBudgetMonthActivityMap(range && range.from, range && range.to)
+      ? buildBudgetMonthActivityMap(range && range.from, range && range.to, { onlyIncluded: true })
+      : null;
+    const activityMapAll = isBudget
+      ? buildBudgetMonthActivityMap(range && range.from, range && range.to, { onlyIncluded: false })
       : null;
     const signMaps = isBudget ? buildBudgetSignMaps() : null;
     const expandedSet = isBudget ? budgetExpandedCats : trendExpandedCats;
@@ -15177,6 +15183,8 @@ function buildCareListItems(){
         : null;
       const catAmt = isBudget ? budgetMonthlyToPeriod(catMonthly) : catMonthly;
       const catIsIncome = isBudget && budgetSignForItem({ rowKind: 'cat', name: name }, signMaps) === 'in';
+      // Avbockad kategori: förbrukat från alla blad; annars bara bocklista (för stapel/summa).
+      const catActivity = isBudget && checkState === 'none' ? activityMapAll : activityMap;
       const catItem = {
         rowKind: 'cat',
         name,
@@ -15184,7 +15192,7 @@ function buildCareListItems(){
         count: countCategoryUsage(name),
         monthAmt: catAmt,
         isIncome: catIsIncome,
-        spentAmt: isBudget ? budgetActualForItem({ rowKind: 'cat', name: name }, activityMap, catIsIncome) : 0,
+        spentAmt: isBudget ? budgetActualForItem({ rowKind: 'cat', name: name }, catActivity, catIsIncome) : 0,
         included: checkState !== 'none',
         checkState: checkState,
         hasSubs: leafRows.length > 0,
@@ -15215,8 +15223,10 @@ function buildCareListItems(){
             expanded: false
           };
           leafItem.isIncome = isBudget && budgetSignForItem(leafItem, signMaps) === 'in';
+          // Avbockat blad: visa ändå förbrukat (ingår inte i BUDGET IN/UT).
+          const leafActivity = isBudget && !leafIncluded ? activityMapAll : activityMap;
           leafItem.spentAmt = isBudget
-            ? budgetActualForItem(leafItem, activityMap, leafItem.isIncome)
+            ? budgetActualForItem(leafItem, leafActivity, leafItem.isIncome)
             : 0;
           items.push(leafItem);
         }
