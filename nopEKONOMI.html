@@ -231,6 +231,7 @@ h1{
 .start-period-wrap .budget-amt-bar{
   position:absolute;
   left:0;
+  right:auto;
   top:0;
   bottom:0;
   width:0;
@@ -241,10 +242,14 @@ h1{
   opacity:0.55;
 }
 .start-period-wrap[data-budget-over="0"] .budget-amt-bar{
+  left:0;
+  right:auto;
   background:#1FAE55;
   opacity:0.58;
 }
 .start-period-wrap[data-budget-over="1"] .budget-amt-bar{
+  left:auto;
+  right:0;
   background:#E03131;
   opacity:0.62;
 }
@@ -4623,7 +4628,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v09';
+const APP_VERSION = '2026-09-24 v10';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
