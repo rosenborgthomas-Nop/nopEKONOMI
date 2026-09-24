@@ -4680,7 +4680,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v14';
+const APP_VERSION = '2026-09-24 v15';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -14926,40 +14926,68 @@ function isBudgetEditDirty(){
   return false;
 }
 
-function hideBudgetLeaveConfirm(){
+function isTrendIncludeEditDirty(){
+  if(careListKind !== 'trend') return false;
+  if(trendIncludeEditSnapshot == null) return false;
+  if(!budgetIncludeMapsEqual(book && book.trendInclude, trendIncludeEditSnapshot)) return true;
+  if(trendBudgetIncludeEditSnapshot != null
+    && !budgetIncludeMapsEqual(book && book.budgetInclude, trendBudgetIncludeEditSnapshot)){
+    return true;
+  }
+  if(trendBudgetMonthEditSnapshot != null
+    && !budgetMonthMapsEqual(book && book.budgetMonth, trendBudgetMonthEditSnapshot)){
+    return true;
+  }
+  return false;
+}
+
+function hideCareListLeaveConfirm(){
   const box = el('careListBudgetLeaveBox');
   if(box) box.hidden = true;
 }
 
-function showBudgetLeaveConfirm(){
+function showCareListLeaveConfirm(){
   const box = el('careListBudgetLeaveBox');
   if(!box) return;
   clear(careListMessages);
+  const text = el('careListBudgetLeaveText');
+  if(text) text.textContent = 'Ändringarna har inte sparats.';
   box.hidden = false;
   const okBtn = el('careListBudgetLeaveOkBtn');
   if(okBtn) okBtn.focus();
 }
 
-function leaveBudgetDiscarded(){
-  hideBudgetLeaveConfirm();
-  discardBudgetEdit();
+function leaveCareListDiscarded(){
+  hideCareListLeaveConfirm();
+  if(careListKind === 'trend') discardTrendIncludeEdit();
+  else if(careListKind === 'budget') discardBudgetEdit();
   careHubMenu.selectedIndex = 0;
   hideCareHubSection();
   show('start');
 }
 
-function requestLeaveBudget(){
-  if(careListKind !== 'budget'){
+/** Avbryt / tillbaka: varna om osparade ändringar i Budget eller Bocklista. */
+function requestLeaveCareListEdit(){
+  if(careListKind !== 'budget' && careListKind !== 'trend'){
     closeCareList();
     return;
   }
   if(el('careListBudgetLeaveBox') && !el('careListBudgetLeaveBox').hidden) return;
-  if(!isBudgetEditDirty()){
-    leaveBudgetDiscarded();
+  const dirty = careListKind === 'budget'
+    ? isBudgetEditDirty()
+    : isTrendIncludeEditDirty();
+  if(!dirty){
+    leaveCareListDiscarded();
     return;
   }
-  showBudgetLeaveConfirm();
+  showCareListLeaveConfirm();
 }
+
+/** @deprecated alias — behålls för äldre anrop */
+function hideBudgetLeaveConfirm(){ hideCareListLeaveConfirm(); }
+function showBudgetLeaveConfirm(){ showCareListLeaveConfirm(); }
+function leaveBudgetDiscarded(){ leaveCareListDiscarded(); }
+function requestLeaveBudget(){ requestLeaveCareListEdit(); }
 
 const CARE_HUB_SECTIONS = {
   konto: { title: 'Konto', kind: 'accountEdit' },
@@ -15040,12 +15068,11 @@ function runCareHubMenu(){
 
 el('careHubBackBtn').addEventListener('click', () => {
   if(careListKind === 'trend' && careHubListArea && !careHubListArea.hidden){
-    discardTrendIncludeEdit();
-    show('start');
+    requestLeaveCareListEdit();
     return;
   }
   if(careListKind === 'budget' && careHubListArea && !careHubListArea.hidden){
-    requestLeaveBudget();
+    requestLeaveCareListEdit();
     return;
   }
   show('start');
@@ -15155,9 +15182,8 @@ function careListMeta(){
 }
 
 function closeCareList(){
-  if(careListKind === 'trend') discardTrendIncludeEdit();
-  if(careListKind === 'budget'){
-    requestLeaveBudget();
+  if(careListKind === 'trend' || careListKind === 'budget'){
+    requestLeaveCareListEdit();
     return;
   }
   careHubMenu.selectedIndex = 0;
@@ -15166,6 +15192,7 @@ function closeCareList(){
 
 async function confirmCareListTrend(){
   clear(careListMessages);
+  hideCareListLeaveConfirm();
   try{
     await commitTrendIncludeEdit();
   } catch(e){
@@ -16591,7 +16618,7 @@ careListOkBtn.addEventListener('click', () => {
     return;
   }
   if(careListKind === 'budget'){
-    hideBudgetLeaveConfirm();
+    hideCareListLeaveConfirm();
     confirmCareListBudget();
     return;
   }
@@ -16600,10 +16627,10 @@ careListOkBtn.addEventListener('click', () => {
 const careListBudgetLeaveCancelBtn = el('careListBudgetLeaveCancelBtn');
 const careListBudgetLeaveOkBtn = el('careListBudgetLeaveOkBtn');
 if(careListBudgetLeaveCancelBtn){
-  careListBudgetLeaveCancelBtn.addEventListener('click', hideBudgetLeaveConfirm);
+  careListBudgetLeaveCancelBtn.addEventListener('click', hideCareListLeaveConfirm);
 }
 if(careListBudgetLeaveOkBtn){
-  careListBudgetLeaveOkBtn.addEventListener('click', leaveBudgetDiscarded);
+  careListBudgetLeaveOkBtn.addEventListener('click', leaveCareListDiscarded);
 }
 if(careListScroll){
   careListScroll.addEventListener('scroll', hideBudgetAmtInfoPops, { passive: true });
@@ -17063,13 +17090,13 @@ views.careHub.addEventListener('keydown', e => {
     if(e.key === 'Escape'){
       e.preventDefault();
       e.stopPropagation();
-      hideBudgetLeaveConfirm();
+      hideCareListLeaveConfirm();
       return;
     }
     if(e.key === 'Enter'){
       if(e.target === careListBudgetLeaveCancelBtn) return;
       e.preventDefault();
-      leaveBudgetDiscarded();
+      leaveCareListDiscarded();
       return;
     }
     return;
