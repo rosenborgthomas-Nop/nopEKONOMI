@@ -110,6 +110,9 @@ h1{
   font-size:clamp(22px, 3.5vw, 28px);
   margin-bottom:0;
 }
+#viewSettings .settings-section-menu-row{
+  margin:14px 0 18px;
+}
 #viewSettings .quiet-row#bookActions{
   margin-top:16px;
   justify-content:flex-end;
@@ -2019,13 +2022,20 @@ body.trend-view-active{
   display:flex;
   justify-content:space-between;
   align-items:baseline;
-  gap:14px;
+  gap:10px 14px;
   padding:7px 0;
   border-bottom:1px solid var(--paper-line);
   font-size:14px;
+  flex-wrap:wrap;
 }
 .book-row:last-child{ border-bottom:none; }
-.book-row .who{ color:var(--text-on-paper); }
+.book-row .who{
+  color:var(--text-on-paper);
+  flex:1 1 12rem;
+  min-width:0;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
 .book-row.current .who{ font-weight:700; }
 .book-row .here{
   font-family:'JetBrains Mono', monospace;
@@ -2034,12 +2044,41 @@ body.trend-view-active{
   text-transform:uppercase;
   color:var(--teal);
   margin-left:8px;
+  white-space:nowrap;
 }
 .book-row .what{
   font-family:'JetBrains Mono', monospace;
   font-size:11.5px;
   color:var(--text-on-paper-soft);
   white-space:nowrap;
+  flex:0 0 auto;
+  margin-left:auto;
+}
+
+/* Inställningar → Startmeny: konto av/på */
+.settings-start-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:8px 0;
+  border-bottom:1px solid var(--paper-line);
+  font-size:14px;
+}
+.settings-start-row:last-child{ border-bottom:none; }
+.settings-start-row.is-summa .settings-start-name{ font-weight:700; }
+.settings-start-name{
+  flex:1 1 auto;
+  min-width:0;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  color:var(--text-on-paper);
+}
+.settings-start-row input[type="checkbox"]{
+  flex:0 0 auto;
+  width:18px;
+  height:18px;
+  accent-color:var(--teal);
 }
 
 /* --- 9. Import ------------------------------------------------------- */
@@ -4473,7 +4512,14 @@ td.num.dash .cell-content{
       <h1>Inställningar</h1>
     </header>
 
-    <main class="panel">
+    <div class="menu-row settings-section-menu-row">
+      <select id="settingsSectionMenu" class="menu-select" aria-label="Inställningar">
+        <option value="bok">Bok...</option>
+        <option value="startmeny">Startmeny</option>
+      </select>
+    </div>
+
+    <main class="panel" id="settingsPanelBok">
       <h2>Underhåll</h2>
 
       <section class="section">
@@ -4507,6 +4553,12 @@ td.num.dash .cell-content{
           </div>
         </div>
       </section>
+    </main>
+
+    <main class="panel" id="settingsPanelStartmeny" hidden>
+      <h2>Startmeny</h2>
+      <p class="sub">Kryssa i de konton som ska synas i startfönstrets kontoöversikt. Samma gäller summan.</p>
+      <div id="settingsStartIncludeList"></div>
     </main>
 
     <footer>
@@ -4628,7 +4680,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v13';
+const APP_VERSION = '2026-09-24 v14';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -4784,6 +4836,14 @@ function sanitizeBook(book){
       if(typeof n === 'number' && Number.isFinite(n)) budgetMonth[raw] = n;
     }
   }
+  const startInclude = {};
+  if(book.startInclude && typeof book.startInclude === 'object'){
+    for(const key of Object.keys(book.startInclude)){
+      const raw = String(key || '').trim();
+      if(!raw) continue;
+      startInclude[raw] = !!book.startInclude[key];
+    }
+  }
   return {
     order: book.order.slice(),
     accounts: accounts,
@@ -4792,7 +4852,8 @@ function sanitizeBook(book){
     subCategoryList: subCategoryList,
     trendInclude: trendInclude,
     budgetInclude: budgetInclude,
-    budgetMonth: budgetMonth
+    budgetMonth: budgetMonth,
+    startInclude: startInclude
   };
 }
 
@@ -7011,6 +7072,60 @@ function saveStartPeriodMode(mode){
   } catch(e){ /* ignore */ }
 }
 
+/** Nyckel för sumraden i book.startInclude. */
+const START_INCLUDE_SUMMA_KEY = '__summa__';
+
+/** Håll startInclude i synk med bokens konton (saknade = på). */
+function syncStartIncludeMap(bookData){
+  if(!bookData || typeof bookData !== 'object') return false;
+  if(!bookData.startInclude || typeof bookData.startInclude !== 'object'){
+    bookData.startInclude = {};
+  }
+  const map = bookData.startInclude;
+  const known = new Set(Array.isArray(bookData.order) ? bookData.order : []);
+  let changed = false;
+  for(const name of known){
+    if(!Object.prototype.hasOwnProperty.call(map, name)){
+      map[name] = true;
+      changed = true;
+    }
+  }
+  if(!Object.prototype.hasOwnProperty.call(map, START_INCLUDE_SUMMA_KEY)){
+    map[START_INCLUDE_SUMMA_KEY] = true;
+    changed = true;
+  }
+  for(const key of Object.keys(map)){
+    if(key === START_INCLUDE_SUMMA_KEY) continue;
+    if(!known.has(key)){
+      delete map[key];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function isStartAccountIncluded(name){
+  if(!book) return true;
+  syncStartIncludeMap(book);
+  const map = book.startInclude || {};
+  if(Object.prototype.hasOwnProperty.call(map, name)) return !!map[name];
+  return true;
+}
+
+function isStartSummaIncluded(){
+  return isStartAccountIncluded(START_INCLUDE_SUMMA_KEY);
+}
+
+function renameStartIncludeKey(bookData, oldName, newName){
+  if(!bookData || !bookData.startInclude || typeof bookData.startInclude !== 'object') return;
+  const map = bookData.startInclude;
+  if(!Object.prototype.hasOwnProperty.call(map, oldName)) return;
+  if(!Object.prototype.hasOwnProperty.call(map, newName)){
+    map[newName] = !!map[oldName];
+  }
+  delete map[oldName];
+}
+
 function paintStartPeriodBar(){
   const barEl = el('startPeriodBar');
   const wrap = el('startPeriodWrap');
@@ -8435,22 +8550,40 @@ function renderStart(){
     return;
   }
 
+  syncStartIncludeMap(book);
+
   if(startAccountsOverviewHead) startAccountsOverviewHead.hidden = false;
   accountsEmptyBlock.hidden = true;
   accountsList.hidden = false;
   paintStartPeriodBar();
 
   let total = 0;
+  let anyVisible = false;
 
   for(const name of book.order){
     const acc = book.accounts[name];
     if(!acc) continue;
     const saldo = accountSaldo(acc.rows || []);
+    if(!isStartAccountIncluded(name)) continue;
+    anyVisible = true;
     total += saldo;
     accountsList.appendChild(summaryRow(name, saldo, false));
   }
 
-  accountsList.appendChild(summaryRow('Summa', total, true));
+  if(isStartSummaIncluded() && (anyVisible || book.order.length)){
+    // Summa räknas bara över synliga konton.
+    accountsList.appendChild(summaryRow('Summa', total, true));
+  }
+
+  if(!anyVisible && !isStartSummaIncluded()){
+    accountsList.appendChild((() => {
+      const p = document.createElement('p');
+      p.className = 'sub';
+      p.style.margin = '0';
+      p.textContent = 'Inga konton valda för startfönstret. Ändra under Inställningar → Startmeny.';
+      return p;
+    })());
+  }
 }
 
 function summaryRow(labelText, value, isTotal){
@@ -16022,6 +16155,7 @@ async function saveCareListEdit(opts){
         if(newName !== oldName){
           if(draft.accounts[newName]) throw new Error('Det finns redan ett konto med det namnet.');
           renameTransfersInDraft(draft, oldName, newName);
+          renameStartIncludeKey(draft, oldName, newName);
           draft.order = draft.order.map(n => n === oldName ? newName : n);
           delete draft.accounts[oldName];
           draft.accounts[newName] = finalized;
@@ -17908,6 +18042,7 @@ async function saveAccountEdit(){
       if(newName !== oldName){
         if(draft.accounts[newName]) throw new Error('Det finns redan ett konto med det namnet.');
         renameTransfersInDraft(draft, oldName, newName);
+        renameStartIncludeKey(draft, oldName, newName);
         draft.order = draft.order.map(n => n === oldName ? newName : n);
         delete draft.accounts[oldName];
         draft.accounts[newName] = finalized;
@@ -19643,6 +19778,10 @@ bindNewTxDatalistAutocomplete();
 /* --- 8. Inställningar ------------------------------------------------ */
 
 const settingsBookName = el('settingsBookName');
+const settingsSectionMenu = el('settingsSectionMenu');
+const settingsPanelBok = el('settingsPanelBok');
+const settingsPanelStartmeny = el('settingsPanelStartmeny');
+const settingsStartIncludeList = el('settingsStartIncludeList');
 const renameFieldWrap = el('renameFieldWrap');
 const renameInput = el('renameInput');
 const renameHint = el('renameHint');
@@ -19664,6 +19803,17 @@ function showRenameField(){
   renameInput.focus();
 }
 
+function settingsSectionMode(){
+  const v = settingsSectionMenu && settingsSectionMenu.value;
+  return v === 'startmeny' ? 'startmeny' : 'bok';
+}
+
+function syncSettingsSectionPanels(){
+  const mode = settingsSectionMode();
+  if(settingsPanelBok) settingsPanelBok.hidden = mode !== 'bok';
+  if(settingsPanelStartmeny) settingsPanelStartmeny.hidden = mode !== 'startmeny';
+}
+
 function renderSettings(){
   if(settingsBookName) settingsBookName.textContent = bookName(bookId);
   hideRenameField();
@@ -19671,7 +19821,9 @@ function renderSettings(){
   warnBox.hidden = true;
   confirmBox.hidden = true;
   bookActions.hidden = false;
-  renderBookList().catch(() => {});
+  syncSettingsSectionPanels();
+  if(settingsSectionMode() === 'startmeny') renderSettingsStartIncludeList();
+  else renderBookList().catch(() => {});
 }
 
 function setRenameHint(msg, bad){
@@ -19684,22 +19836,28 @@ function showWarning(msg){
   warnBox.hidden = false;
 }
 
+function bookCountsFromData(data){
+  if(!data || !Array.isArray(data.order)) return null;
+  let transactions = 0;
+  for(const accName of data.order){
+    const acc = data.accounts && data.accounts[accName];
+    if(acc && Array.isArray(acc.rows)) transactions += acc.rows.length;
+  }
+  return { accounts: data.order.length, transactions: transactions };
+}
+
+/** Antal för boklistan: öppna boken, annars lokal spegel om den finns. */
+function peekBookCounts(id){
+  if(id === bookId && book) return bookCountsFromData(book);
+  if(hasBookLocalMirror(id)) return bookCountsFromData(readBook(id));
+  return null;
+}
+
 async function renderBookList(){
   clear(bookList);
 
   for(const id of reg.order){
-    let data;
-    try{
-      data = (id === bookId) ? book : await readBookAsync(id);
-    } catch(e){
-      data = { order: [], accounts: {} };
-    }
-
-    let transactions = 0;
-    for(const accName of data.order){
-      const acc = data.accounts[accName];
-      if(acc && Array.isArray(acc.rows)) transactions += acc.rows.length;
-    }
+    const counts = peekBookCounts(id);
 
     const row = document.createElement('div');
     row.className = 'book-row' + (id === bookId ? ' current' : '');
@@ -19714,15 +19872,63 @@ async function renderBookList(){
       who.appendChild(here);
     }
 
-    const what = document.createElement('span');
-    what.className = 'what';
-    what.textContent = formatCount(data.order.length) + ' konton · '
-      + formatCount(transactions) + ' transaktioner';
-
     row.appendChild(who);
-    row.appendChild(what);
+
+    if(counts){
+      const what = document.createElement('span');
+      what.className = 'what';
+      what.textContent = formatCount(counts.accounts) + ' konton · '
+        + formatCount(counts.transactions) + ' transaktioner';
+      row.appendChild(what);
+    }
+
     bookList.appendChild(row);
   }
+}
+
+function renderSettingsStartIncludeList(){
+  if(!settingsStartIncludeList) return;
+  clear(settingsStartIncludeList);
+  if(!book || !book.order) return;
+  syncStartIncludeMap(book);
+
+  const addRow = (label, key, isSumma) => {
+    const row = document.createElement('div');
+    row.className = 'settings-start-row' + (isSumma ? ' is-summa' : '');
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'settings-start-name';
+    nameEl.textContent = label;
+
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = isStartAccountIncluded(key);
+    box.setAttribute('aria-label',
+      isSumma ? 'Visa summa på startsidan' : ('Visa konto ' + label + ' på startsidan'));
+    box.addEventListener('change', () => {
+      setStartInclude(key, box.checked);
+    });
+
+    row.appendChild(nameEl);
+    row.appendChild(box);
+    settingsStartIncludeList.appendChild(row);
+  };
+
+  for(const name of book.order){
+    if(!book.accounts[name]) continue;
+    addRow(name, name, false);
+  }
+  addRow('Summa', START_INCLUDE_SUMMA_KEY, true);
+}
+
+async function setStartInclude(key, included){
+  if(!book || !key) return;
+  syncStartIncludeMap(book);
+  book.startInclude[key] = !!included;
+  try{
+    book = sanitizeBook(book);
+    await writeBookPreferGranted(bookId, book);
+  } catch(e){ /* ignore — UI behåller valet lokalt */ }
 }
 
 el('renameBtn').addEventListener('click', async () => {
@@ -19831,6 +20037,14 @@ el('confirmDeleteBtn').addEventListener('click', async () => {
 });
 
 el('settingsBackBtn').addEventListener('click', () => show('start'));
+
+if(settingsSectionMenu){
+  settingsSectionMenu.addEventListener('change', () => {
+    syncSettingsSectionPanels();
+    if(settingsSectionMode() === 'startmeny') renderSettingsStartIncludeList();
+    else renderBookList().catch(() => {});
+  });
+}
 
 el('settingsCancelBtn').addEventListener('click', () => {
   if(!renameFieldWrap.hidden){
