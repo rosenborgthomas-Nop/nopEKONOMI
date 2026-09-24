@@ -3181,6 +3181,19 @@ footer p{
 .care-list-table tr.trend-off td.cl-name{
   opacity:0.55;
 }
+.care-list-table.budget-list tr.budget-excluded td.cl-name,
+.care-list-table.budget-list tr.budget-excluded td.cl-name .trend-empty-label{
+  opacity:0.48;
+  text-decoration:line-through;
+  text-decoration-thickness:1px;
+  text-decoration-color:color-mix(in srgb, var(--ink, #1a3050) 45%, transparent);
+}
+.care-list-table.budget-list tr.budget-excluded td.cl-budget-amt input.budget-amt-input{
+  opacity:0.72;
+}
+.care-list-table.budget-list tr.budget-excluded .budget-amt-bar{
+  opacity:0.28;
+}
 .care-list-table tr.trend-partial td.cl-name{
   opacity:0.78;
 }
@@ -4610,7 +4623,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v07';
+const APP_VERSION = '2026-09-24 v08';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6493,6 +6506,8 @@ function computeBudgetSideTotals(items){
   let outActual = 0;
   for(const it of items){
     if(it.rowKind !== 'cat') continue;
+    // Avbockade (ej i bocklistan) syns i listan men ingår inte i BUDGET IN/UT.
+    if(it.checkState === 'none' || it.included === false) continue;
     const b = typeof it.monthAmt === 'number' && Number.isFinite(it.monthAmt) ? it.monthAmt : 0;
     const a = typeof it.spentAmt === 'number' && Number.isFinite(it.spentAmt) ? it.spentAmt : 0;
     if(it.isIncome){
@@ -15115,18 +15130,10 @@ function buildCareListItems(){
     for(const name of cats){
       const subs = catSubs[name] || [];
       const checkState = trendCategoryCheckState(name, map, catSubs);
-      if(isBudget && checkState === 'none') continue;
 
-      const leafRows = [];
-      if(!isBudget || isTrendLeafIncluded(name, '')){
-        leafRows.push({ emptySub: true, name: '' });
-      }
-      for(const sub of subs){
-        if(!isBudget || isTrendLeafIncluded(name, sub)){
-          leafRows.push({ emptySub: false, name: sub });
-        }
-      }
-      if(isBudget && !leafRows.length) continue;
+      // Budget + Trend: visa alla blad (Budget: avbockade nedtonade men redigerbara).
+      const leafRows = [{ emptySub: true, name: '' }];
+      for(const sub of subs) leafRows.push({ emptySub: false, name: sub });
 
       const expanded = expandedSet.has(name);
       const catMonthly = monthMap && Object.prototype.hasOwnProperty.call(monthMap, name)
@@ -15156,6 +15163,7 @@ function buildCareListItems(){
             ? monthMap[sk]
             : null;
           const leafAmt = isBudget ? budgetMonthlyToPeriod(leafMonthly) : leafMonthly;
+          const leafIncluded = isTrendLeafIncluded(name, leaf.emptySub ? '' : leaf.name);
           const leafItem = {
             rowKind: 'sub',
             name: leaf.name,
@@ -15165,7 +15173,8 @@ function buildCareListItems(){
               ? countCategoryEmptySubUsage(name)
               : countCategorySubUsage(name, leaf.name),
             monthAmt: leafAmt,
-            included: isTrendLeafIncluded(name, leaf.emptySub ? '' : leaf.name),
+            included: leafIncluded,
+            checkState: leafIncluded ? 'all' : 'none',
             hasSubs: false,
             expanded: false
           };
@@ -15365,16 +15374,23 @@ function careListRowHtml(item, idx){
     const checkState = item.checkState || (item.included ? 'all' : 'none');
     const on = isSub ? !!item.included : checkState !== 'none';
     const dim = !isBudget && !isSub && checkState === 'some';
-    const rowCls = (isBudget || (on && !dim) ? '' : ' trend-off')
+    const budgetExcluded = isBudget && !on;
+    const rowCls = (isBudget
+        ? (budgetExcluded ? ' budget-excluded' : '')
+        : (on && !dim ? '' : ' trend-off'))
       + (dim ? ' trend-partial' : '')
       + (isSub ? ' trend-sub' : '')
       + (isEmptySub ? ' trend-empty-sub' : '');
     const tip = isBudget
-      ? (isSub
-        ? (isEmptySub
-          ? 'Dubbelklicka för transaktioner utan underkategori i vald period'
-          : 'Dubbelklicka för underkategorins transaktioner i vald period')
-        : 'Pilen fäller ut underkategorier. Dubbelklicka för kategorins transaktioner i vald period.')
+      ? (budgetExcluded
+        ? (isSub
+          ? 'Avbockad i bocklistan — beloppet sparas men ingår inte i budgeten'
+          : 'Avbockad i bocklistan — beloppet sparas men ingår inte i budgeten')
+        : (isSub
+          ? (isEmptySub
+            ? 'Dubbelklicka för transaktioner utan underkategori i vald period'
+            : 'Dubbelklicka för underkategorins transaktioner i vald period')
+          : 'Pilen fäller ut underkategorier. Dubbelklicka för kategorins transaktioner i vald period.'))
       : (isSub
         ? (isEmptySub
           ? 'Poster i kategorin utan underkategori'
