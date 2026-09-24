@@ -4610,7 +4610,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v06';
+const APP_VERSION = '2026-09-24 v07';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -15626,13 +15626,18 @@ function applyBudgetMonthFromInput(idx, raw){
     ? book.budgetMonth[key]
     : null;
   const prevPeriod = budgetMonthlyToPeriod(prevMonthly);
+  // Oförändrat fält (t.ex. flush vid Avbryt) — skriv inte om boken.
+  const normAmt = s => String(s == null ? '' : s).trim().replace(/[\s\u00A0]/g, '');
+  if(normAmt(text) === normAmt(formatBudgetAmtEdit(item.monthAmt))){
+    return { ok: true };
+  }
 
   if(item.rowKind === 'cat'){
     const subSumMonthly = budgetSubMonthSum(item.name);
     const subSumPeriod = budgetMonthlyToPeriod(subSumMonthly > 0 ? subSumMonthly : null) || 0;
     if(!text){
-      // Tom kategori + underkategorivärden → fyll i summan automatiskt (periodbelopp i UI).
-      if(subSumMonthly > 0){
+      // Tom kategori som hade eget belopp + underkategorivärden → fyll i summan.
+      if(subSumMonthly > 0 && prevMonthly != null){
         book.budgetMonth[key] = subSumMonthly;
         item.monthAmt = budgetMonthlyToPeriod(subSumMonthly);
         return { ok: true, autofilled: true };
