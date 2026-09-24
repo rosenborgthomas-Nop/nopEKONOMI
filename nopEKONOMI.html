@@ -4628,7 +4628,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v12';
+const APP_VERSION = '2026-09-24 v13';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11258,11 +11258,6 @@ function addMonthKey(mk, delta){
   return y + '-' + String(m).padStart(2, '0');
 }
 
-/**
- * Månadsserie In/Ut från Trend-registret (ibockade kategorier).
- * Gemensam bas för In/Ut-prognos och framtida trendvyer.
- * Sista ofullständiga månaden skattas klart från föregående månads motsvarande dagar.
- */
 function daysInCalendarMonth(y, m){
   return new Date(y, m, 0).getDate();
 }
@@ -11422,17 +11417,34 @@ function buildTrendForecast(fromIso, toIso, horizon, filter){
   const fitNet = olsFitSeries(netW);
   const n = months.length;
   const lastMk = months[n - 1];
+  // Prognosen ankras i sista verkliga historikvärdet (samma mönster som Netto över tid).
+  // Lutningen kommer från OLS på winsorizad historik — inte från en fri OLS-linje
+  // som annars kan "hålla kvar" sista månaden när bocklistan växlar (outlier/winsorize).
+  const lastIn = incomeSeries[n - 1];
+  const lastUt = expenseSeries[n - 1];
+  const lastNet = netSeries[n - 1];
   const forecast = [];
   let sumIn = 0, sumUt = 0;
+  let prevIn = lastIn;
+  let prevUt = lastUt;
+  let prevNetFit = lastNet;
   for(let h = 1; h <= horizon; h++){
-    const t = n - 1 + h;
-    const fi = fitIn.a + fitIn.b * t;
-    const fe = fitUt.a + fitUt.b * t;
-    const fn = fitNet.a + fitNet.b * t;
+    const fi = prevIn + fitIn.b;
+    const fe = prevUt + fitUt.b;
+    const fn = prevNetFit + fitNet.b;
     const mk = addMonthKey(lastMk, h);
-    forecast.push({ month: mk, income: fi, expense: fe, net: fi - fe, netFit: fn });
+    forecast.push({
+      month: mk,
+      income: fi,
+      expense: fe,
+      net: fi - fe,
+      netFit: fn
+    });
     sumIn += fi;
     sumUt += fe;
+    prevIn = fi;
+    prevUt = fe;
+    prevNetFit = fn;
   }
 
   return {
@@ -11444,6 +11456,9 @@ function buildTrendForecast(fromIso, toIso, horizon, filter){
     fitIn,
     fitUt,
     fitNet,
+    lastIn,
+    lastUt,
+    lastNet,
     forecast,
     sumIn,
     sumUt,
@@ -11489,7 +11504,7 @@ function trendHorizonLabel(n){
   return n + ' månader';
 }
 
-/** Linjediagram: historik In/Ut/Netto + OLS-trendlinjer (historik + prognos). */
+/** Linjediagram: historik In/Ut/Netto + prognos ankrad i sista historikpunkten. */
 function buildTrendInUtLineChart(data, opts){
   opts = opts || {};
   const onlyNet = !!opts.onlyNet;
@@ -11512,23 +11527,25 @@ function buildTrendInUtLineChart(data, opts){
     );
   }
 
-  const fitInAll = [];
-  const fitUtAll = [];
-  const fitNetAll = [];
-  const useFitSeries = data.fitNetSeries && data.fitNetSeries.length === total;
-  for(let i = 0; i < total; i++){
-    const fi = data.fitIn.a + data.fitIn.b * i;
-    const fu = data.fitUt.a + data.fitUt.b * i;
-    fitInAll.push(fi);
-    fitUtAll.push(fu);
-    if(useFitSeries){
-      fitNetAll.push(data.fitNetSeries[i]);
-    } else if(data.fitNet){
-      fitNetAll.push(data.fitNet.a + data.fitNet.b * i);
-    } else {
-      fitNetAll.push(fi - fu);
-    }
-  }
+  const lastHistIn = histN > 0
+    ? (Number.isFinite(data.lastIn) ? data.lastIn : data.incomeSeries[histN - 1])
+    : 0;
+  const lastHistUt = histN > 0
+    ? (Number.isFinite(data.lastUt) ? data.lastUt : data.expenseSeries[histN - 1])
+    : 0;
+  const lastHistNet = histN > 0
+    ? (Number.isFinite(data.lastNet) ? data.lastNet : histNet[histN - 1])
+    : 0;
+
+  // Prognos (streckad): startar i sista verkliga historikvärdet.
+  const forecastInVals = forecast.map(p => p.income);
+  const forecastUtVals = forecast.map(p => p.expense);
+  const forecastNetVals = forecast.map(p =>
+    (onlyNet && p.netFit != null) ? p.netFit : p.net
+  );
+  const fitInLine = forecast.length ? [lastHistIn].concat(forecastInVals) : [];
+  const fitUtLine = forecast.length ? [lastHistUt].concat(forecastUtVals) : [];
+  const fitNetLine = forecast.length ? [lastHistNet].concat(forecastNetVals) : [];
 
   let ymin = Infinity;
   let ymax = -Infinity;
@@ -11544,13 +11561,9 @@ function buildTrendInUtLineChart(data, opts){
     }
     bump(histNet[i]);
   }
-  for(let i = 0; i < total; i++){
-    if(!onlyNet){
-      bump(fitInAll[i]);
-      bump(fitUtAll[i]);
-    }
-    bump(fitNetAll[i]);
-  }
+  for(const v of fitInLine){ if(!onlyNet) bump(v); }
+  for(const v of fitUtLine){ if(!onlyNet) bump(v); }
+  for(const v of fitNetLine) bump(v);
   if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){
     ymin = 0;
     ymax = 1;
@@ -11599,19 +11612,24 @@ function buildTrendInUtLineChart(data, opts){
       + ' stroke="' + axis + '" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>';
   }
 
-  const poly = (vals, color, dash, width) => {
-    const pts = vals.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
+  const polyFrom = (vals, startIdx, color, dash, width) => {
+    const pts = vals.map((v, k) =>
+      xAt(startIdx + k).toFixed(1) + ',' + yAt(v).toFixed(1)
+    ).join(' ');
     return '<polyline fill="none" stroke="' + color + '" stroke-width="' + width + '"'
       + ' stroke-linejoin="round" stroke-linecap="round"'
       + (dash ? ' stroke-dasharray="' + dash + '"' : '')
       + ' points="' + pts + '"/>';
   };
 
-  if(!onlyNet){
-    svg += poly(fitInAll, colIn, '5 4', 2);
-    svg += poly(fitUtAll, colUt, '5 4', 2);
+  // Streckad prognos från sista historikpunkten (inte OLS genom historiken).
+  if(forecast.length && histN > 0){
+    if(!onlyNet){
+      svg += polyFrom(fitInLine, histN - 1, colIn, '5 4', 2);
+      svg += polyFrom(fitUtLine, histN - 1, colUt, '5 4', 2);
+    }
+    svg += polyFrom(fitNetLine, histN - 1, colNet, '5 4', 2);
   }
-  svg += poly(fitNetAll, colNet, '5 4', 2);
 
   if(!onlyNet){
     const histInPts = data.incomeSeries.map((v, i) => xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)).join(' ');
@@ -11663,16 +11681,16 @@ function buildTrendInUtLineChart(data, opts){
   }
 
   let legend = '<p class="trend-line-chart-legend">';
-  const lastT = total - 1;
-  // Skillnad = trendens slut − trenden vid sista historikmånad (inte sista faktiska punkten,
-  // som kan vara en outlier och ge fel tecken när lutningen är tydlig).
-  const trendAtHistEnd = histN > 0 ? fitNetAll[histN - 1] : fitNetAll[0];
-  const lastHistNet = histN > 0 ? histNet[histN - 1] : 0;
-  const lastHistIn = histN > 0 ? data.incomeSeries[histN - 1] : 0;
-  const lastHistUt = histN > 0 ? data.expenseSeries[histN - 1] : 0;
+  // Skillnad = prognosens slut − sista verkliga historikvärdet (ankarpunkten).
+  const lastForecastIn = forecastInVals.length
+    ? forecastInVals[forecastInVals.length - 1] : lastHistIn;
+  const lastForecastUt = forecastUtVals.length
+    ? forecastUtVals[forecastUtVals.length - 1] : lastHistUt;
+  const lastForecastNet = forecastNetVals.length
+    ? forecastNetVals[forecastNetVals.length - 1] : lastHistNet;
   if(onlyNet){
-    const slutdest = fitNetAll[lastT];
-    const dd = Math.round(slutdest - trendAtHistEnd);
+    const slutdest = lastForecastNet;
+    const dd = Math.round(slutdest - lastHistNet);
     const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
     const txt = (dd > 0 ? '+' : '') + formatReportInt(dd)
       + formatTrendDeltaPct(dd, lastHistNet);
@@ -11693,10 +11711,10 @@ function buildTrendInUtLineChart(data, opts){
         + (cls ? ' ' + cls : '') + '">('
         + escapeHtml(txt) + ')</span></span>';
     };
-    legend += deltaLabel('In', Math.round(fitInAll[lastT] - fitInAll[0]), lastHistIn, 'is-in')
-      + deltaLabel('Ut', Math.round(fitUtAll[lastT] - fitUtAll[0]), lastHistUt, 'is-ut');
-    const slutdest = fitNetAll[lastT];
-    const dd = Math.round(slutdest - trendAtHistEnd);
+    legend += deltaLabel('In', Math.round(lastForecastIn - lastHistIn), lastHistIn, 'is-in')
+      + deltaLabel('Ut', Math.round(lastForecastUt - lastHistUt), lastHistUt, 'is-ut');
+    const slutdest = lastForecastNet;
+    const dd = Math.round(slutdest - lastHistNet);
     const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
     const txt = (dd > 0 ? '+' : '') + formatReportInt(dd)
       + formatTrendDeltaPct(dd, lastHistNet);
@@ -12096,7 +12114,7 @@ function renderTrendPrognosInUt(){
     + basText
     + 'Lutning In ' + escapeHtml(formatTrendSlope(data.fitIn.b))
     + ', Ut ' + escapeHtml(formatTrendSlope(data.fitUt.b))
-    + ' (OLS, lätt IQR-winsorize). '
+    + ' (OLS, lätt IQR-winsorize; prognos ankrad i sista historikmånaden). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
 
@@ -12932,25 +12950,17 @@ function renderTrendDetailPrognos(kind, itemName){
 
   let data = raw;
   if(isExpense){
-    const histN = raw.months.length;
-    const total = histN + raw.forecast.length;
     const clampRaw = v => (clampAtZero ? Math.min(0, v) : v);
-    const fitNetSeries = [];
-    for(let i = 0; i < total; i++){
-      const rawFit = raw.fitNet.a + raw.fitNet.b * i;
-      fitNetSeries.push(-clampRaw(rawFit));
-    }
     data = {
       ...raw,
       netSeries: raw.netSeries.map(v => -v),
+      lastNet: -clampRaw(raw.lastNet != null ? raw.lastNet : raw.netSeries[raw.netSeries.length - 1]),
       fitNet: {
         a: -raw.fitNet.a,
         b: -raw.fitNet.b
       },
-      fitNetSeries: fitNetSeries,
-      forecast: raw.forecast.map((p, hi) => {
-        const t = histN + hi;
-        const rawFit = p.netFit != null ? p.netFit : (raw.fitNet.a + raw.fitNet.b * t);
+      forecast: raw.forecast.map(p => {
+        const rawFit = p.netFit != null ? p.netFit : p.net;
         return {
           month: p.month,
           income: p.income,
@@ -13003,7 +13013,7 @@ function renderTrendDetailPrognos(kind, itemName){
       : 'En summa per månad (In − Ut). ')
     + 'Lutning '
     + escapeHtml(formatTrendSlope(data.fitNet.b))
-    + ' (OLS, lätt IQR-winsorize). '
+    + ' (OLS, lätt IQR-winsorize; prognos ankrad i sista historikmånaden). '
     + 'Prognos: ' + escapeHtml(trendHorizonLabel(horizon)) + ' framåt.'
     + '</p>';
 
