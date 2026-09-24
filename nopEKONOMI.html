@@ -4628,7 +4628,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v10';
+const APP_VERSION = '2026-09-24 v11';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6981,6 +6981,33 @@ function computeStartBudgetUtTotals(mode){
 
 let startPeriodMode = 'currentMonth';
 
+const START_PERIOD_PREFS_KEY = 'msmoney_start_period__' + STORAGE_SCOPE;
+const START_PERIOD_ALLOWED = {
+  currentMonth: 1, last30: 1, last3m: 1, last6m: 1, last12m: 1, last24m: 1, allt: 1
+};
+
+function loadStartPeriodMode(){
+  if(!bookId) return 'currentMonth';
+  try{
+    const all = JSON.parse(localStorage.getItem(START_PERIOD_PREFS_KEY));
+    const saved = all && typeof all === 'object' ? all[bookId] : null;
+    const mode = saved && typeof saved === 'object' ? saved.mode : saved;
+    if(typeof mode === 'string' && START_PERIOD_ALLOWED[mode]) return mode;
+  } catch(e){ /* ignore */ }
+  return 'currentMonth';
+}
+
+function saveStartPeriodMode(mode){
+  if(!bookId) return;
+  const m = START_PERIOD_ALLOWED[mode] ? mode : 'currentMonth';
+  try{
+    const all = JSON.parse(localStorage.getItem(START_PERIOD_PREFS_KEY));
+    const store = all && typeof all === 'object' ? all : {};
+    store[bookId] = { mode: m };
+    localStorage.setItem(START_PERIOD_PREFS_KEY, JSON.stringify(store));
+  } catch(e){ /* ignore */ }
+}
+
 function paintStartPeriodBar(){
   const barEl = el('startPeriodBar');
   const wrap = el('startPeriodWrap');
@@ -6994,10 +7021,8 @@ function paintStartPeriodBar(){
     return;
   }
   barEl.hidden = false;
-  const allowed = {
-    currentMonth: 1, last30: 1, last3m: 1, last6m: 1, last12m: 1, last24m: 1, allt: 1
-  };
-  if(!allowed[startPeriodMode]) startPeriodMode = 'currentMonth';
+  if(!START_PERIOD_ALLOWED[startPeriodMode]) startPeriodMode = loadStartPeriodMode();
+  if(!START_PERIOD_ALLOWED[startPeriodMode]) startPeriodMode = 'currentMonth';
   if(menu.value !== startPeriodMode){
     menu.value = startPeriodMode;
   }
@@ -8384,6 +8409,7 @@ async function refreshStartBackupHintFromDisk(){
 function renderStart(){
   startMenu.selectedIndex = 0;
   syncTrendMenuGates();
+  startPeriodMode = loadStartPeriodMode();
 
   const rec = lastBackupRecord(bookId);
   paintStartBackupHint(rec && rec.at, rec && rec.posts);
@@ -8455,6 +8481,8 @@ const startPeriodMenu = el('startPeriodMenu');
 if(startPeriodMenu){
   startPeriodMenu.addEventListener('change', () => {
     startPeriodMode = startPeriodMenu.value || 'currentMonth';
+    if(!START_PERIOD_ALLOWED[startPeriodMode]) startPeriodMode = 'currentMonth';
+    saveStartPeriodMode(startPeriodMode);
     paintStartPeriodBar();
   });
 }
