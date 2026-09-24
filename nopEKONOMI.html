@@ -4623,7 +4623,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-24 v08';
+const APP_VERSION = '2026-09-24 v09';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -14562,6 +14562,9 @@ const CARE_HUB_TREND_HELP =
   'Här styr du vilka kategorier och underkategorier som ingår i den rensade '
   + 'serien (Netto över tid → Kategorialternativ Bocklista). Ibockade ingår; '
   + 'avbockade tas bort (t.ex. engångsposter som annars förvränger riktningen). '
+  + 'Samma val styr Budget: ibockade poster ingår i BUDGET IN/UT och startteasern; '
+  + 'avbockade syns nedtonade i Budget med sparat belopp men räknas inte in. '
+  + 'När du bockar in igen lyfts kategorisumman vid behov. '
   + 'I diagrammet visas två linjer: verkligt saldo (alla poster) och den rensade '
   + 'bocklista-serien — vardera med egen historik och prognos ankrad i sitt sista '
   + 'värde. Ändringar sparas med OK och följer med i backupen.';
