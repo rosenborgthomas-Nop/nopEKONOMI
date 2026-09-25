@@ -1631,6 +1631,113 @@ body.trend-view-active{
   letter-spacing:0.04em;
   text-align:center;
 }
+
+/* Mobil: egen meny istället för systemets trista select-ruta */
+.app-select-sheet{
+  position:fixed;
+  inset:0;
+  z-index:10050;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  padding:12px 12px max(12px, env(safe-area-inset-bottom));
+}
+.app-select-sheet[hidden]{ display:none; }
+.app-select-sheet-backdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(10, 22, 48, 0.55);
+}
+.app-select-sheet-panel{
+  position:relative;
+  z-index:1;
+  width:min(420px, 100%);
+  max-height:min(72vh, 560px);
+  display:flex;
+  flex-direction:column;
+  background:var(--paper-surface);
+  color:var(--text-on-paper);
+  border:1px solid var(--paper-line-strong);
+  border-radius:14px 14px 10px 10px;
+  box-shadow:0 -8px 28px rgba(8, 18, 40, 0.35);
+  overflow:hidden;
+}
+.app-select-sheet-list{
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:8px 0;
+  flex:1 1 auto;
+}
+.app-select-sheet-opt{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  width:100%;
+  margin:0;
+  padding:14px 18px;
+  border:none;
+  background:transparent;
+  color:var(--text-on-paper);
+  font-family:'Source Sans 3', sans-serif;
+  font-size:16px;
+  font-weight:600;
+  text-align:left;
+  cursor:pointer;
+}
+.app-select-sheet-opt:active,
+.app-select-sheet-opt:hover{
+  background:color-mix(in srgb, var(--paper-alt) 70%, transparent);
+}
+.app-select-sheet-opt.is-selected{
+  color:var(--ink);
+  background:color-mix(in srgb, var(--gold) 18%, var(--paper-surface));
+}
+.app-select-sheet-opt.is-selected::after{
+  content:'';
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:var(--teal);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--teal) 25%, transparent);
+  flex:0 0 auto;
+}
+.app-select-sheet-sep{
+  height:1px;
+  margin:8px 16px;
+  background:var(--paper-line);
+  border:none;
+  pointer-events:none;
+}
+.app-select-sheet-sep-title{
+  display:block;
+  padding:10px 18px 4px;
+  font-size:12px;
+  font-weight:600;
+  font-style:italic;
+  color:var(--text-on-paper-soft);
+  letter-spacing:0.02em;
+}
+.app-select-sheet-cancel{
+  margin:0;
+  border-radius:0;
+  border:none;
+  border-top:1px solid var(--paper-line);
+  width:100%;
+  padding:14px 16px;
+  font-family:'JetBrains Mono', monospace;
+  font-size:13px;
+  letter-spacing:0.04em;
+  background:var(--btn-fill);
+  color:var(--btn-text);
+  cursor:pointer;
+}
+.app-select-sheet-cancel:active{
+  background:var(--btn-fill-hover);
+}
+body.app-select-open{
+  overflow:hidden;
+}
 .import-choice-row{
   display:flex;
   flex-wrap:wrap;
@@ -4884,11 +4991,19 @@ td.num.dash .cell-content{
   </div>
 </div>
 
+<div class="app-select-sheet" id="appSelectSheet" hidden>
+  <div class="app-select-sheet-backdrop" id="appSelectSheetBackdrop"></div>
+  <div class="app-select-sheet-panel" role="dialog" aria-modal="true" aria-label="Meny">
+    <div class="app-select-sheet-list" id="appSelectSheetList" role="listbox"></div>
+    <button type="button" class="app-select-sheet-cancel" id="appSelectSheetCancel">Avbryt</button>
+  </div>
+</div>
+
 <script>
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v26';
+const APP_VERSION = '2026-09-26 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -23708,6 +23823,7 @@ function currentViewName(){
 // Esc = samma som tillbakapilen på aktuell vy (stänger dialoger först).
 function triggerEscapeBack(){
   try{
+  if(closeAppSelectSheet()) return true;
   const newName = el('newNameConfirmOverlay');
   if(newName && !newName.hidden){
     finishNewNameConfirm(false);
@@ -23923,6 +24039,131 @@ document.addEventListener('keydown', e => {
   if(triggerEscapeBack()) e.preventDefault();
 });
 
+/* --- Mobilmeny: egen sheet istället för systemets select-ruta -------- */
+
+let appSelectTarget = null;
+
+function preferCustomMenuSelect(){
+  return isReportMobileLayout();
+}
+
+function isAppSelectSheetOpen(){
+  const sheet = el('appSelectSheet');
+  return !!(sheet && !sheet.hidden);
+}
+
+function closeAppSelectSheet(){
+  const sheet = el('appSelectSheet');
+  if(!sheet || sheet.hidden) return false;
+  sheet.hidden = true;
+  document.body.classList.remove('app-select-open');
+  appSelectTarget = null;
+  return true;
+}
+
+function openAppSelectSheet(selectEl){
+  if(!selectEl || selectEl.disabled) return;
+  const sheet = el('appSelectSheet');
+  const list = el('appSelectSheetList');
+  if(!sheet || !list) return;
+
+  appSelectTarget = selectEl;
+  clear(list);
+
+  const opts = selectEl.options;
+  for(let i = 0; i < opts.length; i++){
+    const opt = opts[i];
+    const label = (opt.textContent || '').trim();
+    const isSep = opt.classList.contains('menu-sep')
+      || opt.disabled && /^[─\-–—\s]+$/.test(label);
+    const isSepTitle = opt.classList.contains('menu-sep-title');
+
+    if(isSepTitle){
+      const title = document.createElement('div');
+      title.className = 'app-select-sheet-sep-title';
+      title.textContent = label.replace(/^─+\s*|\s*─+$/g, '').trim() || label;
+      list.appendChild(title);
+      continue;
+    }
+    if(isSep || (opt.disabled && !opt.value)){
+      const sep = document.createElement('div');
+      sep.className = 'app-select-sheet-sep';
+      sep.setAttribute('aria-hidden', 'true');
+      list.appendChild(sep);
+      continue;
+    }
+    if(opt.disabled) continue;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'app-select-sheet-opt'
+      + (opt.value === selectEl.value ? ' is-selected' : '');
+    btn.setAttribute('role', 'option');
+    btn.setAttribute('aria-selected', opt.value === selectEl.value ? 'true' : 'false');
+    btn.textContent = label || opt.value;
+    btn.dataset.value = opt.value;
+    btn.addEventListener('click', () => {
+      const sel = appSelectTarget;
+      const val = btn.dataset.value;
+      closeAppSelectSheet();
+      if(!sel) return;
+      if(sel.value !== val){
+        sel.value = val;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        // Samma val — vissa menyer kör ändå (t.ex. startmenyn via change).
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    list.appendChild(btn);
+  }
+
+  sheet.hidden = false;
+  document.body.classList.add('app-select-open');
+  try{ selectEl.blur(); } catch(e){ /* ignore */ }
+
+  const selectedBtn = list.querySelector('.app-select-sheet-opt.is-selected');
+  if(selectedBtn && typeof selectedBtn.scrollIntoView === 'function'){
+    requestAnimationFrame(() => {
+      try{ selectedBtn.scrollIntoView({ block: 'nearest' }); } catch(e){ /* ignore */ }
+    });
+  }
+}
+
+function bindCustomMenuSelects(){
+  const sheet = el('appSelectSheet');
+  const backdrop = el('appSelectSheetBackdrop');
+  const cancel = el('appSelectSheetCancel');
+  if(backdrop) backdrop.addEventListener('click', () => closeAppSelectSheet());
+  if(cancel) cancel.addEventListener('click', () => closeAppSelectSheet());
+
+  const activate = e => {
+    if(!preferCustomMenuSelect()) return;
+    const t = e.target;
+    if(!t || !t.closest) return;
+    const sel = t.closest('select.menu-select, select#bookSelect');
+    if(!sel || sel.disabled) return;
+    // Tillåt systemmenyn om custom sheet saknas.
+    if(!sheet) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openAppSelectSheet(sel);
+  };
+
+  document.addEventListener('mousedown', activate, true);
+  document.addEventListener('touchstart', activate, { capture: true, passive: false });
+  document.addEventListener('keydown', e => {
+    if(!preferCustomMenuSelect()) return;
+    const t = e.target;
+    if(!t || t.tagName !== 'SELECT') return;
+    if(!t.matches('select.menu-select, select#bookSelect')) return;
+    if(e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown'){
+      e.preventDefault();
+      openAppSelectSheet(t);
+    }
+  });
+}
+
 async function initApp(){
   applyAppVersionLabels();
   await openIdb();
@@ -23932,6 +24173,7 @@ async function initApp(){
   await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
   await show('login');
   bindAppBackNavigation();
+  bindCustomMenuSelects();
   window.addEventListener('resize', syncReportMobileLayout, { passive: true });
   window.addEventListener('orientationchange', syncReportMobileLayout, { passive: true });
   window.addEventListener('resize', resizeTrendChartText, { passive: true });
