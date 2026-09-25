@@ -4761,7 +4761,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v08';
+const APP_VERSION = '2026-09-25 v09';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7084,10 +7084,94 @@ function budgetAmtBarTip(isIncome, actual, budget){
 /**
  * Start-teaser: bara utgifter — siffra = återstår (budget − förbrukat),
  * övre stapel = förbrukat/budget (röd från vänster vid överskridande).
- * Undre stapel: separat mätare (placeholder tills vidare).
+ * Undre stapel (bara Pågående månad): spök-saldo = återstår + medel av
+ * historiska rest-av-månad (6 föregående månader, från morgondagens dagtal
+ * till månadsslut), jämfört med samma budget. Bocklistan styr vilka poster.
  */
-/** Testvärde för undre halv (positiv andel 0–100). */
-const START_TEASER_LOWER_TEST_PCT = 50;
+
+/** Dagtal för morgondagen (1–31). Sista dagen i månaden → 1 (hela månader). */
+function startTeaserTailStartDay(todayIso){
+  const iso = todayIso || todayIsoDate();
+  const y = Number(iso.slice(0, 4));
+  const m = Number(iso.slice(5, 7));
+  const d = Number(iso.slice(8, 10));
+  const dim = daysInCalendarMonth(y, m);
+  if(!(d >= 1) || d >= dim) return 1;
+  return d + 1;
+}
+
+/**
+ * Sex föregående kalendermånader: intervall [dagtal → månadsslut].
+ * Hoppar över månader där start-dagen inte finns (t.ex. 31 i februari).
+ */
+function startTeaserGhostTailRanges(todayIso){
+  const iso = todayIso || todayIsoDate();
+  const curMk = monthKeyFromIso(iso);
+  const dayStart = startTeaserTailStartDay(iso);
+  const ranges = [];
+  for(let i = 6; i >= 1; i--){
+    const mk = addMonthKey(curMk, -i);
+    const y = Number(mk.slice(0, 4));
+    const m = Number(mk.slice(5, 7));
+    const dim = daysInCalendarMonth(y, m);
+    if(dayStart > dim) continue;
+    ranges.push({
+      from: mk + '-' + String(dayStart).padStart(2, '0'),
+      to: mk + '-' + String(dim).padStart(2, '0')
+    });
+  }
+  return ranges;
+}
+
+/** Netto (in − ut) i datumintervall, endast bocklistade (icke-överföring) poster. */
+function sumBocklistaNetInDateRange(fromIso, toIso){
+  if(!book || !book.order || !fromIso || !toIso) return 0;
+  syncTrendIncludeMap(book);
+  let net = 0;
+  for(const accName of book.order){
+    const acc = book.accounts[accName];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(isOpeningBalanceRow(r)) continue;
+      if(isReportExcludedRow(r)) continue;
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(d < fromIso || d > toIso) continue;
+      if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
+      for(const piece of reportPiecesFromRow(r)){
+        const cat = (piece.category || '').trim();
+        const sub = (piece.subCategory || '').trim();
+        if(!cat || isTransferCategory(cat)) continue;
+        if(!isTrendPieceIncluded(cat, sub)) continue;
+        const amount = piece.amount;
+        if(!Number.isFinite(amount) || !amount) continue;
+        net += amount;
+      }
+    }
+  }
+  return net;
+}
+
+/**
+ * Spök-saldo = återstår + medelnetto för rest-av-månad i 6 föregående månader.
+ * Returnerar { ghost, mean, n, ranges } eller null.
+ */
+function computeStartTeaserGhostSaldo(remaining, todayIso){
+  const ranges = startTeaserGhostTailRanges(todayIso);
+  if(!ranges.length) return null;
+  let sum = 0;
+  for(const r of ranges){
+    sum += sumBocklistaNetInDateRange(r.from, r.to);
+  }
+  const mean = sum / ranges.length;
+  const rem = typeof remaining === 'number' && Number.isFinite(remaining) ? remaining : 0;
+  return {
+    ghost: rem + mean,
+    mean: mean,
+    n: ranges.length,
+    ranges: ranges
+  };
+}
 
 function ensureStartPeriodAmtBar(wrap, id, extraClass){
   let bar = el(id);
@@ -7103,14 +7187,43 @@ function ensureStartPeriodAmtBar(wrap, id, extraClass){
   return bar;
 }
 
-function paintStartTeaserLowerBar(wrap, lowerBar){
+/**
+ * Undre halv: spök-saldo mot budget (samma stapellogik som övre, men prognos).
+ * @param {number|null} budget
+ * @param {number} remaining  återstår från övre halv­an
+ */
+function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
   if(!wrap) return;
-  // Placeholder: positiv 50 % under test — byts ut när undre mätaren definieras.
-  const pct = START_TEASER_LOWER_TEST_PCT;
-  const red = false;
-  wrap.setAttribute('data-budget-lower-over', red ? '1' : '0');
   const bar = lowerBar || ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBarLower', 'budget-amt-bar-lower');
+  if(!(budget > 0)){
+    wrap.removeAttribute('data-budget-lower-over');
+    if(bar) bar.style.width = '0';
+    return;
+  }
+  const ghostInfo = computeStartTeaserGhostSaldo(remaining, todayIsoDate());
+  if(!ghostInfo){
+    wrap.removeAttribute('data-budget-lower-over');
+    if(bar) bar.style.width = '0';
+    return;
+  }
+  const ghost = ghostInfo.ghost;
+  // Tolka spök-saldo som prognostiserat "återstår" → prognostiserat förbrukat.
+  const ghostActual = Math.max(0, budget - ghost);
+  const pct = budgetBarWidthPct(false, ghostActual, budget);
+  const isRed = budgetBarIsRed(false, ghostActual, budget);
+  wrap.setAttribute('data-budget-lower-over', isRed ? '1' : '0');
   if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
+
+  const tipExtra = '\nSpök-saldo ' + formatBudgetAmtEdit(Math.round(ghost))
+    + ' (återstår '
+    + formatBudgetAmtEdit(Math.round(remaining))
+    + ' + medel rest-månad '
+    + formatBudgetAmtEdit(Math.round(ghostInfo.mean))
+    + ', ' + ghostInfo.n + ' mån)';
+  const base = wrap.getAttribute('title') || '';
+  if(base.indexOf('Spök-saldo') < 0){
+    wrap.title = base + tipExtra;
+  }
 }
 
 function clearStartTeaserLowerBar(wrap, lowerBar){
@@ -7164,7 +7277,7 @@ function paintStartPeriodBar(){
       valueEl.textContent = '';
     }
     if(bar) bar.style.width = '0';
-    if(split) paintStartTeaserLowerBar(wrap, amtBarLower);
+    if(split) paintStartTeaserLowerBar(wrap, amtBarLower, null, 0);
     return;
   }
   wrap.removeAttribute('data-budget-unbudgeted');
@@ -7179,7 +7292,7 @@ function paintStartPeriodBar(){
   if(remaining < 0) valueEl.classList.add('neg');
   bar = ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBar', 'budget-amt-bar-upper');
   if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
-  if(split) paintStartTeaserLowerBar(wrap, amtBarLower);
+  if(split) paintStartTeaserLowerBar(wrap, amtBarLower, budget, remaining);
 }
 function computeStartBudgetUtTotals(mode){
   const empty = { outBudget: null, outActual: 0 };
