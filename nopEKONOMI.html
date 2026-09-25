@@ -278,8 +278,8 @@ h1{
   opacity:0.58;
 }
 .start-period-wrap[data-budget-over="1"] .budget-amt-bar-upper{
-  left:auto;
-  right:0;
+  left:0;
+  right:auto;
   background:#E03131;
   opacity:0.62;
 }
@@ -290,8 +290,8 @@ h1{
   opacity:0.58;
 }
 .start-period-wrap[data-budget-lower-over="1"] .budget-amt-bar-lower{
-  left:auto;
-  right:0;
+  left:0;
+  right:auto;
   background:#E03131;
   opacity:0.62;
 }
@@ -4761,7 +4761,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v07';
+const APP_VERSION = '2026-09-25 v08';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7082,7 +7082,8 @@ function budgetAmtBarTip(isIncome, actual, budget){
 }
 
 /**
- * Start-teaser: bara utgifter — värde = BUDGET UT, övre stapel = förbrukat/budget.
+ * Start-teaser: bara utgifter — siffra = återstår (budget − förbrukat),
+ * övre stapel = förbrukat/budget (röd från vänster vid överskridande).
  * Undre stapel: separat mätare (placeholder tills vidare).
  */
 /** Testvärde för undre halv (positiv andel 0–100). */
@@ -7169,10 +7170,13 @@ function paintStartPeriodBar(){
   wrap.removeAttribute('data-budget-unbudgeted');
   const pct = budgetBarWidthPct(false, actual, budget);
   const red = budgetBarIsRed(false, actual, budget);
+  const remaining = Math.round(budget) - Math.round(actual);
   wrap.setAttribute('data-budget-over', red ? '1' : '0');
   wrap.setAttribute('data-budget-side', 'out');
-  wrap.title = budgetAmtBarTip(false, actual, budget);
-  valueEl.textContent = formatBudgetAmtEdit(budget);
+  wrap.title = budgetAmtBarTip(false, actual, budget)
+    + '\nÅterstår ' + formatBudgetAmtEdit(remaining);
+  valueEl.textContent = formatBudgetAmtEdit(remaining);
+  if(remaining < 0) valueEl.classList.add('neg');
   bar = ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBar', 'budget-amt-bar-upper');
   if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
   if(split) paintStartTeaserLowerBar(wrap, amtBarLower);
