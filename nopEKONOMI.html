@@ -339,10 +339,13 @@ h1{
   border-left:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 55%, transparent);
   box-sizing:border-box;
 }
-/* Summan i övre halv när stapeln är delad. */
+/* Summan i övre halv när stapeln är delad — optiskt centrerad, lite längre höger. */
 .start-period-wrap[data-teaser-split="1"] .start-period-value{
   align-self:flex-start;
   height:50%;
+  padding:0 5px 0 10px;
+  line-height:1;
+  transform:translateY(1px);
 }
 .start-period-value.pos{ color:var(--teal); }
 .start-period-value.neg{ color:var(--wine); }
@@ -4753,7 +4756,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v05';
+const APP_VERSION = '2026-09-25 v06';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
