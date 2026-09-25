@@ -5003,7 +5003,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v02';
+const APP_VERSION = '2026-09-26 v03';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9110,9 +9110,10 @@ async function renderLogin(){
   }
 
   const mode = await getWorkspaceSetupMode();
-  if(mode === 'confirm'){
-    setLoginWorkspaceSetupVisible(true, 'confirm');
-  } else if(mode === 'pick' && !reg.order.length){
+  // Mobil/Chrome glömmer filbehörighet mellan starter. Blockera inte inloggningen
+  // med "Bekräfta mappåtkomst" — öppna från spegel; be om tillstånd vid synk/Öppna
+  // när filen faktiskt behövs (då räcker ett tryck till webbläsarens Tillåt).
+  if(mode === 'pick' && !reg.order.length){
     setLoginWorkspaceSetupVisible(true, 'pick');
   } else {
     setLoginWorkspaceSetupVisible(false);
@@ -9200,10 +9201,13 @@ newBookBtn.addEventListener('click', async () => {
   if(!creating) newNameInput.value = '';
   syncLoginMode();
   // Användargest: väck ev. redan sparad behörighet till programmappar (Tillåt — inte mappväljare).
+  // Bara när det behövs för att skapa fil — undvik dialog vid varje start.
   if(creating){
     try{
       const dir = await idbGet(WORKSPACE_DIR_KEY);
-      if(dir) await ensureDirPermission(dir, true);
+      if(dir && !(await handlePermissionIsGranted(dir, 'readwrite'))){
+        await ensureDirPermission(dir, true);
+      }
     } catch(e){ /* ignore */ }
   }
 });
