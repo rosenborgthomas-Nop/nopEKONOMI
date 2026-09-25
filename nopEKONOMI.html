@@ -4860,7 +4860,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v18';
+const APP_VERSION = '2026-09-25 v19';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10151,6 +10151,42 @@ async function writeClipboardText(text){
   document.body.removeChild(ta);
 }
 
+/**
+ * Urklipp för kalkylprogram (LibreOffice Calc m.fl.):
+ * text/plain = TSV (tabb + CRLF), text/html = riktig tabell.
+ */
+async function writeClipboardSpreadsheet(tsv, htmlTable){
+  const plain = String(tsv || '').replace(/\r?\n/g, '\r\n');
+  const htmlDoc = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>'
+    + (htmlTable || '') + '</body></html>';
+  if(navigator.clipboard && window.ClipboardItem && window.isSecureContext){
+    try{
+      const item = new ClipboardItem({
+        'text/plain': new Blob([plain], { type: 'text/plain' }),
+        'text/html': new Blob([htmlDoc], { type: 'text/html' })
+      });
+      await navigator.clipboard.write([item]);
+      return;
+    } catch(e){
+      try{
+        const item = new ClipboardItem({
+          'text/plain': Promise.resolve(new Blob([plain], { type: 'text/plain' })),
+          'text/html': Promise.resolve(new Blob([htmlDoc], { type: 'text/html' }))
+        });
+        await navigator.clipboard.write([item]);
+        return;
+      } catch(e2){ /* fallback below */ }
+    }
+  }
+  await writeClipboardText(plain);
+}
+
+/** Belopp för Calc: heltal utan blanksteg (blir siffercell). */
+function formatBudgetAmtClipboard(v){
+  if(typeof v !== 'number' || !Number.isFinite(v)) return '';
+  return String(Math.round(v));
+}
+
 function reportHeadTextFromRoot(root){
   const head = root && root.querySelector('.report-table-head');
   if(!head) return { title: '', updated: '' };
@@ -10843,8 +10879,9 @@ async function executeReportExport(action){
           if(msgEl) addBox(msgEl, 'notice', 'Inget att kopiera.');
           return;
         }
-        await writeClipboardText(ctx.text);
-        if(msgEl) addBox(msgEl, 'report', 'Budgeten är kopierad till urklipp.');
+        if(ctx.html) await writeClipboardSpreadsheet(ctx.text, ctx.html);
+        else await writeClipboardText(ctx.text);
+        if(msgEl) addBox(msgEl, 'report', 'Budgeten är kopierad till urklipp (redo för Calc).');
         return;
       }
       if(action === 'print'){
@@ -16473,50 +16510,84 @@ function buildBudgetPrintRows(){
   return items;
 }
 
-/** Text för urklipp (samma kolumner som budgetutskrift). */
-function buildBudgetClipboardText(){
-  if(careListKind !== 'budget' || !book) return '';
+/** Text + HTML för urklipp till LibreOffice Calc (kolumner). */
+function buildBudgetClipboardPayload(){
+  if(careListKind !== 'budget' || !book) return null;
   const rows = buildBudgetPrintRows();
-  if(!rows.length) return '';
+  if(!rows.length) return null;
   const range = budgetPeriodRange();
   const periodLab = budgetPeriodLabel();
   const totals = computeBudgetSideTotals(rows);
-  const lines = [];
-  let head = 'BUDGET';
-  if(periodLab) head += ' · ' + periodLab;
-  if(range && range.from && range.to){
-    head += ' (' + range.from.slice(0, 7) + ' – ' + range.to.slice(0, 7) + ')';
+  const tsvLines = [];
+  const htmlRows = [];
+
+  const periodFrom = range && range.from ? range.from : '';
+  const periodTo = range && range.to ? range.to : '';
+  tsvLines.push(['Period', periodLab || '', periodFrom, periodTo].join('\t'));
+  htmlRows.push('<tr>'
+    + '<td>Period</td><td>' + escapeHtml(periodLab || '') + '</td>'
+    + '<td>' + escapeHtml(periodFrom) + '</td>'
+    + '<td>' + escapeHtml(periodTo) + '</td></tr>');
+
+  tsvLines.push(['Kategori', 'Budget', 'Inkommit/förbrukat', 'Bocklista'].join('\t'));
+  htmlRows.push('<tr>'
+    + '<th>Kategori</th><th>Budget</th><th>Inkommit/förbrukat</th><th>Bocklista</th></tr>');
+
+  function pushRow(label, budgetVal, spentVal, bock, opts){
+    opts = opts || {};
+    const bStr = (typeof budgetVal === 'number' && Number.isFinite(budgetVal) && budgetVal > 0)
+      ? formatBudgetAmtClipboard(budgetVal)
+      : (opts.budgetDash ? '—' : '');
+    const sStr = (typeof spentVal === 'number' && Number.isFinite(spentVal))
+      ? formatBudgetAmtClipboard(spentVal)
+      : '0';
+    const bockStr = bock || '';
+    tsvLines.push([label, bStr, sStr, bockStr].join('\t'));
+    const strong = opts.section ? ' style="font-weight:700"' : '';
+    htmlRows.push('<tr' + strong + '>'
+      + '<td>' + escapeHtml(label) + '</td>'
+      + '<td>' + escapeHtml(bStr) + '</td>'
+      + '<td>' + escapeHtml(sStr) + '</td>'
+      + '<td>' + escapeHtml(bockStr) + '</td></tr>');
   }
-  lines.push(head);
-  lines.push(reportUpdatedLineHtml());
-  lines.push('Kategori\tBudget\tInkommit/förbrukat\tBocklista');
-  lines.push('BUDGET IN\t'
-    + (formatBudgetAmtEdit(totals.inBudget) || '—') + '\t'
-    + (formatBudgetAmtEdit(totals.inActual) || '0') + '\t');
-  lines.push('BUDGET UT\t'
-    + (formatBudgetAmtEdit(totals.outBudget) || '—') + '\t'
-    + (formatBudgetAmtEdit(totals.outActual) || '0') + '\t');
+
+  pushRow('BUDGET IN', totals.inBudget, totals.inActual, '', { section: true, budgetDash: true });
+  pushRow('BUDGET UT', totals.outBudget, totals.outActual, '', { section: true, budgetDash: true });
+
   for(const item of rows){
     const isSub = item.rowKind === 'sub';
     let label = isSub
       ? (item.emptySub ? TREND_EMPTY_SUB_LABEL : item.name)
       : item.name;
     if(isSub) label = '  ' + label;
-    const budgetStr = (typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0)
-      ? formatBudgetAmtEdit(item.monthAmt)
-      : '—';
-    const spentStr = formatBudgetAmtEdit(
-      typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt) ? item.spentAmt : 0
-    ) || '0';
-    lines.push(label + '\t' + budgetStr + '\t' + spentStr + '\t' + budgetPrintBocklistaLabel(item));
+    const budgetVal = (typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0)
+      ? item.monthAmt
+      : null;
+    const spentVal = typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt)
+      ? item.spentAmt
+      : 0;
+    pushRow(label, budgetVal, spentVal, budgetPrintBocklistaLabel(item), { budgetDash: true });
   }
-  return lines.join('\n');
+
+  const tsv = tsvLines.join('\n');
+  const html = '<table border="1" cellspacing="0" cellpadding="2">'
+    + htmlRows.join('') + '</table>';
+  return { tsv: tsv, html: html, text: tsv };
+}
+
+function buildBudgetClipboardText(){
+  const payload = buildBudgetClipboardPayload();
+  return payload ? payload.tsv : '';
 }
 
 function getBudgetExportContext(){
-  const text = buildBudgetClipboardText();
-  if(!text) return null;
-  return { text: text, isBudget: true };
+  const payload = buildBudgetClipboardPayload();
+  if(!payload) return null;
+  return {
+    text: payload.tsv,
+    html: payload.html,
+    isBudget: true
+  };
 }
 
 function printBudgetList(){
