@@ -4129,6 +4129,7 @@ td.num.dash .cell-content{
             <div class="care-list-actions">
               <button class="btn-quiet" id="careListNewBtn" type="button">Nytt konto…</button>
               <button class="btn-quiet" id="careListBackupBtn" type="button" hidden>Säkerhetskopia…</button>
+              <button class="btn-quiet" id="careListPrintBtn" type="button" hidden>Skriv ut…</button>
               <div class="care-list-actions-right">
                 <button class="btn-cancel" id="careListCancelBtn" type="button">Avbryt</button>
                 <button class="btn-ok" id="careListOkBtn" type="button">OK</button>
@@ -4859,7 +4860,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v16';
+const APP_VERSION = '2026-09-25 v17';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10607,6 +10608,10 @@ function printHtmlDocument(title, bodyHtml, opts){
     + '.report-table th.report-label-col,.report-table td.report-label-col{text-align:left;position:static;max-width:14rem;border-right:1px solid #bbb;}'
     + '.report-table tr.report-section td{font-weight:700;text-transform:uppercase;}'
     + '.report-table td.num.neg{color:#A33B3B;}'
+    + '.budget-print-table{width:100%;}'
+    + '.budget-print-table th.budget-print-bock,.budget-print-table td.budget-print-bock{text-align:center;width:4.5rem;}'
+    + '.budget-print-sub{padding-left:1.1rem;font-weight:400;}'
+    + '.budget-print-off{opacity:0.55;}'
     + '.report-print-img{display:block;width:100%;max-width:' + (landscape ? '277mm' : '210mm') + ';height:auto;margin:0 auto;}'
     + '.payee-chart-board{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 16px;}'
     + '.payee-chart-panel{padding:10px 10px 8px;border:1px solid #ddd;border-radius:8px;overflow:visible;}'
@@ -16076,6 +16081,7 @@ const careListStageList = el('careListStageList');
 const careListStageEdit = el('careListStageEdit');
 const careListNewBtn = el('careListNewBtn');
 const careListBackupBtn = el('careListBackupBtn');
+const careListPrintBtn = el('careListPrintBtn');
 const careListOkBtn = el('careListOkBtn');
 const careListCancelBtn = el('careListCancelBtn');
 const careListEditName = el('careListEditName');
@@ -16354,6 +16360,153 @@ function buildCareListItems(){
     .slice()
     .sort((a, b) => a.localeCompare(b, 'sv'))
     .map(name => ({ name, count: counter(name) }));
+}
+
+/** Bocklista-status för utskrift: På / Av / Delvis. */
+function budgetPrintBocklistaLabel(item){
+  if(!item) return 'Av';
+  if(item.rowKind === 'sub') return item.included ? 'På' : 'Av';
+  const st = item.checkState || (item.included ? 'all' : 'none');
+  if(st === 'all') return 'På';
+  if(st === 'some') return 'Delvis';
+  return 'Av';
+}
+
+/**
+ * Alla kategorier + underkategorier för budgetutskrift (oberoende av fäll ut/in).
+ */
+function buildBudgetPrintRows(){
+  if(!book) return [];
+  rebuildBookLookup();
+  syncTrendIncludeMap(book);
+  syncBudgetIncludeMap(book);
+  syncBudgetMonthMap(book);
+  const catSubs = buildTrendCategorySubsMap(book);
+  const map = book.trendInclude || {};
+  const monthMap = book.budgetMonth || {};
+  const range = budgetPeriodRange();
+  const activityMap = buildBudgetMonthActivityMap(
+    range && range.from, range && range.to, { onlyIncluded: true }
+  );
+  const activityMapAll = buildBudgetMonthActivityMap(
+    range && range.from, range && range.to, { onlyIncluded: false }
+  );
+  const signMaps = buildBudgetSignMaps();
+  const items = [];
+  const cats = (bookLookup.categories || [])
+    .slice()
+    .sort((a, b) => a.localeCompare(b, 'sv'));
+  for(const name of cats){
+    const subs = catSubs[name] || [];
+    const checkState = trendCategoryCheckState(name, map, catSubs);
+    const leafRows = [{ emptySub: true, name: '' }];
+    for(const sub of subs) leafRows.push({ emptySub: false, name: sub });
+    const catMonthly = Object.prototype.hasOwnProperty.call(monthMap, name)
+      ? monthMap[name]
+      : null;
+    const catIsIncome = budgetSignForItem({ rowKind: 'cat', name: name }, signMaps) === 'in';
+    const catActivity = checkState === 'none' ? activityMapAll : activityMap;
+    items.push({
+      rowKind: 'cat',
+      name: name,
+      parent: '',
+      emptySub: false,
+      monthAmt: budgetMonthlyToPeriod(catMonthly),
+      isIncome: catIsIncome,
+      spentAmt: budgetActualForItem({ rowKind: 'cat', name: name }, catActivity, catIsIncome),
+      included: checkState !== 'none',
+      checkState: checkState
+    });
+    for(const leaf of leafRows){
+      const emptyKey = trendEmptySubKey(name);
+      const sk = leaf.emptySub ? emptyKey : trendIncludeSubKey(name, leaf.name);
+      const leafMonthly = Object.prototype.hasOwnProperty.call(monthMap, sk)
+        ? monthMap[sk]
+        : null;
+      const leafIncluded = isTrendLeafIncluded(name, leaf.emptySub ? '' : leaf.name);
+      const leafItem = {
+        rowKind: 'sub',
+        name: leaf.name,
+        emptySub: leaf.emptySub,
+        parent: name,
+        monthAmt: budgetMonthlyToPeriod(leafMonthly),
+        included: leafIncluded,
+        checkState: leafIncluded ? 'all' : 'none'
+      };
+      leafItem.isIncome = budgetSignForItem(leafItem, signMaps) === 'in';
+      const leafActivity = !leafIncluded ? activityMapAll : activityMap;
+      leafItem.spentAmt = budgetActualForItem(leafItem, leafActivity, leafItem.isIncome);
+      items.push(leafItem);
+    }
+  }
+  return items;
+}
+
+function printBudgetList(){
+  if(careListKind !== 'budget' || !book) return false;
+  const rows = buildBudgetPrintRows();
+  const range = budgetPeriodRange();
+  const fromIso = range && range.from ? range.from : '';
+  const toIso = range && range.to ? range.to : '';
+  const periodLab = budgetPeriodLabel();
+  const totals = computeBudgetSideTotals(rows);
+  const titleHtml = 'BUDGET'
+    + (periodLab ? ' · ' + escapeHtml(periodLab) : '');
+  let head = '<div class="report-table-head">'
+    + '<p class="report-table-title">' + titleHtml;
+  if(fromIso && toIso){
+    head += reportPeriodRangeTitleHtml(fromIso, toIso, null);
+  }
+  head += '</p>'
+    + '<p class="report-table-updated">' + escapeHtml(reportUpdatedLineHtml()) + '</p>'
+    + '</div>';
+
+  let body = '';
+  body += '<tr class="report-section">'
+    + '<td class="report-label-col">BUDGET IN</td>'
+    + '<td class="num">' + escapeHtml(formatBudgetAmtEdit(totals.inBudget) || '—') + '</td>'
+    + '<td class="num">' + escapeHtml(formatBudgetAmtEdit(totals.inActual) || '0') + '</td>'
+    + '<td></td></tr>';
+  body += '<tr class="report-section">'
+    + '<td class="report-label-col">BUDGET UT</td>'
+    + '<td class="num">' + escapeHtml(formatBudgetAmtEdit(totals.outBudget) || '—') + '</td>'
+    + '<td class="num">' + escapeHtml(formatBudgetAmtEdit(totals.outActual) || '0') + '</td>'
+    + '<td></td></tr>';
+
+  for(const item of rows){
+    const isSub = item.rowKind === 'sub';
+    const label = isSub
+      ? (item.emptySub ? TREND_EMPTY_SUB_LABEL : item.name)
+      : item.name;
+    const nameCell = isSub
+      ? ('<span class="budget-print-sub">' + escapeHtml(label) + '</span>')
+      : escapeHtml(label);
+    const budgetStr = (typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0)
+      ? formatBudgetAmtEdit(item.monthAmt)
+      : '—';
+    const spentStr = formatBudgetAmtEdit(
+      typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt) ? item.spentAmt : 0
+    ) || '0';
+    const bock = budgetPrintBocklistaLabel(item);
+    const rowCls = isSub ? ' class="budget-print-sub-row"' : '';
+    const offCls = (!item.included && item.checkState !== 'some') ? ' budget-print-off' : '';
+    body += '<tr' + rowCls + '>'
+      + '<td class="report-label-col' + offCls + '">' + nameCell + '</td>'
+      + '<td class="num">' + escapeHtml(budgetStr) + '</td>'
+      + '<td class="num">' + escapeHtml(spentStr) + '</td>'
+      + '<td class="budget-print-bock">' + escapeHtml(bock) + '</td>'
+      + '</tr>';
+  }
+
+  const table = '<div class="report-print-table-wrap"><table class="report-table budget-print-table">'
+    + '<thead><tr>'
+    + '<th class="report-label-col">Kategori</th>'
+    + '<th class="num">Budget</th>'
+    + '<th class="num">Inkommit/förbrukat</th>'
+    + '<th class="budget-print-bock">Bocklista</th>'
+    + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+
+  return printHtmlDocument('Budget', head + table, { landscape: false });
 }
 
 function careListIsEditOpen(){
@@ -16649,6 +16802,7 @@ function renderCareList(){
     careListOkBtn.textContent = careListKind === 'budget' ? 'Spara' : 'OK';
   }
   if(careListBackupBtn) careListBackupBtn.hidden = careListKind !== 'bok';
+  if(careListPrintBtn) careListPrintBtn.hidden = careListKind !== 'budget';
   syncCareHubMenuVisibility();
   syncBudgetPeriodBar();
   clear(careListMessages);
@@ -17588,6 +17742,15 @@ careListDeleteBtn.addEventListener('click', showCareListDeleteConfirm);
 careListDeleteCancelBtn.addEventListener('click', hideCareListDeleteConfirm);
 careListDeleteOkBtn.addEventListener('click', confirmCareListDelete);
 if(careListBackupBtn) careListBackupBtn.addEventListener('click', openBackupPage);
+if(careListPrintBtn){
+  careListPrintBtn.addEventListener('click', () => {
+    const ok = printBudgetList();
+    if(!ok && careListMessages){
+      clear(careListMessages);
+      addBox(careListMessages, 'notice', 'Kunde inte skriva ut budgeten.');
+    }
+  });
+}
 careListEditName.addEventListener('blur', () => {
   if(careListEditMode === 'edit' && (careListKind === 'payee' || careListKind === 'kategori' || careListKind === 'underkategori')){
     saveCareListEdit({ stayOpen: true });
