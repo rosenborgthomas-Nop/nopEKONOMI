@@ -3846,7 +3846,7 @@ td.num.dash .cell-content{
           <span class="budget-amt-bar budget-amt-bar-lower" id="startPeriodAmtBarLower" aria-hidden="true"></span>
           <span class="start-period-lead" id="startPeriodLead">
             <span class="start-period-labels" id="startPeriodLabels" aria-hidden="true">
-              <span class="start-period-label start-period-label-real">Pågående</span>
+              <span id="startPeriodLabelReal" class="start-period-label start-period-label-real">Pågående</span>
               <span class="start-period-label start-period-label-ghost">Spökbudget</span>
             </span>
             <select id="startPeriodMenu" class="menu-select start-period-select" title="Budgetperiod" aria-label="Budgetperiod">
@@ -4859,7 +4859,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v15';
+const APP_VERSION = '2026-09-25 v16';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7439,6 +7439,12 @@ function paintStartPeriodBar(){
   const totals = computeStartBudgetUtTotals(startPeriodMode);
   const budget = totals.outBudget;
   const actual = totals.outActual;
+  const labelReal = el('startPeriodLabelReal');
+  if(labelReal){
+    labelReal.textContent = (budget != null && budget > 0)
+      ? ('Pågående (' + formatBudgetAmtEdit(budget) + ')')
+      : 'Pågående';
+  }
   valueEl.classList.remove('pos', 'neg');
   let bar = amtBar;
   if(budget == null || !(budget > 0)){
