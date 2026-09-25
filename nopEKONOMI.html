@@ -235,8 +235,6 @@ h1{
   position:absolute;
   left:0;
   right:auto;
-  top:0;
-  bottom:0;
   width:0;
   max-width:100%;
   border-radius:0;
@@ -244,13 +242,45 @@ h1{
   z-index:0;
   opacity:0.55;
 }
-.start-period-wrap[data-budget-over="0"] .budget-amt-bar{
+/* Övre halv: förbrukat/budget (som tidigare). Undre: separat mätare (test). */
+.start-period-wrap .budget-amt-bar-upper{
+  top:0;
+  bottom:50%;
+}
+.start-period-wrap .budget-amt-bar-lower{
+  top:50%;
+  bottom:0;
+}
+.start-period-wrap::after{
+  content:'';
+  position:absolute;
+  left:0;
+  right:0;
+  top:50%;
+  height:1px;
+  background:color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 70%, transparent);
+  z-index:0;
+  pointer-events:none;
+}
+.start-period-wrap[data-budget-over="0"] .budget-amt-bar-upper{
   left:0;
   right:auto;
   background:#1FAE55;
   opacity:0.58;
 }
-.start-period-wrap[data-budget-over="1"] .budget-amt-bar{
+.start-period-wrap[data-budget-over="1"] .budget-amt-bar-upper{
+  left:auto;
+  right:0;
+  background:#E03131;
+  opacity:0.62;
+}
+.start-period-wrap[data-budget-lower-over="0"] .budget-amt-bar-lower{
+  left:0;
+  right:auto;
+  background:#1FAE55;
+  opacity:0.58;
+}
+.start-period-wrap[data-budget-lower-over="1"] .budget-amt-bar-lower{
   left:auto;
   right:0;
   background:#E03131;
@@ -3699,7 +3729,8 @@ td.num.dash .cell-content{
     <main class="panel">
       <div id="startPeriodBar" class="start-period-bar" hidden>
         <span class="start-period-wrap" id="startPeriodWrap">
-          <span class="budget-amt-bar" id="startPeriodAmtBar" aria-hidden="true"></span>
+          <span class="budget-amt-bar budget-amt-bar-upper" id="startPeriodAmtBar" aria-hidden="true"></span>
+          <span class="budget-amt-bar budget-amt-bar-lower" id="startPeriodAmtBarLower" aria-hidden="true"></span>
           <select id="startPeriodMenu" class="menu-select start-period-select" title="Budgetperiod" aria-label="Budgetperiod">
             <option value="currentMonth">Pågående månad</option>
             <option value="last30">Senaste 30 dagarna</option>
@@ -4706,7 +4737,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v03';
+const APP_VERSION = '2026-09-25 v04';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7027,8 +7058,89 @@ function budgetAmtBarTip(isIncome, actual, budget){
 }
 
 /**
- * Start-teaser: bara utgifter — värde = BUDGET UT, stapel = förbrukat/budget.
+ * Start-teaser: bara utgifter — värde = BUDGET UT, övre stapel = förbrukat/budget.
+ * Undre stapel: separat mätare (placeholder tills vidare).
  */
+/** Testvärde för undre halv (positiv andel 0–100). */
+const START_TEASER_LOWER_TEST_PCT = 50;
+
+function ensureStartPeriodAmtBar(wrap, id, extraClass){
+  let bar = el(id);
+  if(bar) return bar;
+  if(!wrap) return null;
+  bar = document.createElement('span');
+  bar.className = 'budget-amt-bar' + (extraClass ? ' ' + extraClass : '');
+  bar.id = id;
+  bar.setAttribute('aria-hidden', 'true');
+  const menu = el('startPeriodMenu');
+  if(menu && menu.parentNode === wrap) wrap.insertBefore(bar, menu);
+  else wrap.insertBefore(bar, wrap.firstChild);
+  return bar;
+}
+
+function paintStartTeaserLowerBar(wrap, lowerBar){
+  if(!wrap) return;
+  // Placeholder: positiv 50 % under test — byts ut när undre mätaren definieras.
+  const pct = START_TEASER_LOWER_TEST_PCT;
+  const red = false;
+  wrap.setAttribute('data-budget-lower-over', red ? '1' : '0');
+  const bar = lowerBar || ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBarLower', 'budget-amt-bar-lower');
+  if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
+}
+
+function paintStartPeriodBar(){
+  const barEl = el('startPeriodBar');
+  const wrap = el('startPeriodWrap');
+  const menu = el('startPeriodMenu');
+  const valueEl = el('startPeriodValue');
+  const amtBar = el('startPeriodAmtBar');
+  const amtBarLower = el('startPeriodAmtBarLower');
+  if(!barEl || !wrap || !menu || !valueEl) return;
+
+  if(!book || !book.order || !book.order.length){
+    barEl.hidden = true;
+    return;
+  }
+  barEl.hidden = false;
+  if(!START_PERIOD_ALLOWED[startPeriodMode]) startPeriodMode = loadStartPeriodMode();
+  if(!START_PERIOD_ALLOWED[startPeriodMode]) startPeriodMode = 'currentMonth';
+  if(menu.value !== startPeriodMode){
+    menu.value = startPeriodMode;
+  }
+  const totals = computeStartBudgetUtTotals(startPeriodMode);
+  const budget = totals.outBudget;
+  const actual = totals.outActual;
+  valueEl.classList.remove('pos', 'neg');
+  let bar = amtBar;
+  if(budget == null || !(budget > 0)){
+    wrap.removeAttribute('data-budget-over');
+    if(actual > 0){
+      wrap.setAttribute('data-budget-unbudgeted', 'out');
+      wrap.setAttribute('data-budget-side', 'out');
+      wrap.title = 'Förbrukat ' + formatBudgetAmtEdit(actual)
+        + ' utan budget i vald period';
+      valueEl.textContent = formatBudgetAmtEdit(actual);
+    } else {
+      wrap.removeAttribute('data-budget-unbudgeted');
+      wrap.removeAttribute('data-budget-side');
+      wrap.removeAttribute('title');
+      valueEl.textContent = '';
+    }
+    if(bar) bar.style.width = '0';
+    paintStartTeaserLowerBar(wrap, amtBarLower);
+    return;
+  }
+  wrap.removeAttribute('data-budget-unbudgeted');
+  const pct = budgetBarWidthPct(false, actual, budget);
+  const red = budgetBarIsRed(false, actual, budget);
+  wrap.setAttribute('data-budget-over', red ? '1' : '0');
+  wrap.setAttribute('data-budget-side', 'out');
+  wrap.title = budgetAmtBarTip(false, actual, budget);
+  valueEl.textContent = formatBudgetAmtEdit(budget);
+  bar = ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBar', 'budget-amt-bar-upper');
+  if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
+  paintStartTeaserLowerBar(wrap, amtBarLower);
+}
 function computeStartBudgetUtTotals(mode){
   const empty = { outBudget: null, outActual: 0 };
   if(!book || !book.order || !book.order.length) return empty;
@@ -7150,63 +7262,6 @@ function renameStartIncludeKey(bookData, oldName, newName){
     map[newName] = !!map[oldName];
   }
   delete map[oldName];
-}
-
-function paintStartPeriodBar(){
-  const barEl = el('startPeriodBar');
-  const wrap = el('startPeriodWrap');
-  const menu = el('startPeriodMenu');
-  const valueEl = el('startPeriodValue');
-  const amtBar = el('startPeriodAmtBar');
-  if(!barEl || !wrap || !menu || !valueEl) return;
-
-  if(!book || !book.order || !book.order.length){
-    barEl.hidden = true;
-    return;
-  }
-  barEl.hidden = false;
-  if(!START_PERIOD_ALLOWED[startPeriodMode]) startPeriodMode = loadStartPeriodMode();
-  if(!START_PERIOD_ALLOWED[startPeriodMode]) startPeriodMode = 'currentMonth';
-  if(menu.value !== startPeriodMode){
-    menu.value = startPeriodMode;
-  }
-  const totals = computeStartBudgetUtTotals(startPeriodMode);
-  const budget = totals.outBudget;
-  const actual = totals.outActual;
-  valueEl.classList.remove('pos', 'neg');
-  let bar = amtBar;
-  if(budget == null || !(budget > 0)){
-    wrap.removeAttribute('data-budget-over');
-    if(actual > 0){
-      wrap.setAttribute('data-budget-unbudgeted', 'out');
-      wrap.setAttribute('data-budget-side', 'out');
-      wrap.title = 'Förbrukat ' + formatBudgetAmtEdit(actual)
-        + ' utan budget i vald period';
-      valueEl.textContent = formatBudgetAmtEdit(actual);
-    } else {
-      wrap.removeAttribute('data-budget-unbudgeted');
-      wrap.removeAttribute('data-budget-side');
-      wrap.removeAttribute('title');
-      valueEl.textContent = '';
-    }
-    if(bar) bar.style.width = '0';
-    return;
-  }
-  wrap.removeAttribute('data-budget-unbudgeted');
-  const pct = budgetBarWidthPct(false, actual, budget);
-  const red = budgetBarIsRed(false, actual, budget);
-  wrap.setAttribute('data-budget-over', red ? '1' : '0');
-  wrap.setAttribute('data-budget-side', 'out');
-  wrap.title = budgetAmtBarTip(false, actual, budget);
-  valueEl.textContent = formatBudgetAmtEdit(budget);
-  if(!bar){
-    bar = document.createElement('span');
-    bar.className = 'budget-amt-bar';
-    bar.id = 'startPeriodAmtBar';
-    bar.setAttribute('aria-hidden', 'true');
-    wrap.insertBefore(bar, menu);
-  }
-  bar.style.width = (Math.round(pct * 10) / 10) + '%';
 }
 
 /** Text till ?-knappen: aktuella värden för posten i vald period. */
