@@ -4870,7 +4870,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v21';
+const APP_VERSION = '2026-09-25 v22';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8852,37 +8852,44 @@ function loginWorkspaceNotice(msg){
 }
 
 // Användargest: välj/bekräfta bokmapp (eller programmapp), synka böcker från disk.
-async function connectWorkspaceFromLogin(){
+// opts.forcePick = true → alltid öppna mappväljaren (Knappen "Koppla bokmapp…").
+async function connectWorkspaceFromLogin(opts){
+  opts = opts || {};
   loginWorkspaceNotice('');
   if(!bookStorageSupported()){
     loginWorkspaceNotice('Din webbläsare kan inte ge mappåtkomst. Använd Chrome eller Edge.');
     return false;
   }
 
-  const existing = await idbGet(WORKSPACE_DIR_KEY);
-  if(existing){
-    const ok = await ensureDirPermission(existing, true);
-    if(ok && await workspaceDirStillValid(existing)){
-      await rememberWorkspaceDir(existing, getWorkspaceKind() || await detectWorkspaceKind(existing));
-      await reconcileBooksWithWorkspace(true);
-      return true;
+  if(!opts.forcePick){
+    const existing = await idbGet(WORKSPACE_DIR_KEY);
+    if(existing){
+      const ok = await ensureDirPermission(existing, true);
+      if(ok && await workspaceDirStillValid(existing)){
+        await rememberWorkspaceDir(existing, getWorkspaceKind() || await detectWorkspaceKind(existing));
+        await reconcileBooksWithWorkspace(true);
+        return true;
+      }
+      if(ok && getWorkspaceKind() !== 'books') await forgetWorkspaceDir();
     }
-    if(ok && getWorkspaceKind() !== 'books') await forgetWorkspaceDir();
   }
 
   try{
     await grantWorkspaceOnce();
+    await reconcileBooksWithWorkspace(true);
+    return true;
   } catch(err){
     if(err && (err.name === 'AbortError' || err.name === 'NotAllowedError')){
-      loginWorkspaceNotice('Ingen mapp valdes. Välj bokmappen (t.ex. i Google Drive) för att se böcker som redan finns där.');
+      const msg = 'Ingen mapp valdes. Välj bokmappen (t.ex. i Google Drive) för att se böcker som redan finns där.';
+      if(opts.forcePick) loginNotice(msg);
+      else loginWorkspaceNotice(msg);
       return false;
     }
-    loginWorkspaceNotice('Kunde inte få tillstånd till mappen. Försök igen.');
+    const fail = 'Kunde inte få tillstånd till mappen. Försök igen.';
+    if(opts.forcePick) loginNotice(fail);
+    else loginWorkspaceNotice(fail);
     return false;
   }
-
-  await reconcileBooksWithWorkspace(true);
-  return true;
 }
 
 async function connectProgramWorkspaceFromLogin(){
@@ -8973,14 +8980,18 @@ if(loginConnectFolderBtn){
     loginConnectFolderBtn.disabled = true;
     loginNotice('');
     try{
-      const ok = await connectWorkspaceFromLogin();
+      // Alltid öppna mappväljaren — annars återanvänds sparad mapp tyst.
+      const ok = await connectWorkspaceFromLogin({ forcePick: true });
       if(ok){
+        let folderLabel = '';
+        try{
+          const dir = await idbGet(WORKSPACE_DIR_KEY);
+          if(dir && dir.name) folderLabel = dir.name;
+        } catch(e){ /* ignore */ }
         await renderLogin();
-        loginNotice('Bokmapp kopplad. Böcker i mappen syns i listan.');
-      } else if(loginWorkspaceSetup && !loginWorkspaceSetup.hidden){
-        /* feltext i workspace-panelen */
-      } else {
-        loginNotice('Kunde inte koppla bokmapp. Tillåt åtkomst eller välj mappen igen.');
+        loginNotice(folderLabel
+          ? 'Bokmapp kopplad: «' + folderLabel + '». Böcker i mappen syns i listan.'
+          : 'Bokmapp kopplad. Böcker i mappen syns i listan.');
       }
     } finally{
       loginConnectFolderBtn.disabled = false;
