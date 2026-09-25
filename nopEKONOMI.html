@@ -601,6 +601,14 @@ input[type=file]{ display:none; }
 .start-backup-hint.stale{
   color:var(--wine);
 }
+.start-file-sync-hint{
+  font-size:14px;
+  line-height:1.55;
+  color:var(--wine);
+  cursor:default;
+  margin-right:8px;
+}
+.start-file-sync-hint[hidden]{ display:none; }
 .start-backup-wrap{
   display:inline-flex;
   align-items:center;
@@ -3762,18 +3770,18 @@ td.num.dash .cell-content{
     <main class="panel panel-login" id="loginPanel">
 
       <div class="login-workspace-setup" id="loginWorkspaceSetup" hidden>
-        <h2 id="loginWorkspaceTitle">Välj arbetsmapp</h2>
+        <h2 id="loginWorkspaceTitle">Välj bokmapp</h2>
         <p class="lede" id="loginWorkspaceLede">
-          Webbläsaren måste få tillstånd till mappen där <strong>nopEKONOMI.html</strong> ligger
+          Välj mappen där dina bokfiler (<strong>.json</strong>) ska ligga
           <span id="loginWorkspaceFolderHint"></span>.
-          Där hittar programmet dina bokfiler (om det redan finns några) — du behöver inte skapa en ny bok bara för att komma igång.
+          Lämpligast: en mapp i <strong>Google Drive</strong> som både dator och telefon synkar.
         </p>
         <p class="sub" id="loginWorkspaceSub">
-          Av säkerhetsskäl måste du peka ut mappen en gång. Därefter räcker oftast en snabb bekräftelse — inte att välja mappen på nytt.
+          Appen (skalet) kommer från webben. Bara bokfilen synkas via Drive. Redigera på en enhet i taget — Drive slår inte ihop samtidiga ändringar.
         </p>
         <div class="messages" id="loginWorkspaceMessages"></div>
         <div class="button-row">
-          <button class="btn right" id="loginWorkspaceBtn" type="button">Välj arbetsmapp…</button>
+          <button class="btn right" id="loginWorkspaceBtn" type="button">Välj bokmapp…</button>
         </div>
       </div>
 
@@ -3787,7 +3795,7 @@ td.num.dash .cell-content{
       <div class="field" id="newNameField" hidden>
         <label for="newName">Namn på den nya boken</label>
         <input type="text" id="newName" maxlength="40" placeholder="Till exempel Vår ekonomi" autocomplete="off" spellcheck="false">
-        <p class="field-hint">Boken sparas som fil i samma mapp som nopEKONOMI.html. En kopia av programmet i en annan mapp ser bara böckerna i den mappen.</p>
+        <p class="field-hint">Boken sparas som .json i vald bokmapp (t.ex. Google Drive). Appen synkas via webben — bara datafilen via Drive.</p>
       </div>
 
       <div class="messages" id="loginMessages"></div>
@@ -3800,6 +3808,7 @@ td.num.dash .cell-content{
 
       <div class="button-row">
         <button class="btn" id="newBookBtn" type="button">NY BOK</button>
+        <button class="btn" id="loginConnectFolderBtn" type="button">Koppla bokmapp…</button>
         <button class="btn right" id="openBookBtn" type="button">Öppna</button>
       </div>
 
@@ -3833,6 +3842,7 @@ td.num.dash .cell-content{
       </select>
       <button class="btn-ok" id="startMenuBtn" type="button">OK</button>
       <span class="start-backup-wrap">
+        <span id="startFileSyncHint" class="start-file-sync-hint" hidden></span>
         <span id="startBackupHint" class="start-backup-hint"></span>
         <button type="button" class="help-tip-btn" id="startBackupHelpBtn" aria-label="Hjälp om säkerhetskopiering" aria-expanded="false" aria-controls="startBackupHelpPop">?</button>
         <span id="startBackupHelpPop" class="help-tip-pop" role="tooltip" hidden>Hantera säkerhetskopiering i REGISTERVÅRD</span>
@@ -4860,7 +4870,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v20';
+const APP_VERSION = '2026-09-25 v21';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -4929,6 +4939,7 @@ const BOOKS_KEY = 'msmoney_books__' + STORAGE_SCOPE;
 const BOOK_PREFIX = 'msmoney_book__' + STORAGE_SCOPE + '_';
 const COLWIDTH_KEY = 'msmoney_colwidths__' + STORAGE_SCOPE;
 const WORKSPACE_FLAG_KEY = 'msmoney_program_workspace__' + STORAGE_SCOPE;
+const WORKSPACE_KIND_KEY = 'msmoney_workspace_kind__' + STORAGE_SCOPE; // 'program' | 'books'
 
 function applyAppVersionLabels(){
   document.querySelectorAll('.app-version').forEach(p => {
@@ -5233,6 +5244,11 @@ async function writeBookAsync(id, bookData, interactive){
     const handle = await getBookFileHandle(id, !!interactive, 'readwrite');
     await writeBookFile(handle, bookData, bookName(id));
     clearBookFileSyncPending(id);
+    if(id === bookId){
+      bookKnownSavedAt = Date.now();
+      bookSessionDirty = false;
+      updateBookFileSyncStatusUi();
+    }
   }
   writeBook(id, bookData);
 }
@@ -5259,6 +5275,102 @@ function hasBookFileSyncPending(id){
   try{ return localStorage.getItem(bookFileSyncKey(id)) === 'pending'; } catch(e){ return false; }
 }
 
+// Session: lokala ändringar som ännu inte skrivits till bokfilen / Drive.
+let bookSessionDirty = false;
+let bookKnownSavedAt = 0;
+let bookFileCheckBusy = false;
+
+function updateBookFileSyncStatusUi(){
+  const hint = typeof el === 'function' ? el('startFileSyncHint') : null;
+  if(!hint) return;
+  if(!bookId || !isFileBook(bookId)){
+    hint.hidden = true;
+    hint.textContent = '';
+    return;
+  }
+  if(hasBookFileSyncPending(bookId)){
+    hint.hidden = false;
+    hint.textContent = 'Ej sparad till bokmapp/Drive';
+    return;
+  }
+  hint.hidden = true;
+  hint.textContent = '';
+}
+
+function payloadSavedAt(raw, lastModified){
+  if(raw && typeof raw.savedAt === 'number' && raw.savedAt > 0) return raw.savedAt;
+  if(lastModified && lastModified > 0) return lastModified;
+  return 0;
+}
+
+async function applyBookFromFilePayload(parsed){
+  const data = parsed.raw && parsed.raw.book ? parsed.raw.book : parsed.raw;
+  book = sanitizeBook(data);
+  migrateMixedSplitRows(book);
+  writeBook(bookId, book);
+  bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
+  bookSessionDirty = false;
+  clearBookFileSyncPending(bookId);
+  rebuildBookLookup();
+  updateBookFileSyncStatusUi();
+}
+
+// Vid återkomst till fliken: ladda om om Drive/filen är nyare; fråga vid konflikt.
+async function checkBookFileForRemoteChanges(){
+  if(bookFileCheckBusy) return;
+  if(!bookId || !isFileBook(bookId)) return;
+  if(typeof currentViewName === 'function' && currentViewName() === 'login') return;
+
+  const handle = await idbGet(bookId);
+  if(!handle || !(await handlePermissionIsGranted(handle, 'read'))) return;
+
+  bookFileCheckBusy = true;
+  try{
+    const parsed = await readBookFileRaw(handle);
+    const fileAt = payloadSavedAt(parsed.raw, parsed.lastModified);
+    if(!fileAt) return;
+    // Filen är inte nyare än vad vi senast känner till.
+    if(bookKnownSavedAt && fileAt <= bookKnownSavedAt + 500) return;
+    // Första gången vi får en stämpel utan känd lokal — bara kom ihåg.
+    if(!bookKnownSavedAt){
+      bookKnownSavedAt = fileAt;
+      return;
+    }
+
+    const remoteNewer = fileAt > bookKnownSavedAt + 500;
+    if(!remoteNewer) return;
+
+    if(bookSessionDirty || hasBookFileSyncPending(bookId)){
+      const loadRemote = window.confirm(
+        'Bokfilen i mappen (t.ex. Google Drive) har ändrats på en annan enhet.\n\n'
+        + 'OK = ladda från mappen (kasta ändringar på den här enheten)\n'
+        + 'Avbryt = behåll den här enheten (skrivs till mappen vid nästa lyckade sparning)'
+      );
+      if(!loadRemote){
+        // Användaren behåller lokalt — nästa lyckade filskrivning vinner.
+        bookKnownSavedAt = fileAt;
+        return;
+      }
+    }
+
+    await applyBookFromFilePayload(parsed);
+    if(typeof currentViewName === 'function' && currentViewName() === 'start'){
+      renderStart();
+      clear(startMessages);
+      addBox(startMessages, 'report', 'Boken laddades om från bokmappen (nyare fil).');
+    } else if(typeof currentViewName === 'function'){
+      const view = currentViewName();
+      if(view && view !== 'login'){
+        try{ await show(view, { fromHash: true }); } catch(e){ /* ignore */ }
+      }
+    }
+  } catch(e){
+    /* nätverksdisk / behörighet — tyst */
+  } finally{
+    bookFileCheckBusy = false;
+  }
+}
+
 function hasBookLocalMirror(id){
   try{
     const raw = localStorage.getItem(BOOK_PREFIX + id);
@@ -5283,19 +5395,29 @@ async function handlePermissionIsGranted(handle, mode){
 // (createWritable på Android visar "Vill du spara ändringarna?" innan det ens misslyckas.)
 async function writeBookPreferGranted(id, bookData){
   writeBook(id, bookData);
-  if(!isFileBook(id)) return;
+  bookSessionDirty = true;
+  updateBookFileSyncStatusUi();
+  if(!isFileBook(id)){
+    bookSessionDirty = false;
+    return;
+  }
 
   const handle = await idbGet(id);
   if(!handle || !(await handlePermissionIsGranted(handle, 'readwrite'))){
     markBookFileSyncPending(id);
+    updateBookFileSyncStatusUi();
     return;
   }
   try{
     await writeBookFile(handle, bookData, bookName(id));
     clearBookFileSyncPending(id);
+    bookKnownSavedAt = Date.now();
+    bookSessionDirty = false;
+    updateBookFileSyncStatusUi();
   } catch(err){
     if(!looksLikeBookPermissionError(err)) throw err;
     markBookFileSyncPending(id);
+    updateBookFileSyncStatusUi();
   }
 }
 
@@ -5355,7 +5477,7 @@ async function cacheBookDirFromFile(bookId, fileHandle){
     const dir = await fileHandle.getParent();
     if(dir){
       await idbPut(bookId + BOOK_DIR_SUFFIX, dir);
-      await rememberWorkspaceDir(dir);
+      await rememberWorkspaceDir(dir, await detectWorkspaceKind(dir));
       return dir;
     }
   } catch(e){ /* webbläsaren stödjer inte mappuppslag */ }
@@ -5381,43 +5503,88 @@ async function directoryContainsProgram(dir){
   return false;
 }
 
-// Sparar bara mappar som faktiskt är programmets mapp (innehåller nopEKONOMI.html).
-async function rememberWorkspaceDir(dir){
+function getWorkspaceKind(){
+  try{
+    const k = localStorage.getItem(WORKSPACE_KIND_KEY);
+    return (k === 'program' || k === 'books') ? k : '';
+  } catch(e){
+    return '';
+  }
+}
+
+function setWorkspaceKind(kind){
+  try{
+    if(kind === 'program' || kind === 'books'){
+      localStorage.setItem(WORKSPACE_KIND_KEY, kind);
+    } else {
+      localStorage.removeItem(WORKSPACE_KIND_KEY);
+    }
+  } catch(e){ /* ignore */ }
+}
+
+async function detectWorkspaceKind(dir){
+  if(dir && await directoryContainsProgram(dir)) return 'program';
+  return 'books';
+}
+
+async function workspaceDirStillValid(dir){
+  if(!dir) return false;
+  const kind = getWorkspaceKind();
+  if(kind === 'books') return true;
+  if(kind === 'program') return directoryContainsProgram(dir);
+  // Äldre sessioner utan kind: endast programmapp (HTML).
+  return directoryContainsProgram(dir);
+}
+
+// Sparar arbetsmapp: programmapp (med HTML) eller bokmapp (bara .json, t.ex. Drive).
+async function rememberWorkspaceDir(dir, kindHint){
   if(!dir) return;
-  if(!(await directoryContainsProgram(dir))) return;
+  let kind = kindHint;
+  if(kind !== 'program' && kind !== 'books'){
+    kind = await detectWorkspaceKind(dir);
+  }
+  if(kind === 'program' && !(await directoryContainsProgram(dir))) return;
   try{ await idbPut(WORKSPACE_DIR_KEY, dir); } catch(e){ /* ignore */ }
   try{ localStorage.setItem(WORKSPACE_FLAG_KEY, '1'); } catch(e){ /* ignore */ }
+  setWorkspaceKind(kind);
 }
 
 async function forgetWorkspaceDir(){
   try{ await idbDelete(WORKSPACE_DIR_KEY); } catch(e){ /* ignore */ }
   try{ localStorage.removeItem(WORKSPACE_FLAG_KEY); } catch(e){ /* ignore */ }
+  setWorkspaceKind('');
 }
 
-// Rensar en tidigare felvald arbetsmapp (t.ex. en mapp utan programfilen).
+// Rensar en tidigare felvald programmapp (mapp utan programfilen).
+// Bokmappar (Google Drive m.m.) behålls — de ska inte innehålla HTML.
 async function clearInvalidWorkspaceDir(){
   const dir = await idbGet(WORKSPACE_DIR_KEY);
   if(!dir) return;
+  if(getWorkspaceKind() === 'books') return;
   try{
     const perm = await dir.queryPermission({ mode: 'read' });
     if(perm !== 'granted') return;
-    if(await directoryContainsProgram(dir)) return;
+    if(await directoryContainsProgram(dir)){
+      setWorkspaceKind('program');
+      return;
+    }
+    // Legacy/programmapp utan HTML → glöm.
     await forgetWorkspaceDir();
   } catch(e){
     /* Behåll sparad mapp vid tillfälliga fel — annars tvingas användaren välja om i onödan. */
   }
 }
 
-// Hittar sparad programmapp via bokhandtag om själva workspace-nyckeln saknas.
+// Hittar sparad arbetsmapp via bokhandtag om själva workspace-nyckeln saknas.
 async function recoverWorkspaceDirFromBooks(){
   const existing = await idbGet(WORKSPACE_DIR_KEY);
   if(existing) return existing;
   for(const id of workspaceBookCandidates()){
     const dir = await idbGet(id + BOOK_DIR_SUFFIX);
-    if(dir && await directoryContainsProgram(dir)){
-      await rememberWorkspaceDir(dir);
-      return dir;
-    }
+    if(!dir) continue;
+    const kind = await detectWorkspaceKind(dir);
+    await rememberWorkspaceDir(dir, kind);
+    return dir;
   }
   return null;
 }
@@ -5437,21 +5604,25 @@ function workspaceBookCandidates(){
   return candidates;
 }
 
-// Arbetsmapp = mappen med nopEKONOMI.html. Aldrig en godtycklig bokmapp.
+// Arbetsmapp = programmapp (HTML) eller bokmapp (.json i t.ex. Google Drive).
 async function getWorkspaceDirHandle(interactive){
   let dir = await idbGet(WORKSPACE_DIR_KEY);
   if(dir){
     const ok = await ensureDirPermission(dir, !!interactive);
-    if(ok && await directoryContainsProgram(dir)) return dir;
-    if(ok) await forgetWorkspaceDir();
-    else return null;
+    if(ok && await workspaceDirStillValid(dir)) return dir;
+    if(ok && getWorkspaceKind() === 'program' && !(await directoryContainsProgram(dir))){
+      await forgetWorkspaceDir();
+    } else if(!ok){
+      return null;
+    }
   }
 
   const candidates = workspaceBookCandidates();
   for(const id of candidates){
     dir = await getBookDirHandle(id, false);
-    if(dir && await directoryContainsProgram(dir)){
-      await rememberWorkspaceDir(dir);
+    if(dir){
+      const kind = await detectWorkspaceKind(dir);
+      await rememberWorkspaceDir(dir, kind);
       return dir;
     }
   }
@@ -5459,14 +5630,15 @@ async function getWorkspaceDirHandle(interactive){
 
   for(const id of candidates){
     dir = await getBookDirHandle(id, true);
-    if(dir && await directoryContainsProgram(dir)){
-      await rememberWorkspaceDir(dir);
+    if(dir){
+      const kind = await detectWorkspaceKind(dir);
+      await rememberWorkspaceDir(dir, kind);
       return dir;
     }
   }
 
   // Mappväljaren kräver användargest — anropas från inloggningens
-  // "Välj arbetsmapp" / ny bok, inte här vid sidladdning.
+  // "Välj bokmapp" / ny bok, inte här vid sidladdning.
   return null;
 }
 
@@ -5474,7 +5646,7 @@ async function getBookDirHandle(bookId, interactive, mode){
   mode = mode || 'readwrite';
   let dir = await idbGet(bookId + BOOK_DIR_SUFFIX);
   if(dir && await ensureHandlePermission(dir, interactive, mode)){
-    await rememberWorkspaceDir(dir);
+    await rememberWorkspaceDir(dir, await detectWorkspaceKind(dir));
     return dir;
   }
 
@@ -5482,14 +5654,14 @@ async function getBookDirHandle(bookId, interactive, mode){
     const file = await idbGet(bookId);
     dir = await cacheBookDirFromFile(bookId, file);
     if(dir && await ensureHandlePermission(dir, interactive, mode)){
-      await rememberWorkspaceDir(dir);
+      await rememberWorkspaceDir(dir, await detectWorkspaceKind(dir));
       return dir;
     }
   }
   return null;
 }
 
-// Engångsbehörighet: peka ut programmets mapp (måste innehålla nopEKONOMI.html).
+// Engångsbehörighet: peka ut programmapp eller bokmapp (Drive).
 // Webbläsaren får av säkerhetsskäl inte öppna filväljaren i "mappen där HTML
 // startades" — vi kan bara tipsa via id (Chrome minns senast valda mapp per id)
 // och visa mappnamnet från adressraden i felmeddelanden.
@@ -5505,57 +5677,68 @@ function programFolderHintName(){
   return '';
 }
 
-async function grantProgramWorkspaceOnce(){
+async function grantWorkspaceOnce(){
   const dirHandle = await window.showDirectoryPicker({
     id: 'hemekonomi-workspace-' + STORAGE_SCOPE,
     mode: 'readwrite',
     startIn: 'documents'
   });
-  if(!(await directoryContainsProgram(dirHandle))){
-    throw new Error('NOT_PROGRAM_DIR');
-  }
-  await rememberWorkspaceDir(dirHandle);
-  return dirHandle;
+  const kind = await detectWorkspaceKind(dirHandle);
+  await rememberWorkspaceDir(dirHandle, kind);
+  return { dir: dirHandle, kind: kind };
 }
 
-// Ny bok: återanvänd känd programmapi; annars webbläsarens tillståndsdialog.
-// return { dir } | { denied: true } | { badFolder: true } | { error: true }
-async function acquireProgramWorkspaceForNewBook(){
+// Bakåtkompatibelt alias.
+async function grantProgramWorkspaceOnce(){
+  const res = await grantWorkspaceOnce();
+  return res.dir;
+}
+
+// Ny bok: återanvänd känd arbetsmapp; annars webbläsarens tillståndsdialog.
+// return { dir, kind } | { denied: true } | { error: true }
+async function acquireWorkspaceForNewBook(){
   const existing = await idbGet(WORKSPACE_DIR_KEY);
   if(existing){
     const ok = await ensureDirPermission(existing, true);
-    if(ok && await directoryContainsProgram(existing)) return { dir: existing };
+    if(ok && await workspaceDirStillValid(existing)){
+      const kind = getWorkspaceKind() || await detectWorkspaceKind(existing);
+      await rememberWorkspaceDir(existing, kind);
+      return { dir: existing, kind: kind };
+    }
     if(!ok) return { denied: true };
-    await forgetWorkspaceDir();
+    if(getWorkspaceKind() === 'program') await forgetWorkspaceDir();
   }
 
   for(const id of workspaceBookCandidates()){
     const dir = await getBookDirHandle(id, false);
-    if(dir && await directoryContainsProgram(dir)){
-      await rememberWorkspaceDir(dir);
-      return { dir };
+    if(dir){
+      const kind = await detectWorkspaceKind(dir);
+      await rememberWorkspaceDir(dir, kind);
+      return { dir: dir, kind: kind };
     }
   }
 
   for(const id of workspaceBookCandidates()){
     const dir = await getBookDirHandle(id, true);
-    if(dir && await directoryContainsProgram(dir)){
-      await rememberWorkspaceDir(dir);
-      return { dir };
+    if(dir){
+      const kind = await detectWorkspaceKind(dir);
+      await rememberWorkspaceDir(dir, kind);
+      return { dir: dir, kind: kind };
     }
   }
 
   try{
-    return { dir: await grantProgramWorkspaceOnce() };
+    return await grantWorkspaceOnce();
   } catch(err){
     if(err && (err.name === 'AbortError' || err.name === 'NotAllowedError')){
       return { denied: true };
     }
-    if(err && err.message === 'NOT_PROGRAM_DIR'){
-      return { badFolder: true };
-    }
     return { error: true };
   }
+}
+
+async function acquireProgramWorkspaceForNewBook(){
+  return acquireWorkspaceForNewBook();
 }
 
 async function fileHandleExists(dirHandle, fileName){
@@ -5855,7 +6038,7 @@ async function reconcileBooksWithWorkspace(interactive){
     } catch(e){ /* ignore */ }
   }
 
-  await rememberWorkspaceDir(dir);
+  await rememberWorkspaceDir(dir, await detectWorkspaceKind(dir));
 
   const toRemove = [];
   for(const id of reg.order.slice()){
@@ -8384,8 +8567,13 @@ function rebuildBookLookup(){
   }
 }
 
-function markBookDirty(){ /* kvar som no-op — sparning sker direkt till disk */ }
-function markBookClean(){ /* kvar som no-op */ }
+function markBookDirty(){
+  bookSessionDirty = true;
+  updateBookFileSyncStatusUi();
+}
+function markBookClean(){
+  bookSessionDirty = false;
+}
 
 const views = {
   login: el('viewLogin'),
@@ -8490,6 +8678,7 @@ async function openBook(id){
   writeRegistry(reg);
   bookId = id;
   markBookClean();
+  bookKnownSavedAt = 0;
   book = { order: [], accounts: {} };
   bookLookup = emptyBookLookup();
   try{
@@ -8499,10 +8688,19 @@ async function openBook(id){
       migrateMixedSplitRows(book);
       if(!hasBookFileSyncPending(id)){
         try{
-          const fromFile = await readBookAsync(id, false);
-          book = fromFile;
-          migrateMixedSplitRows(book);
-          writeBook(id, book);
+          const handle = await idbGet(id);
+          if(handle && await handlePermissionIsGranted(handle, 'read')){
+            const parsed = await readBookFileRaw(handle);
+            book = sanitizeBook(parsed.raw && parsed.raw.book ? parsed.raw.book : parsed.raw);
+            migrateMixedSplitRows(book);
+            writeBook(id, book);
+            bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
+          } else {
+            const fromFile = await readBookAsync(id, false);
+            book = fromFile;
+            migrateMixedSplitRows(book);
+            writeBook(id, book);
+          }
         } catch(e){ /* behåll spegeln */ }
       }
       const file = await idbGet(id);
@@ -8513,11 +8711,20 @@ async function openBook(id){
       if(isFileBook(id)){
         writeBook(id, book);
         clearBookFileSyncPending(id);
+        try{
+          const handle = await idbGet(id);
+          if(handle){
+            const parsed = await readBookFileRaw(handle);
+            bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
+          }
+        } catch(e){ bookKnownSavedAt = Date.now(); }
         const file = await idbGet(id);
         await cacheBookDirFromFile(id, file);
       }
     }
+    markBookClean();
     rebuildBookLookup();
+    updateBookFileSyncStatusUi();
     show('start');
   } catch(e){
     bookId = '';
@@ -8544,6 +8751,7 @@ const newNameInput = el('newName');
 const loginMessages = el('loginMessages');
 const newBookBtn = el('newBookBtn');
 const openBookBtn = el('openBookBtn');
+const loginConnectFolderBtn = el('loginConnectFolderBtn');
 const loginPanelMain = el('loginPanelMain');
 const loginWorkspaceSetup = el('loginWorkspaceSetup');
 const loginWorkspaceBtn = el('loginWorkspaceBtn');
@@ -8551,17 +8759,21 @@ const loginWorkspaceMessages = el('loginWorkspaceMessages');
 
 let creating = false;
 
-async function hasUsableProgramWorkspace(){
+async function hasUsableWorkspace(){
   if(!bookStorageSupported()) return false;
   const dir = await idbGet(WORKSPACE_DIR_KEY);
   if(!dir) return false;
   try{
     const perm = await dir.queryPermission({ mode: 'readwrite' });
     if(perm !== 'granted') return false;
-    return await directoryContainsProgram(dir);
+    return await workspaceDirStillValid(dir);
   } catch(e){
     return false;
   }
+}
+
+async function hasUsableProgramWorkspace(){
+  return hasUsableWorkspace();
 }
 
 // 'ready' | 'confirm' (sparad mapp, behörighet saknas) | 'pick' (första gången)
@@ -8572,7 +8784,7 @@ async function getWorkspaceSetupMode(){
   try{
     const perm = await dir.queryPermission({ mode: 'readwrite' });
     if(perm === 'granted'){
-      if(await directoryContainsProgram(dir)) return 'ready';
+      if(await workspaceDirStillValid(dir)) return 'ready';
       return 'pick';
     }
     return 'confirm';
@@ -8594,8 +8806,9 @@ function setLoginWorkspaceSetupVisible(on, mode){
   const folderName = programFolderHintName();
   const folderSafe = escapeHtml(folderName);
   const folderHint = folderSafe ? ' («' + folderSafe + '»)' : '';
+
   const hintEl = el('loginWorkspaceFolderHint');
-  if(hintEl) hintEl.textContent = folderName ? ' (troligen mappen «' + folderName + '»)' : '';
+  if(hintEl) hintEl.textContent = '';
 
   const titleEl = el('loginWorkspaceTitle');
   const ledeEl = el('loginWorkspaceLede');
@@ -8604,7 +8817,7 @@ function setLoginWorkspaceSetupVisible(on, mode){
     if(titleEl) titleEl.textContent = 'Bekräfta mappåtkomst';
     if(ledeEl){
       ledeEl.innerHTML =
-        'Programmet har redan mappen' + folderHint + ' sparad. '
+        'Programmet har redan bokmappen' + folderHint + ' sparad. '
         + 'Webbläsaren behöver bara att du <strong>tillåter åtkomst</strong> igen — du behöver inte leta upp mappen på nytt.';
     }
     if(subEl){
@@ -8614,19 +8827,21 @@ function setLoginWorkspaceSetupVisible(on, mode){
     }
     if(loginWorkspaceBtn) loginWorkspaceBtn.textContent = 'Tillåt åtkomst…';
   } else {
-    if(titleEl) titleEl.textContent = 'Välj arbetsmapp';
+    if(titleEl) titleEl.textContent = 'Välj bokmapp';
     if(ledeEl){
       ledeEl.innerHTML =
-        'Webbläsaren måste få tillstånd till mappen där <strong>nopEKONOMI.html</strong> ligger'
-        + (folderSafe ? ' (troligen mappen «' + folderSafe + '»)' : '')
-        + '. Där hittar programmet dina bokfiler (om det redan finns några) — du behöver inte skapa en ny bok bara för att komma igång.';
+        'Välj mappen där dina bokfiler (<strong>.json</strong>) ska ligga. '
+        + 'Lämpligast: en mapp i <strong>Google Drive</strong> som både dator och telefon synkar '
+        + '(t.ex. «nopEKONOMI-böcker»). '
+        + 'Där hittar programmet böcker som redan finns — du behöver inte skapa en ny bara för att komma igång.';
     }
     if(subEl){
       subEl.textContent = hadWorkspaceBefore()
-        ? 'Webbläsaren har glömt mappreferensen (vanligt vid genväg eller om surfdata rensas). Peka ut samma mapp igen — väljaren brukar minnas senaste mapp.'
-        : 'Av säkerhetsskäl måste du peka ut mappen en gång. Därefter räcker oftast en snabb bekräftelse — inte att välja mappen på nytt.';
+        ? 'Webbläsaren har glömt mappreferensen (vanligt vid genväg eller om surfdata rensas). Peka ut samma Drive-mapp igen.'
+        : 'Appen (skalet) kommer från webben. Bara bokfilen synkas via Drive. Redigera på en enhet i taget. '
+          + 'På Android: Chrome och välj mappen via Drive i filväljaren.';
     }
-    if(loginWorkspaceBtn) loginWorkspaceBtn.textContent = 'Välj arbetsmapp…';
+    if(loginWorkspaceBtn) loginWorkspaceBtn.textContent = 'Välj bokmapp…';
   }
 }
 
@@ -8636,8 +8851,8 @@ function loginWorkspaceNotice(msg){
   if(msg) addBox(loginWorkspaceMessages, 'notice', msg);
 }
 
-// Användargest: välj/bekräfta programmets mapp, synka böcker från disk.
-async function connectProgramWorkspaceFromLogin(){
+// Användargest: välj/bekräfta bokmapp (eller programmapp), synka böcker från disk.
+async function connectWorkspaceFromLogin(){
   loginWorkspaceNotice('');
   if(!bookStorageSupported()){
     loginWorkspaceNotice('Din webbläsare kan inte ge mappåtkomst. Använd Chrome eller Edge.');
@@ -8647,28 +8862,19 @@ async function connectProgramWorkspaceFromLogin(){
   const existing = await idbGet(WORKSPACE_DIR_KEY);
   if(existing){
     const ok = await ensureDirPermission(existing, true);
-    if(ok && await directoryContainsProgram(existing)){
-      await rememberWorkspaceDir(existing);
+    if(ok && await workspaceDirStillValid(existing)){
+      await rememberWorkspaceDir(existing, getWorkspaceKind() || await detectWorkspaceKind(existing));
       await reconcileBooksWithWorkspace(true);
       return true;
     }
-    if(ok) await forgetWorkspaceDir();
+    if(ok && getWorkspaceKind() !== 'books') await forgetWorkspaceDir();
   }
 
   try{
-    await grantProgramWorkspaceOnce();
+    await grantWorkspaceOnce();
   } catch(err){
-    if(err && err.message === 'NOT_PROGRAM_DIR'){
-      const hint = programFolderHintName();
-      loginWorkspaceNotice(
-        'Det måste vara mappen där nopEKONOMI.html ligger'
-        + (hint ? ' («' + hint + '»)' : '')
-        + '. Försök igen.'
-      );
-      return false;
-    }
     if(err && (err.name === 'AbortError' || err.name === 'NotAllowedError')){
-      loginWorkspaceNotice('Ingen mapp valdes. Välj arbetsmappen för att se böcker som redan finns där.');
+      loginWorkspaceNotice('Ingen mapp valdes. Välj bokmappen (t.ex. i Google Drive) för att se böcker som redan finns där.');
       return false;
     }
     loginWorkspaceNotice('Kunde inte få tillstånd till mappen. Försök igen.');
@@ -8677,6 +8883,10 @@ async function connectProgramWorkspaceFromLogin(){
 
   await reconcileBooksWithWorkspace(true);
   return true;
+}
+
+async function connectProgramWorkspaceFromLogin(){
+  return connectWorkspaceFromLogin();
 }
 
 async function renderLogin(){
@@ -8688,10 +8898,6 @@ async function renderLogin(){
   if(embHint) embHint.hidden = !isEmbeddedFileViewer();
 
   try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
-
-  // Test 2026-09-03 v01: ingen mappfråga vid start. Böcker i registret visas
-  // ändå. Behörighet begärs vid Öppna / NY BOK (användargest).
-  setLoginWorkspaceSetupVisible(false);
 
   try{
     await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
@@ -8717,6 +8923,19 @@ async function renderLogin(){
     bookSelect.value = hasActive ? reg.active : reg.order[0];
   }
 
+  const mode = await getWorkspaceSetupMode();
+  if(mode === 'confirm'){
+    setLoginWorkspaceSetupVisible(true, 'confirm');
+  } else if(mode === 'pick' && !reg.order.length){
+    setLoginWorkspaceSetupVisible(true, 'pick');
+  } else {
+    setLoginWorkspaceSetupVisible(false);
+  }
+
+  if(loginConnectFolderBtn){
+    loginConnectFolderBtn.hidden = !bookStorageSupported();
+  }
+
   syncLoginMode();
 }
 
@@ -8730,6 +8949,9 @@ function syncLoginMode(){
   newBookBtn.hidden = false;
   newBookBtn.textContent = creating ? 'Avbryt' : 'NY BOK';
   openBookBtn.textContent = creating ? 'Skapa' : 'Öppna';
+  if(loginConnectFolderBtn){
+    loginConnectFolderBtn.hidden = !bookStorageSupported() || creating;
+  }
 
   if(creating) newNameInput.focus();
 }
@@ -8738,10 +8960,30 @@ if(loginWorkspaceBtn){
   loginWorkspaceBtn.addEventListener('click', async () => {
     loginWorkspaceBtn.disabled = true;
     try{
-      const ok = await connectProgramWorkspaceFromLogin();
+      const ok = await connectWorkspaceFromLogin();
       if(ok) await renderLogin();
     } finally{
       loginWorkspaceBtn.disabled = false;
+    }
+  });
+}
+
+if(loginConnectFolderBtn){
+  loginConnectFolderBtn.addEventListener('click', async () => {
+    loginConnectFolderBtn.disabled = true;
+    loginNotice('');
+    try{
+      const ok = await connectWorkspaceFromLogin();
+      if(ok){
+        await renderLogin();
+        loginNotice('Bokmapp kopplad. Böcker i mappen syns i listan.');
+      } else if(loginWorkspaceSetup && !loginWorkspaceSetup.hidden){
+        /* feltext i workspace-panelen */
+      } else {
+        loginNotice('Kunde inte koppla bokmapp. Tillåt åtkomst eller välj mappen igen.');
+      }
+    } finally{
+      loginConnectFolderBtn.disabled = false;
     }
   });
 }
@@ -8837,22 +9079,18 @@ openBookBtn.addEventListener('click', async () => {
 
   let dirHandle = null;
   try{
-    const ws = await acquireProgramWorkspaceForNewBook();
+    const ws = await acquireWorkspaceForNewBook();
     if(ws.denied){
       cancelCreatingBook();
       return;
     }
-    if(ws.badFolder){
-      loginNotice('Det måste vara mappen där nopEKONOMI.html ligger. Boken sparas bara där.');
-      return;
-    }
     if(ws.error || !ws.dir){
-      loginNotice('Kunde inte få tillstånd till programmets mapp. Boken skapades inte.');
+      loginNotice('Kunde inte få tillstånd till bokmappen. Boken skapades inte.');
       return;
     }
     dirHandle = ws.dir;
   } catch(err){
-    loginNotice('Kunde inte nå programmets mapp. Boken skapades inte.');
+    loginNotice('Kunde inte nå bokmappen. Boken skapades inte.');
     return;
   }
 
@@ -8863,7 +9101,7 @@ openBookBtn.addEventListener('click', async () => {
   try{
     if(await fileHandleExists(dirHandle, fileName)){
       loginNotice('Det finns redan en fil som heter "' + fileName
-        + '" i programmets mapp. Välj ett annat boknamn.');
+        + '" i bokmappen. Välj ett annat boknamn.');
       newNameInput.focus();
       return;
     }
@@ -8871,9 +9109,9 @@ openBookBtn.addEventListener('click', async () => {
     await writeBookFile(handle, emptyBook, name);
     await idbPut(id, handle);
     await idbPut(id + BOOK_DIR_SUFFIX, dirHandle);
-    await rememberWorkspaceDir(dirHandle);
+    await rememberWorkspaceDir(dirHandle, await detectWorkspaceKind(dirHandle));
   } catch(err){
-    loginNotice('Kunde inte skriva bokfilen i programmets mapp. Boken skapades inte.');
+    loginNotice('Kunde inte skriva bokfilen i bokmappen. Boken skapades inte.');
     return;
   }
 
@@ -8952,6 +9190,7 @@ function renderStart(){
   const rec = lastBackupRecord(bookId);
   paintStartBackupHint(rec && rec.at, rec && rec.posts);
   refreshStartBackupHintFromDisk();
+  updateBookFileSyncStatusUi();
 
   clear(startMessages);
   for(const msg of importReport) addBox(startMessages, 'report', msg);
@@ -23522,6 +23761,14 @@ async function initApp(){
   window.addEventListener('orientationchange', syncReportMobileLayout, { passive: true });
   window.addEventListener('resize', resizeTrendChartText, { passive: true });
   window.addEventListener('orientationchange', resizeTrendChartText, { passive: true });
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible'){
+      try{ checkBookFileForRemoteChanges(); } catch(e){ /* ignore */ }
+    }
+  });
+  window.addEventListener('focus', () => {
+    try{ checkBookFileForRemoteChanges(); } catch(e){ /* ignore */ }
+  });
 }
 
 initApp();
