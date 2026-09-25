@@ -3813,7 +3813,6 @@ td.num.dash .cell-content{
 
       <div class="button-row">
         <button class="btn" id="newBookBtn" type="button">NY BOK</button>
-        <button class="btn" id="loginConnectFolderBtn" type="button">Koppla bokmapp…</button>
         <button class="btn right" id="openBookBtn" type="button">Öppna</button>
       </div>
 
@@ -4875,7 +4874,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v23';
+const APP_VERSION = '2026-09-25 v24';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8785,11 +8784,12 @@ const newNameInput = el('newName');
 const loginMessages = el('loginMessages');
 const newBookBtn = el('newBookBtn');
 const openBookBtn = el('openBookBtn');
-const loginConnectFolderBtn = el('loginConnectFolderBtn');
 const loginPanelMain = el('loginPanelMain');
 const loginWorkspaceSetup = el('loginWorkspaceSetup');
 const loginWorkspaceBtn = el('loginWorkspaceBtn');
 const loginWorkspaceMessages = el('loginWorkspaceMessages');
+
+const LOGIN_CONNECT_FOLDER = '__connect_folder__';
 
 let creating = false;
 
@@ -8886,7 +8886,7 @@ function loginWorkspaceNotice(msg){
 }
 
 // Användargest: välj/bekräfta bokmapp (eller programmapp), synka böcker från disk.
-// opts.forcePick = true → alltid öppna mappväljaren (Knappen "Koppla bokmapp…").
+// opts.forcePick = true → alltid öppna mappväljaren ("Koppla bokmapp…" i listan).
 async function connectWorkspaceFromLogin(opts){
   opts = opts || {};
   loginWorkspaceNotice('');
@@ -8949,11 +8949,12 @@ async function renderLogin(){
 
   if(!reg.order.length){
     const opt = document.createElement('option');
+    opt.value = '';
+    opt.disabled = true;
     opt.textContent = 'Inga böcker ännu';
     bookSelect.appendChild(opt);
     creating = false;
   } else {
-    loginNotice('');
     for(const id of reg.order){
       const opt = document.createElement('option');
       opt.value = id;
@@ -8962,6 +8963,21 @@ async function renderLogin(){
     }
     const hasActive = reg.active && reg.order.includes(reg.active);
     bookSelect.value = hasActive ? reg.active : reg.order[0];
+  }
+
+  if(bookStorageSupported()){
+    if(reg.order.length){
+      const sep = document.createElement('option');
+      sep.disabled = true;
+      sep.value = '';
+      sep.textContent = '────────';
+      bookSelect.appendChild(sep);
+    }
+    const connectOpt = document.createElement('option');
+    connectOpt.value = LOGIN_CONNECT_FOLDER;
+    connectOpt.textContent = 'Koppla bokmapp…';
+    bookSelect.appendChild(connectOpt);
+    if(!reg.order.length) bookSelect.value = LOGIN_CONNECT_FOLDER;
   }
 
   const mode = await getWorkspaceSetupMode();
@@ -8973,26 +8989,20 @@ async function renderLogin(){
     setLoginWorkspaceSetupVisible(false);
   }
 
-  if(loginConnectFolderBtn){
-    loginConnectFolderBtn.hidden = !bookStorageSupported();
-  }
-
   syncLoginMode();
 }
 
 function syncLoginMode(){
   const hasBooks = reg.order.length > 0;
+  const isConnect = bookSelect.value === LOGIN_CONNECT_FOLDER;
 
   newNameField.hidden = !creating;
-  bookSelect.disabled = creating || !hasBooks;
-  openBookBtn.disabled = !creating && !hasBooks;
+  bookSelect.disabled = creating;
+  openBookBtn.disabled = !creating && !hasBooks && !isConnect;
 
   newBookBtn.hidden = false;
   newBookBtn.textContent = creating ? 'Avbryt' : 'NY BOK';
-  openBookBtn.textContent = creating ? 'Skapa' : 'Öppna';
-  if(loginConnectFolderBtn){
-    loginConnectFolderBtn.hidden = !bookStorageSupported() || creating;
-  }
+  openBookBtn.textContent = creating ? 'Skapa' : (isConnect ? 'Koppla' : 'Öppna');
 
   if(creating) newNameInput.focus();
 }
@@ -9009,28 +9019,26 @@ if(loginWorkspaceBtn){
   });
 }
 
-if(loginConnectFolderBtn){
-  loginConnectFolderBtn.addEventListener('click', async () => {
-    loginConnectFolderBtn.disabled = true;
-    loginNotice('');
-    try{
-      // Alltid öppna mappväljaren — annars återanvänds sparad mapp tyst.
-      const ok = await connectWorkspaceFromLogin({ forcePick: true });
-      if(ok){
-        let folderLabel = '';
-        try{
-          const dir = await idbGet(WORKSPACE_DIR_KEY);
-          if(dir && dir.name) folderLabel = dir.name;
-        } catch(e){ /* ignore */ }
-        await renderLogin();
-        loginNotice(folderLabel
-          ? 'Bokmapp kopplad: «' + folderLabel + '». Böcker i mappen syns i listan.'
-          : 'Bokmapp kopplad. Böcker i mappen syns i listan.');
-      }
-    } finally{
-      loginConnectFolderBtn.disabled = false;
+async function runConnectFolderFromLogin(){
+  loginNotice('');
+  openBookBtn.disabled = true;
+  try{
+    const ok = await connectWorkspaceFromLogin({ forcePick: true });
+    if(ok){
+      let folderLabel = '';
+      try{
+        const dir = await idbGet(WORKSPACE_DIR_KEY);
+        if(dir && dir.name) folderLabel = dir.name;
+      } catch(e){ /* ignore */ }
+      await renderLogin();
+      loginNotice(folderLabel
+        ? 'Bokmapp kopplad: «' + folderLabel + '». Böcker i mappen syns i listan.'
+        : 'Bokmapp kopplad. Böcker i mappen syns i listan.');
     }
-  });
+  } finally{
+    openBookBtn.disabled = false;
+    syncLoginMode();
+  }
 }
 
 function loginNotice(msg){
@@ -9082,6 +9090,7 @@ function cancelCreatingBook(msg){
 
 bookSelect.addEventListener('change', () => {
   loginNotice('');
+  syncLoginMode();
 });
 
 openBookBtn.addEventListener('click', async () => {
@@ -9091,6 +9100,10 @@ openBookBtn.addEventListener('click', async () => {
   reg = readRegistry();
 
   if(!wasCreating){
+    if(chosen === LOGIN_CONNECT_FOLDER){
+      await runConnectFolderFromLogin();
+      return;
+    }
     if(!reg.order.includes(chosen)){
       await renderLogin();
       loginNotice('Den boken finns inte längre. Välj en annan.');
