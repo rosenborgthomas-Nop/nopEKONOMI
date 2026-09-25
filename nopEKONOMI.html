@@ -4860,7 +4860,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v19';
+const APP_VERSION = '2026-09-25 v20';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -16430,14 +16430,13 @@ function buildCareListItems(){
     .map(name => ({ name, count: counter(name) }));
 }
 
-/** Bocklista-status för utskrift: På / Av / Delvis. */
+/** Bocklista för utskrift/urklipp: bara "Av" (På/Delvis = tomt). */
 function budgetPrintBocklistaLabel(item){
   if(!item) return 'Av';
-  if(item.rowKind === 'sub') return item.included ? 'På' : 'Av';
+  if(item.rowKind === 'sub') return item.included ? '' : 'Av';
   const st = item.checkState || (item.included ? 'all' : 'none');
-  if(st === 'all') return 'På';
-  if(st === 'some') return 'Delvis';
-  return 'Av';
+  if(st === 'none') return 'Av';
+  return '';
 }
 
 /**
