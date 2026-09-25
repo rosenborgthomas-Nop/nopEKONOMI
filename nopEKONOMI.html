@@ -299,6 +299,42 @@ h1{
   background:color-mix(in srgb, #E03131 16%, var(--paper-surface, #E8EFF7));
   border-color:color-mix(in srgb, #E03131 28%, var(--paper-line, #b8c4d4));
 }
+.start-period-wrap .start-period-lead{
+  position:relative;
+  z-index:1;
+  flex:1 1 auto;
+  min-width:0;
+  display:flex;
+  align-items:stretch;
+  align-self:stretch;
+}
+.start-period-labels{
+  display:none;
+  flex-direction:column;
+  flex:1 1 auto;
+  min-width:0;
+  height:100%;
+  box-sizing:border-box;
+  pointer-events:none;
+}
+.start-period-label{
+  display:flex;
+  align-items:center;
+  height:50%;
+  padding:0 2.2em 0 10px;
+  font-size:14px;
+  font-weight:400;
+  color:var(--ink, #1a3050);
+  white-space:nowrap;
+  line-height:1;
+  box-sizing:border-box;
+}
+.start-period-label-ghost{
+  font-size:12px;
+  font-weight:500;
+  opacity:0.72;
+  color:color-mix(in srgb, var(--ink, #1a3050) 70%, transparent);
+}
 .start-period-wrap .start-period-select{
   position:relative;
   z-index:1;
@@ -316,9 +352,6 @@ h1{
   font-weight:400;
   padding:8px 2.4em 8px 10px;
 }
-.start-period-wrap .start-period-select.start-period-select-bold{
-  font-weight:700;
-}
 .start-period-wrap .start-period-select:focus{
   outline:none;
   box-shadow:none;
@@ -326,6 +359,36 @@ h1{
 .start-period-wrap:focus-within{
   border-color:var(--gold);
   box-shadow:0 0 0 2px rgba(201,162,39,0.25);
+}
+/* Delad vy: etiketter Pågående / Spökbudget, select osynlig men klickbar. */
+.start-period-wrap[data-teaser-split="1"] .start-period-labels{
+  display:flex;
+}
+.start-period-wrap[data-teaser-split="1"] .start-period-select{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  opacity:0;
+  cursor:pointer;
+  padding:0;
+  flex:none;
+  z-index:2;
+}
+.start-period-wrap[data-teaser-split="1"] .start-period-lead::after{
+  content:'';
+  position:absolute;
+  right:10px;
+  top:25%;
+  margin-top:-3px;
+  width:0;
+  height:0;
+  border-left:4px solid transparent;
+  border-right:4px solid transparent;
+  border-top:5px solid var(--ink, #1a3050);
+  opacity:0.55;
+  pointer-events:none;
+  z-index:1;
 }
 .start-period-values{
   position:relative;
@@ -3781,15 +3844,21 @@ td.num.dash .cell-content{
         <span class="start-period-wrap" id="startPeriodWrap">
           <span class="budget-amt-bar budget-amt-bar-upper" id="startPeriodAmtBar" aria-hidden="true"></span>
           <span class="budget-amt-bar budget-amt-bar-lower" id="startPeriodAmtBarLower" aria-hidden="true"></span>
-          <select id="startPeriodMenu" class="menu-select start-period-select" title="Budgetperiod" aria-label="Budgetperiod">
-            <option value="currentMonth">Pågående månad</option>
-            <option value="last30">Senaste 30 dagarna</option>
-            <option value="last3m">Senaste 3 månader</option>
-            <option value="last6m">Senaste 6 månader</option>
-            <option value="last12m">Senaste 12 månader</option>
-            <option value="last24m">Senaste 24 månader</option>
-            <option value="allt">Allt</option>
-          </select>
+          <span class="start-period-lead" id="startPeriodLead">
+            <span class="start-period-labels" id="startPeriodLabels" aria-hidden="true">
+              <span class="start-period-label start-period-label-real">Pågående</span>
+              <span class="start-period-label start-period-label-ghost">Spökbudget</span>
+            </span>
+            <select id="startPeriodMenu" class="menu-select start-period-select" title="Budgetperiod" aria-label="Budgetperiod">
+              <option value="currentMonth">Pågående månad</option>
+              <option value="last30">Senaste 30 dagarna</option>
+              <option value="last3m">Senaste 3 månader</option>
+              <option value="last6m">Senaste 6 månader</option>
+              <option value="last12m">Senaste 12 månader</option>
+              <option value="last24m">Senaste 24 månader</option>
+              <option value="allt">Allt</option>
+            </select>
+          </span>
           <span class="start-period-values" id="startPeriodValues">
             <span id="startPeriodValue" class="start-period-value start-period-value-real" aria-live="polite"></span>
             <span id="startPeriodValueGhost" class="start-period-value start-period-value-ghost" hidden aria-live="polite"></span>
@@ -4790,7 +4859,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v12';
+const APP_VERSION = '2026-09-25 v13';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7307,7 +7376,6 @@ function paintStartPeriodBar(){
   if(menu.value !== startPeriodMode){
     menu.value = startPeriodMode;
   }
-  menu.classList.toggle('start-period-select-bold', startPeriodMode === 'currentMonth');
   const split = startPeriodMode === 'currentMonth';
   if(split) wrap.setAttribute('data-teaser-split', '1');
   else clearStartTeaserLowerBar(wrap, amtBarLower);
