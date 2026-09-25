@@ -1072,6 +1072,13 @@ body.trend-view-active{
 .trend-line-chart-legend .trend-delta + .trend-delta{
   margin-left:0.55em;
 }
+.trend-line-chart-axis-hint{
+  margin:2px 2px 0;
+  font-size:12px;
+  font-weight:500;
+  color:var(--text-on-paper-soft);
+  letter-spacing:0.01em;
+}
 .trend-line-chart-swatch{
   display:inline-block;
   width:16px;
@@ -4881,7 +4888,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v25';
+const APP_VERSION = '2026-09-25 v26';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -12970,7 +12977,8 @@ function collectTrendDetailListItems(kind, fromIso, toIso){
   return { items: items, ranked: ranked };
 }
 
-/** Flera netto-serier i samma diagram (ibockade detaljer). */
+/** Flera netto-serier i samma diagram (ibockade detaljer).
+ *  Blandas plus och minus → vänsteraxel = plus, högeraxel = minus (reverserat uppåt). */
 function buildTrendDetailCompareChart(seriesList){
   const list = (seriesList || []).filter(s => s && s.months && s.months.length);
   if(!list.length){
@@ -12989,34 +12997,57 @@ function buildTrendDetailCompareChart(seriesList){
       + '<p class="payee-chart-empty">För få månader för diagram.</p></div>';
   }
 
-  let ymin = Infinity;
-  let ymax = -Infinity;
-  const bump = v => {
-    if(!Number.isFinite(v)) return;
-    if(v < ymin) ymin = v;
-    if(v > ymax) ymax = v;
-  };
-  for(const s of list){
-    for(const v of s.histNet) bump(v);
-    for(const v of s.forecastNet) bump(v);
+  const leftSeries = list.filter(s => s.side !== 'neg');
+  const rightSeries = list.filter(s => s.side === 'neg');
+  const dualAxis = leftSeries.length > 0 && rightSeries.length > 0;
+
+  function domainFor(seriesArr){
+    let ymin = Infinity;
+    let ymax = -Infinity;
+    const bump = v => {
+      if(!Number.isFinite(v)) return;
+      if(v < ymin) ymin = v;
+      if(v > ymax) ymax = v;
+    };
+    for(const s of seriesArr){
+      for(const v of s.histNet) bump(v);
+      for(const v of s.forecastNet) bump(v);
+    }
+    if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){ ymin = 0; ymax = 1; }
+    if(ymax <= ymin) ymax = ymin + 1;
+    // Ensidig skala från 0 när allt ligger på samma sida om noll.
+    if(ymin >= 0) ymin = 0;
+    if(ymax <= 0) ymax = 0;
+    if(ymax <= ymin) ymax = ymin + 1;
+    const padY = (ymax - ymin) * 0.08 || 1;
+    ymin -= padY;
+    ymax += padY;
+    return { ymin: ymin, ymax: ymax };
   }
-  if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){ ymin = 0; ymax = 1; }
-  if(ymax <= ymin) ymax = ymin + 1;
-  const padY = (ymax - ymin) * 0.08 || 1;
-  ymin -= padY;
-  ymax += padY;
+
+  const leftDom = domainFor(dualAxis ? leftSeries : list);
+  const rightDom = dualAxis ? domainFor(rightSeries) : leftDom;
 
   const W = 560;
   const H = 240;
-  const yPad = trendChartYAxisPad(ymin, ymax);
-  const padL = yPad.padL;
-  const padR = 12;
+  const yPadL = trendChartYAxisPad(leftDom.ymin, leftDom.ymax);
+  const yPadR = dualAxis
+    ? trendChartYAxisPad(rightDom.ymin, rightDom.ymax)
+    : { padL: 12, yChars: 0 };
+  // Högeretiketter visar −belopp → räkna in minustecknet i bredden.
+  const padL = yPadL.padL;
+  const padR = dualAxis
+    ? Math.max(yPadR.padL, Math.ceil((yPadR.yChars + 1) * 7.5) + 16)
+    : 12;
   const padT = 14;
   const padB = 28;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const xAt = i => padL + (total === 1 ? plotW / 2 : (i / (total - 1)) * plotW);
-  const yAt = v => padT + plotH - ((v - ymin) / (ymax - ymin)) * plotH;
+  const yAtLeft = v => padT + plotH
+    - ((v - leftDom.ymin) / (leftDom.ymax - leftDom.ymin)) * plotH;
+  const yAtRight = v => padT + plotH
+    - ((v - rightDom.ymin) / (rightDom.ymax - rightDom.ymin)) * plotH;
   const grid = '#A8BDD4';
   const axis = '#5A6F88';
 
@@ -13026,8 +13057,8 @@ function buildTrendDetailCompareChart(seriesList){
     svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '"'
       + ' stroke="' + grid + '" stroke-width="0.6" opacity="0.55"/>';
   }
-  if(ymin < 0 && ymax > 0){
-    const zy = yAt(0);
+  if(leftDom.ymin < 0 && leftDom.ymax > 0){
+    const zy = yAtLeft(0);
     svg += '<line x1="' + padL + '" y1="' + zy + '" x2="' + (W - padR) + '" y2="' + zy + '"'
       + ' stroke="' + axis + '" stroke-width="1" opacity="0.45"/>';
   }
@@ -13037,7 +13068,7 @@ function buildTrendDetailCompareChart(seriesList){
       + ' stroke="' + axis + '" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>';
   }
 
-  for(const s of list){
+  function drawSeries(s, yAt){
     const color = s.color || TREND_DETAIL_COMPARE_COLORS[0];
     if(s.forecastNet.length && histN > 0){
       const fLine = [s.histNet[histN - 1]].concat(s.forecastNet);
@@ -13054,20 +13085,40 @@ function buildTrendDetailCompareChart(seriesList){
     svg += '<polyline fill="none" stroke="' + color + '" stroke-width="2.2"'
       + ' stroke-linejoin="round" stroke-linecap="round" points="' + hPts + '"/>';
     for(let i = 0; i < histN; i++){
+      const shown = s.side === 'neg' ? -Math.abs(s.histNet[i]) : s.histNet[i];
       svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(s.histNet[i]).toFixed(1)
         + '" r="2.5" fill="' + color + '">'
         + '<title>' + escapeHtml(s.label + ' ' + monthKeyYyMm(months[i]) + ' '
-          + formatAmount(Math.round(s.histNet[i]))) + '</title></circle>';
+          + formatAmount(Math.round(shown))) + '</title></circle>';
     }
   }
 
+  for(const s of list){
+    const useRight = dualAxis && s.side === 'neg';
+    drawSeries(s, useRight ? yAtRight : yAtLeft);
+  }
+
   for(let g = 0; g <= 3; g++){
-    const val = ymax - ((ymax - ymin) * g) / 3;
+    const val = leftDom.ymax - ((leftDom.ymax - leftDom.ymin) * g) / 3;
     const gy = padT + (plotH * g) / 3;
     svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
       + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
+  if(dualAxis){
+    for(let g = 0; g <= 3; g++){
+      const mag = rightDom.ymax - ((rightDom.ymax - rightDom.ymin) * g) / 3;
+      const gy = padT + (plotH * g) / 3;
+      // Reverserad negativ axel: uppåt = större |minus|, etikett med minustecken.
+      const label = mag <= 0.5 && mag >= -0.5
+        ? formatReportInt(0)
+        : ('−' + formatReportInt(Math.round(Math.abs(mag))));
+      svg += '<text x="' + (W - padR + 6) + '" y="' + (gy + 3) + '" text-anchor="start"'
+        + ' class="tl-axis tl-axis-right" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+        + escapeHtml(label) + '</text>';
+    }
+  }
+
   const labelIdx = [];
   if(total > 0) labelIdx.push(0);
   if(histN > 1) labelIdx.push(histN - 1);
@@ -13080,16 +13131,25 @@ function buildTrendDetailCompareChart(seriesList){
 
   let legend = '<p class="trend-line-chart-legend">';
   for(const s of list){
+    const sideHint = dualAxis
+      ? (s.side === 'neg' ? ' (−)' : ' (+)')
+      : '';
     legend += '<span class="trend-legend-series" style="color:' + s.color + '">'
       + '<i class="trend-line-chart-swatch" aria-hidden="true"'
       + ' style="color:' + s.color + ';border-top-color:' + s.color + '"></i>'
-      + '<span class="trend-legend-label">' + escapeHtml(s.label) + '</span></span>';
+      + '<span class="trend-legend-label">' + escapeHtml(s.label + sideHint) + '</span></span>';
   }
   legend += '</p>';
+  if(dualAxis){
+    legend += '<p class="trend-line-chart-axis-hint">'
+      + 'Vänster axel: plus · Höger axel: minus (reverserat)</p>';
+  }
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
-    + ' data-pad-l="' + padL + '" data-y-chars="' + yPad.yChars + '"'
+    + ' data-pad-l="' + padL + '" data-pad-r="' + padR + '"'
+    + ' data-y-chars="' + yPadL.yChars + '"'
+    + (dualAxis ? ' data-y-chars-r="' + (yPadR.yChars + 1) + '"' : '')
     + ' aria-label="Jämförelse av valda trender">'
     + svg + '</svg>' + legend + '</div>';
 }
@@ -13130,6 +13190,7 @@ function renderTrendDetailCompare(kind, names){
     seriesList.push({
       label: name,
       color: TREND_DETAIL_COMPARE_COLORS[i % TREND_DETAIL_COMPARE_COLORS.length],
+      side: classif.isExpense ? 'neg' : 'pos',
       months: raw.months,
       histNet: histNet,
       forecast: raw.forecast,
@@ -13169,12 +13230,18 @@ function renderTrendDetailCompare(kind, names){
     return;
   }
 
+  const hasPos = seriesList.some(s => s.side !== 'neg');
+  const hasNeg = seriesList.some(s => s.side === 'neg');
+  const dualHint = (hasPos && hasNeg)
+    ? ' · plus vänster, minus höger'
+    : '';
+
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
     + '<div class="trend-payee-toolbar">'
     + '<button type="button" class="btn-quiet" id="' + backBtnId + '">'
     + '← ' + escapeHtml(listLabel) + '</button>'
-    + '<p class="trend-payee-sign">' + escapeHtml(picked.length + ' valda') + '</p>'
+    + '<p class="trend-payee-sign">' + escapeHtml(picked.length + ' valda' + dualHint) + '</p>'
     + '</div>'
     + buildTrendDetailCompareChart(seriesList)
     + '</div>';
@@ -13582,14 +13649,21 @@ function sizeTrendChartText(wrap){
     return;
   }
   const scale = rect.width / vbWidth;
-  let vbFont = Math.max(4, targetPx / scale);
-
   // Begränsa så y-etiketter inte klipps utanför viewBox (särskilt på smal mobil).
   const padL = Number(svg.getAttribute('data-pad-l')) || 56;
+  const padR = Number(svg.getAttribute('data-pad-r')) || 12;
   const yChars = Number(svg.getAttribute('data-y-chars')) || 6;
-  const maxVbFont = (padL - 10) / Math.max(1, yChars * 0.62);
-  if(Number.isFinite(maxVbFont) && maxVbFont > 0){
-    vbFont = Math.min(vbFont, maxVbFont);
+  const yCharsR = Number(svg.getAttribute('data-y-chars-r')) || 0;
+  const maxVbFontL = (padL - 10) / Math.max(1, yChars * 0.62);
+  let vbFont = Math.max(4, targetPx / scale);
+  if(Number.isFinite(maxVbFontL) && maxVbFontL > 0){
+    vbFont = Math.min(vbFont, maxVbFontL);
+  }
+  if(yCharsR > 0){
+    const maxVbFontR = (padR - 10) / Math.max(1, yCharsR * 0.62);
+    if(Number.isFinite(maxVbFontR) && maxVbFontR > 0){
+      vbFont = Math.min(vbFont, maxVbFontR);
+    }
   }
 
   const texts = svg.querySelectorAll('text.tl-axis');
