@@ -4129,7 +4129,7 @@ td.num.dash .cell-content{
             <div class="care-list-actions">
               <button class="btn-quiet" id="careListNewBtn" type="button">Nytt konto…</button>
               <button class="btn-quiet" id="careListBackupBtn" type="button" hidden>Säkerhetskopia…</button>
-              <button class="btn-quiet" id="careListPrintBtn" type="button" hidden>Skriv ut…</button>
+              <button class="report-copy-btn" id="careListPrintBtn" type="button" title="Exportera budget" aria-label="Exportera budget" hidden>⧉</button>
               <div class="care-list-actions-right">
                 <button class="btn-cancel" id="careListCancelBtn" type="button">Avbryt</button>
                 <button class="btn-ok" id="careListOkBtn" type="button">OK</button>
@@ -4860,7 +4860,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v17';
+const APP_VERSION = '2026-09-25 v18';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10803,6 +10803,10 @@ function hideReportExportChoice(){
 
 function showReportExportChoice(ctx){
   reportExportPending = ctx;
+  const title = el('reportExportTitle');
+  if(title){
+    title.textContent = ctx && ctx.isBudget ? 'Exportera budget' : 'Exportera rapport';
+  }
   const overlay = el('reportExportOverlay');
   if(overlay) overlay.hidden = false;
 }
@@ -10830,6 +10834,33 @@ async function executeReportExport(action){
   const ctx = reportExportPending;
   hideReportExportChoice();
   if(!ctx) return;
+  if(ctx.isBudget){
+    const msgEl = careListMessages || reportMessages;
+    if(msgEl) clear(msgEl);
+    try{
+      if(action === 'clipboard'){
+        if(!ctx.text){
+          if(msgEl) addBox(msgEl, 'notice', 'Inget att kopiera.');
+          return;
+        }
+        await writeClipboardText(ctx.text);
+        if(msgEl) addBox(msgEl, 'report', 'Budgeten är kopierad till urklipp.');
+        return;
+      }
+      if(action === 'print'){
+        if(!printBudgetList()){
+          if(msgEl) addBox(msgEl, 'notice', 'Kunde inte öppna utskrift.');
+        }
+      }
+    } catch(e){
+      if(msgEl){
+        addBox(msgEl, 'notice', action === 'print'
+          ? 'Kunde inte skriva ut.'
+          : 'Kunde inte kopiera till urklipp.');
+      }
+    }
+    return;
+  }
   clear(reportMessages);
   try{
     if(action === 'clipboard'){
@@ -16442,6 +16473,52 @@ function buildBudgetPrintRows(){
   return items;
 }
 
+/** Text för urklipp (samma kolumner som budgetutskrift). */
+function buildBudgetClipboardText(){
+  if(careListKind !== 'budget' || !book) return '';
+  const rows = buildBudgetPrintRows();
+  if(!rows.length) return '';
+  const range = budgetPeriodRange();
+  const periodLab = budgetPeriodLabel();
+  const totals = computeBudgetSideTotals(rows);
+  const lines = [];
+  let head = 'BUDGET';
+  if(periodLab) head += ' · ' + periodLab;
+  if(range && range.from && range.to){
+    head += ' (' + range.from.slice(0, 7) + ' – ' + range.to.slice(0, 7) + ')';
+  }
+  lines.push(head);
+  lines.push(reportUpdatedLineHtml());
+  lines.push('Kategori\tBudget\tInkommit/förbrukat\tBocklista');
+  lines.push('BUDGET IN\t'
+    + (formatBudgetAmtEdit(totals.inBudget) || '—') + '\t'
+    + (formatBudgetAmtEdit(totals.inActual) || '0') + '\t');
+  lines.push('BUDGET UT\t'
+    + (formatBudgetAmtEdit(totals.outBudget) || '—') + '\t'
+    + (formatBudgetAmtEdit(totals.outActual) || '0') + '\t');
+  for(const item of rows){
+    const isSub = item.rowKind === 'sub';
+    let label = isSub
+      ? (item.emptySub ? TREND_EMPTY_SUB_LABEL : item.name)
+      : item.name;
+    if(isSub) label = '  ' + label;
+    const budgetStr = (typeof item.monthAmt === 'number' && Number.isFinite(item.monthAmt) && item.monthAmt > 0)
+      ? formatBudgetAmtEdit(item.monthAmt)
+      : '—';
+    const spentStr = formatBudgetAmtEdit(
+      typeof item.spentAmt === 'number' && Number.isFinite(item.spentAmt) ? item.spentAmt : 0
+    ) || '0';
+    lines.push(label + '\t' + budgetStr + '\t' + spentStr + '\t' + budgetPrintBocklistaLabel(item));
+  }
+  return lines.join('\n');
+}
+
+function getBudgetExportContext(){
+  const text = buildBudgetClipboardText();
+  if(!text) return null;
+  return { text: text, isBudget: true };
+}
+
 function printBudgetList(){
   if(careListKind !== 'budget' || !book) return false;
   const rows = buildBudgetPrintRows();
@@ -17744,11 +17821,15 @@ careListDeleteOkBtn.addEventListener('click', confirmCareListDelete);
 if(careListBackupBtn) careListBackupBtn.addEventListener('click', openBackupPage);
 if(careListPrintBtn){
   careListPrintBtn.addEventListener('click', () => {
-    const ok = printBudgetList();
-    if(!ok && careListMessages){
-      clear(careListMessages);
-      addBox(careListMessages, 'notice', 'Kunde inte skriva ut budgeten.');
+    const ctx = getBudgetExportContext();
+    if(!ctx){
+      if(careListMessages){
+        clear(careListMessages);
+        addBox(careListMessages, 'notice', 'Inget att exportera.');
+      }
+      return;
     }
+    showReportExportChoice(ctx);
   });
 }
 careListEditName.addEventListener('blur', () => {
