@@ -4859,7 +4859,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v13';
+const APP_VERSION = '2026-09-25 v14';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5040,9 +5040,27 @@ function rowsByDate(rows){
   return rows.slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
 }
 
+/**
+ * Förhandspostade rader (datum efter idag) syns i listor men räknas inte
+ * i saldo, budget, rapport eller trend — undantag: Spökbudget.
+ */
+function txDateIsCountable(iso){
+  const d = String(iso || '').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  return d <= todayIsoDate();
+}
+
+function txDateIsFuture(iso){
+  const d = String(iso || '').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  return d > todayIsoDate();
+}
+
 function accountSaldo(rows){
   let sum = 0;
   for(const r of rows){
+    const d = (r && r.date || '').trim();
+    if(d && !txDateIsCountable(d)) continue;
     sum += (typeof r.total === 'number' ? r.total : 0);
   }
   return sum;
@@ -5051,7 +5069,10 @@ function accountSaldo(rows){
 function rowsWithRunningBalance(rows){
   let running = 0;
   return rowsByDate(rows).map(r => {
-    running += (typeof r.total === 'number' ? r.total : 0);
+    const d = (r && r.date || '').trim();
+    if(!d || txDateIsCountable(d)){
+      running += (typeof r.total === 'number' ? r.total : 0);
+    }
     return { row: r, balance: running };
   });
 }
@@ -7005,6 +7026,8 @@ function buildBudgetSignMaps(){
       if(isOpeningBalanceRow(r)) continue;
       if(isReportExcludedRow(r)) continue;
       if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
+      const d = (r.date || '').trim();
+      if(d && !txDateIsCountable(d)) continue;
       for(const piece of reportPiecesFromRow(r)){
         const cat = (piece.category || '').trim();
         const sub = (piece.subCategory || '').trim();
@@ -7081,6 +7104,7 @@ function buildBudgetMonthActivityMap(fromIso, toIso, opts){
       if(isReportExcludedRow(r)) continue;
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(d < from || d > to) continue;
       if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
       for(const piece of reportPiecesFromRow(r)){
@@ -7221,11 +7245,14 @@ function startTeaserGhostTailRanges(todayIso){
   return ranges;
 }
 
-/** Netto (in − ut) i datumintervall, endast bocklistade (icke-överföring) poster. */
-function sumBocklistaNetInDateRange(fromIso, toIso){
-  if(!book || !book.order || !fromIso || !toIso) return 0;
+/** Netto (in − ut) i datumintervall, endast bocklistade (icke-överföring) poster.
+ *  opts.allowFuture: tillåt datum efter idag (bara Spökbudget). */
+function sumBocklistaNetInDateRange(fromIso, toIso, opts){
+  if(!book || !book.order || !fromIso || !toIso) return { net: 0, count: 0 };
+  const allowFuture = !!(opts && opts.allowFuture);
   syncTrendIncludeMap(book);
   let net = 0;
+  let count = 0;
   for(const accName of book.order){
     const acc = book.accounts[accName];
     if(!acc || !Array.isArray(acc.rows)) continue;
@@ -7235,7 +7262,9 @@ function sumBocklistaNetInDateRange(fromIso, toIso){
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
       if(d < fromIso || d > toIso) continue;
+      if(!allowFuture && !txDateIsCountable(d)) continue;
       if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
+      let hit = false;
       for(const piece of reportPiecesFromRow(r)){
         const cat = (piece.category || '').trim();
         const sub = (piece.subCategory || '').trim();
@@ -7244,30 +7273,54 @@ function sumBocklistaNetInDateRange(fromIso, toIso){
         const amount = piece.amount;
         if(!Number.isFinite(amount) || !amount) continue;
         net += amount;
+        hit = true;
       }
+      if(hit) count += 1;
     }
   }
-  return net;
+  return { net: net, count: count };
 }
 
 /**
- * Spök-saldo = återstår + medelnetto för rest-av-månad i 6 föregående månader.
- * Returnerar { ghost, mean, n, ranges } eller null.
+ * Spök-saldo = återstår + (förhandspostad rest-månad ELLER medel av 6 historiska rest-perioder).
+ * Förhandspostade rader efter idag trumfar halvårsmedlet.
  */
 function computeStartTeaserGhostSaldo(remaining, todayIso){
-  const ranges = startTeaserGhostTailRanges(todayIso);
-  if(!ranges.length) return null;
+  const iso = todayIso || todayIsoDate();
+  const ranges = startTeaserGhostTailRanges(iso);
   let sum = 0;
   for(const r of ranges){
-    sum += sumBocklistaNetInDateRange(r.from, r.to);
+    sum += sumBocklistaNetInDateRange(r.from, r.to).net;
   }
-  const mean = sum / ranges.length;
+  const n = ranges.length;
+  const mean = n ? sum / n : 0;
   const rem = typeof remaining === 'number' && Number.isFinite(remaining) ? remaining : 0;
+
+  const curMk = monthKeyFromIso(iso);
+  const y = Number(curMk.slice(0, 4));
+  const m = Number(curMk.slice(5, 7));
+  const dim = daysInCalendarMonth(y, m);
+  const tomorrow = addDaysIso(iso, 1);
+  const monthEnd = curMk + '-' + String(dim).padStart(2, '0');
+  let futureNet = 0;
+  let futureCount = 0;
+  if(tomorrow && tomorrow <= monthEnd){
+    const fut = sumBocklistaNetInDateRange(tomorrow, monthEnd, { allowFuture: true });
+    futureNet = fut.net;
+    futureCount = fut.count;
+  }
+
+  const usePosted = futureCount > 0;
+  const tail = usePosted ? futureNet : mean;
   return {
-    ghost: rem + mean,
+    ghost: rem + tail,
     mean: mean,
-    n: ranges.length,
-    ranges: ranges
+    n: n,
+    ranges: ranges,
+    futureNet: futureNet,
+    futureCount: futureCount,
+    usePosted: usePosted,
+    tail: tail
   };
 }
 
@@ -7331,12 +7384,19 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
     if(ghostRound < 0) ghostEl.classList.add('neg');
   }
 
-  const tipExtra = '\nSpök-saldo ' + formatBudgetAmtEdit(ghostRound)
-    + ' (återstår '
-    + formatBudgetAmtEdit(Math.round(remaining))
-    + ' + medel rest-månad '
-    + formatBudgetAmtEdit(Math.round(ghostInfo.mean))
-    + ', ' + ghostInfo.n + ' mån)';
+  const tipExtra = ghostInfo.usePosted
+    ? ('\nSpök-saldo ' + formatBudgetAmtEdit(ghostRound)
+      + ' (återstår '
+      + formatBudgetAmtEdit(Math.round(remaining))
+      + ' + förhandspostat '
+      + formatBudgetAmtEdit(Math.round(ghostInfo.futureNet))
+      + ', ' + ghostInfo.futureCount + ' st)')
+    : ('\nSpök-saldo ' + formatBudgetAmtEdit(ghostRound)
+      + ' (återstår '
+      + formatBudgetAmtEdit(Math.round(remaining))
+      + ' + medel rest-månad '
+      + formatBudgetAmtEdit(Math.round(ghostInfo.mean))
+      + ', ' + ghostInfo.n + ' mån)');
   const base = wrap.getAttribute('title') || '';
   if(base.indexOf('Spök-saldo') < 0){
     wrap.title = base + tipExtra;
@@ -9145,12 +9205,13 @@ function latestBookDateIso(forReport){
   return max;
 }
 
-// Förvald Till-datum: sista dagen i månaden för senaste vanliga transaktionen.
+// Förvald Till-datum: aldrig efter idag (förhandspostade poster räknas inte).
 function defaultReportToIso(){
   const last = latestBookDateIso(true);
   const end = last ? endOfMonthIso(last) : endOfCurrentMonthIso();
   const today = todayIsoDate();
-  return (end > today) ? end : today;
+  if(end < today) return end;
+  return today;
 }
 
 const REPORT_TIME_MODES = new Set([
@@ -9682,6 +9743,7 @@ function reportRowInRange(row, fromIso, toIso){
   if(isReportExcludedRow(row)) return false;
   const d = (row.date || '').trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  if(!txDateIsCountable(d)) return false;
   if(d < fromIso || d > toIso) return false;
   if(!rowMatchesYearPeriodFilter(d)) return false;
   return true;
@@ -9775,6 +9837,7 @@ function collectTrendDrillItems(meta){
       if(isReportExcludedRow(row)) continue;
       const d = (row.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(d < fromIso || d > toIso) continue;
       if(meta.periodKey && monthKeyFromIso(d) !== meta.periodKey) continue;
       if(rowIsPureTransfer(row) && !rowHasSplits(row)) continue;
@@ -10891,6 +10954,7 @@ function collectCategoryReport(fromIso, toIso){
       if(isReportExcludedRow(r)) continue;
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(d < fromIso || d > toIso) continue;
       // Hel överföringsrad utan splitdelar
       if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
@@ -11309,6 +11373,7 @@ function collectNetOverTime(fromIso, toIso){
     for(const r of acc.rows){
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(!rowMatchesYearPeriodFilter(d)) continue;
       const amount = typeof r.total === 'number' ? r.total : Number(r.total);
       if(!Number.isFinite(amount)) continue;
@@ -11789,6 +11854,7 @@ function completeTrendMonthKeysWithData(){
       if(isReportExcludedRow(r)) continue;
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(d > toIso) continue;
       const mk = monthKeyFromIso(d);
       if(mk > lastMk) continue;
@@ -11855,6 +11921,7 @@ function collectTrendInUtSeries(fromIso, toIso, filter){
       if(isReportExcludedRow(r)) continue;
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(d < fromIso || d > toIso) continue;
       if(payeeWant && (r.payee || '').trim() !== payeeWant) continue;
       if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
@@ -12411,6 +12478,7 @@ function collectTrendDetailRankedItems(kind, fromIso, toIso){
       if(isReportExcludedRow(r)) continue;
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(d < fromIso || d > toIso) continue;
       if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
 
@@ -13279,6 +13347,7 @@ function computeTrendNetReconciliation(toIso){
     for(const r of acc.rows){
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(d > toIso) continue;
 
       const rowTotalRaw = typeof r.total === 'number' ? r.total : Number(r.total);
@@ -13447,6 +13516,7 @@ function collectTrendNetOverTime(fromIso, toIso, forceMode){
     for(const r of acc.rows){
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
 
       if(catMode === 'alla'){
         const amount = typeof r.total === 'number' ? r.total : Number(r.total);
@@ -13505,7 +13575,7 @@ function sumOpeningBalanceThrough(toIso){
     for(const r of acc.rows){
       if(!isOpeningBalanceRow(r)) continue;
       const d = (r.date || '').trim();
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(d) || d > toIso) continue;
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d) || !txDateIsCountable(d) || d > toIso) continue;
       const amount = typeof r.total === 'number' ? r.total : Number(r.total);
       if(Number.isFinite(amount)) sum += amount;
     }
@@ -14271,6 +14341,7 @@ function collectPayeeReport(fromIso, toIso){
       if(rowIsPureTransfer(r)) continue;
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(d < fromIso || d > toIso) continue;
       if(!rowMatchesYearPeriodFilter(d)) continue;
       const payee = (r.payee || '').trim();
@@ -14658,6 +14729,7 @@ function collectTopListReport(fromIso, toIso, kind){
       if(rowIsPureTransfer(r)) continue;
       const d = (r.date || '').trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
       if(d < fromIso || d > toIso) continue;
       if(!rowMatchesYearPeriodFilter(d)) continue;
       const mk = reportPeriodKeyFromIso(d);
