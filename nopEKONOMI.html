@@ -360,7 +360,7 @@ h1{
   border-color:var(--gold);
   box-shadow:0 0 0 2px rgba(201,162,39,0.25);
 }
-/* Delad vy: etiketter Pågående / Spökbudget, select osynlig men klickbar. */
+/* Delad vy: etiketter Pågående / Skuggbudget, select osynlig men klickbar. */
 .start-period-wrap[data-teaser-split="1"] .start-period-labels{
   display:flex;
 }
@@ -3975,7 +3975,7 @@ td.num.dash .cell-content{
           <span class="start-period-lead" id="startPeriodLead">
             <span class="start-period-labels" id="startPeriodLabels" aria-hidden="true">
               <span id="startPeriodLabelReal" class="start-period-label start-period-label-real">Pågående</span>
-              <span class="start-period-label start-period-label-ghost">Spökbudget</span>
+              <span class="start-period-label start-period-label-ghost">Skuggbudget</span>
             </span>
             <select id="startPeriodMenu" class="menu-select start-period-select" title="Budgetperiod" aria-label="Budgetperiod">
               <option value="currentMonth">Pågående månad</option>
@@ -5003,7 +5003,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v01';
+const APP_VERSION = '2026-09-26 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7715,20 +7715,20 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
   }
 
   const tipExtra = ghostInfo.usePosted
-    ? ('\nSpök-saldo ' + formatBudgetAmtEdit(ghostRound)
+    ? ('\nSkugg-saldo ' + formatBudgetAmtEdit(ghostRound)
       + ' (återstår '
       + formatBudgetAmtEdit(Math.round(rem))
       + ' + förhandspostat '
       + formatBudgetAmtEdit(Math.round(ghostInfo.futureNet))
       + ', ' + ghostInfo.futureCount + ' st)')
-    : ('\nSpök-saldo ' + formatBudgetAmtEdit(ghostRound)
+    : ('\nSkugg-saldo ' + formatBudgetAmtEdit(ghostRound)
       + ' (återstår '
       + formatBudgetAmtEdit(Math.round(rem))
       + ' + medel rest-månad '
       + formatBudgetAmtEdit(Math.round(ghostInfo.mean))
       + ', ' + ghostInfo.n + ' mån)');
   const base = wrap.getAttribute('title') || '';
-  if(base.indexOf('Spök-saldo') < 0){
+  if(base.indexOf('Skugg-saldo') < 0 && base.indexOf('Spök-saldo') < 0){
     wrap.title = base + tipExtra;
   }
 
