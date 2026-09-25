@@ -605,8 +605,13 @@ input[type=file]{ display:none; }
   font-size:14px;
   line-height:1.55;
   color:var(--wine);
-  cursor:default;
+  cursor:pointer;
   margin-right:8px;
+  text-decoration:underline;
+  background:none;
+  border:none;
+  padding:0;
+  font-family:inherit;
 }
 .start-file-sync-hint[hidden]{ display:none; }
 .start-backup-wrap{
@@ -3842,7 +3847,7 @@ td.num.dash .cell-content{
       </select>
       <button class="btn-ok" id="startMenuBtn" type="button">OK</button>
       <span class="start-backup-wrap">
-        <span id="startFileSyncHint" class="start-file-sync-hint" hidden></span>
+        <span id="startFileSyncHint" class="start-file-sync-hint" hidden role="button" tabindex="0" title="Tryck för att spara till bokmapp/Drive"></span>
         <span id="startBackupHint" class="start-backup-hint"></span>
         <button type="button" class="help-tip-btn" id="startBackupHelpBtn" aria-label="Hjälp om säkerhetskopiering" aria-expanded="false" aria-controls="startBackupHelpPop">?</button>
         <span id="startBackupHelpPop" class="help-tip-pop" role="tooltip" hidden>Hantera säkerhetskopiering i REGISTERVÅRD</span>
@@ -4870,7 +4875,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v22';
+const APP_VERSION = '2026-09-25 v23';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5290,7 +5295,7 @@ function updateBookFileSyncStatusUi(){
   }
   if(hasBookFileSyncPending(bookId)){
     hint.hidden = false;
-    hint.textContent = 'Ej sparad till bokmapp/Drive';
+    hint.textContent = 'Ej sparad till bokmapp/Drive — tryck här';
     return;
   }
   hint.hidden = true;
@@ -5418,6 +5423,35 @@ async function writeBookPreferGranted(id, bookData){
     if(!looksLikeBookPermissionError(err)) throw err;
     markBookFileSyncPending(id);
     updateBookFileSyncStatusUi();
+  }
+}
+
+// Användargest: skriv spegeln till bokfilen (behövs ofta på Android).
+async function flushBookFileToFolderInteractive(){
+  if(!bookId || !isFileBook(bookId)){
+    return { ok: false, message: 'Ingen bokfil att synka.' };
+  }
+  if(!book || !Array.isArray(book.order)){
+    return { ok: false, message: 'Ingen bokdata att synka.' };
+  }
+  try{
+    const handle = await getBookFileHandle(bookId, true, 'readwrite');
+    await writeBookFile(handle, bookWorkingCopy(), bookName(bookId));
+    writeBook(bookId, book);
+    clearBookFileSyncPending(bookId);
+    bookKnownSavedAt = Date.now();
+    bookSessionDirty = false;
+    updateBookFileSyncStatusUi();
+    return { ok: true };
+  } catch(err){
+    markBookFileSyncPending(bookId);
+    updateBookFileSyncStatusUi();
+    return {
+      ok: false,
+      message: (err && err.message)
+        ? err.message
+        : 'Kunde inte spara till bokmappen. Tillåt skrivning när webbläsaren frågar.'
+    };
   }
 }
 
@@ -9168,6 +9202,33 @@ if(startBackupHelpBtn){
     setStartBackupHelpOpen(startBackupHelpPop.hidden);
   });
   document.addEventListener('click', () => setStartBackupHelpOpen(false));
+}
+
+const startFileSyncHint = el('startFileSyncHint');
+if(startFileSyncHint){
+  const runFlush = async () => {
+    if(startFileSyncHint.hidden) return;
+    startFileSyncHint.style.opacity = '0.6';
+    const res = await flushBookFileToFolderInteractive();
+    startFileSyncHint.style.opacity = '';
+    if(res.ok){
+      clear(startMessages);
+      addBox(startMessages, 'report', 'Sparad till bokmapp/Drive.');
+    } else {
+      clear(startMessages);
+      addBox(startMessages, 'notice', res.message || 'Kunde inte spara till Drive.');
+    }
+  };
+  startFileSyncHint.addEventListener('click', e => {
+    e.stopPropagation();
+    runFlush();
+  });
+  startFileSyncHint.addEventListener('keydown', e => {
+    if(e.key === 'Enter' || e.key === ' '){
+      e.preventDefault();
+      runFlush();
+    }
+  });
 }
 
 function paintStartBackupHint(at, backupPosts){
