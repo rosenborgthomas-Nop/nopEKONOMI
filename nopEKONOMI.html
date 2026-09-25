@@ -784,12 +784,11 @@ body.trend-view-active{
   accent-color:var(--teal);
   cursor:pointer;
 }
-#viewTrend .care-list-table tr.trend-off td.cl-name{
-  opacity:0.55;
-  text-decoration:line-through;
+#viewTrend .care-list-table tr.trend-picked td.cl-name{
+  font-weight:700;
 }
-#viewTrend .care-list-table tr.trend-off td.cl-count{
-  opacity:0.55;
+#viewTrend .care-list-table tr.trend-picked td.cl-count{
+  font-weight:700;
 }
 .report-table-title-row{
   display:flex;
@@ -4707,7 +4706,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v01';
+const APP_VERSION = '2026-09-25 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11968,12 +11967,15 @@ function isTrendDetailType(val){
   return TREND_DETAIL_TYPES.has(val);
 }
 
-/** Aktiv detalj-drill: { kind, name } eller null (visa listan). */
+/** Aktiv detalj-drill: { kind, name } | { kind, names } (jämförelse) | null. */
 let trendDetailDrill = null;
 
-/** Max antal rader i Payee/Kategori/Underkategori-listan. */
-const TREND_DETAIL_TOP_N = 5;
+/** Max antal ibockade för gemensamt diagram. */
+const TREND_DETAIL_PICK_MAX = 5;
 const TREND_DETAIL_PICK_KEY = 'msmoney_trend_detail_pick__' + STORAGE_SCOPE;
+const TREND_DETAIL_COMPARE_COLORS = [
+  '#2B579A', '#3A8F5C', '#A33B3B', '#C47A2C', '#6B4C9A'
+];
 
 function trendDetailFilter(kind, name){
   const n = String(name || '').trim();
@@ -12018,37 +12020,64 @@ function trendDetailPickMap(kind){
   return kindMap;
 }
 
-function setTrendDetailPick(kind, name, on){
-  if(!bookId || !isTrendDetailType(kind) || !name) return;
+function writeTrendDetailPickMap(kind, map){
+  if(!bookId || !isTrendDetailType(kind)) return;
   const store = loadTrendDetailPickStore();
   if(!store[bookId] || typeof store[bookId] !== 'object') store[bookId] = {};
-  if(!store[bookId][kind] || typeof store[bookId][kind] !== 'object') store[bookId][kind] = {};
-  store[bookId][kind][name] = !!on;
+  store[bookId][kind] = map && typeof map === 'object' ? map : {};
   saveTrendDetailPickStore(store);
 }
 
 function isTrendDetailPicked(kind, name){
   const map = trendDetailPickMap(kind);
-  if(Object.prototype.hasOwnProperty.call(map, name)) return !!map[name];
-  return true; // nya i topp-5 är ibockade tills användaren säger annat
+  return !!map[name];
 }
 
-function setAllTrendDetailPicks(kind, names, on){
-  if(!bookId || !isTrendDetailType(kind)) return;
-  const store = loadTrendDetailPickStore();
-  if(!store[bookId] || typeof store[bookId] !== 'object') store[bookId] = {};
+function listTrendDetailPickedNames(kind){
+  const map = trendDetailPickMap(kind);
+  return Object.keys(map).filter(k => map[k])
+    .sort((a, b) => a.localeCompare(b, 'sv'));
+}
+
+function countTrendDetailPicked(kind){
+  return listTrendDetailPickedNames(kind).length;
+}
+
+function setTrendDetailPick(kind, name, on){
+  if(!bookId || !isTrendDetailType(kind) || !name) return { ok: true };
+  const map = Object.assign({}, trendDetailPickMap(kind));
+  if(on){
+    if(!map[name] && countTrendDetailPicked(kind) >= TREND_DETAIL_PICK_MAX){
+      return {
+        ok: false,
+        message: 'Högst ' + TREND_DETAIL_PICK_MAX
+          + ' kan bockas för gemensamt diagram.'
+      };
+    }
+    map[name] = true;
+  } else {
+    delete map[name];
+  }
+  writeTrendDetailPickMap(kind, map);
+  return { ok: true };
+}
+
+/** Bocka de N med högst |netto|; övriga avbockas. */
+function pickTrendDetailTopByAbs(kind, rankedItems, n){
+  n = n || TREND_DETAIL_PICK_MAX;
   const next = {};
-  for(const name of names || []) next[name] = !!on;
-  store[bookId][kind] = next;
-  saveTrendDetailPickStore(store);
+  const top = (rankedItems || []).slice(0, n);
+  for(const it of top){
+    if(it && it.name) next[it.name] = true;
+  }
+  writeTrendDetailPickMap(kind, next);
 }
 
 /**
- * Topp-N namn för detaljlista, rankade på |netto| i historikintervallet
- * (samma filter som prognos: bocklista/alla, ej överföringar).
+ * Netto/antal per namn i historikintervallet (bocklista/alla).
+ * Returnerar alla med aktivitet, sorterade på |netto| fallande.
  */
-function collectTrendDetailTopItems(kind, fromIso, toIso, limit){
-  limit = limit || TREND_DETAIL_TOP_N;
+function collectTrendDetailRankedItems(kind, fromIso, toIso){
   const totals = Object.create(null);
   const counts = Object.create(null);
   if(!book || !book.order) return [];
@@ -12116,16 +12145,258 @@ function collectTrendDetailTopItems(kind, fromIso, toIso, limit){
       if(b.abs !== a.abs) return b.abs - a.abs;
       if(b.count !== a.count) return b.count - a.count;
       return a.name.localeCompare(b.name, 'sv');
-    })
-    .slice(0, limit);
+    });
 }
 
-/** Typ → Detalj: topp-5 med bockrutor (+ Bocka alla). */
+/** Alla namn i registret + netto i perioden (0 om ingen aktivitet). */
+function collectTrendDetailListItems(kind, fromIso, toIso){
+  const ranked = collectTrendDetailRankedItems(kind, fromIso, toIso);
+  const byName = Object.create(null);
+  for(const it of ranked) byName[it.name] = it;
+
+  let names = [];
+  if(kind === 'payee'){
+    names = (bookLookup && bookLookup.payees ? bookLookup.payees : []).slice();
+  } else if(kind === 'kategori'){
+    names = (bookLookup && bookLookup.categories ? bookLookup.categories : [])
+      .filter(c => c && !isTransferCategory(c));
+  } else if(kind === 'underkategori'){
+    names = (bookLookup && bookLookup.subCategories ? bookLookup.subCategories : []).slice();
+  }
+  names.sort((a, b) => a.localeCompare(b, 'sv'));
+
+  const items = names.map(name => byName[name] || {
+    name: name,
+    net: 0,
+    count: 0,
+    abs: 0
+  });
+  return { items: items, ranked: ranked };
+}
+
+/** Flera netto-serier i samma diagram (ibockade detaljer). */
+function buildTrendDetailCompareChart(seriesList){
+  const list = (seriesList || []).filter(s => s && s.months && s.months.length);
+  if(!list.length){
+    return '<div class="trend-line-chart-wrap">'
+      + '<p class="payee-chart-empty">Inget att visa.</p></div>';
+  }
+  const months = list[0].months;
+  const histN = months.length;
+  const horizon = list[0].forecast ? list[0].forecast.length : 0;
+  const allMonths = months.concat(
+    (list[0].forecast || []).map(p => p.month)
+  );
+  const total = allMonths.length;
+  if(total < 2){
+    return '<div class="trend-line-chart-wrap">'
+      + '<p class="payee-chart-empty">För få månader för diagram.</p></div>';
+  }
+
+  let ymin = Infinity;
+  let ymax = -Infinity;
+  const bump = v => {
+    if(!Number.isFinite(v)) return;
+    if(v < ymin) ymin = v;
+    if(v > ymax) ymax = v;
+  };
+  for(const s of list){
+    for(const v of s.histNet) bump(v);
+    for(const v of s.forecastNet) bump(v);
+  }
+  if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){ ymin = 0; ymax = 1; }
+  if(ymax <= ymin) ymax = ymin + 1;
+  const padY = (ymax - ymin) * 0.08 || 1;
+  ymin -= padY;
+  ymax += padY;
+
+  const W = 560;
+  const H = 240;
+  const yPad = trendChartYAxisPad(ymin, ymax);
+  const padL = yPad.padL;
+  const padR = 12;
+  const padT = 14;
+  const padB = 28;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const xAt = i => padL + (total === 1 ? plotW / 2 : (i / (total - 1)) * plotW);
+  const yAt = v => padT + plotH - ((v - ymin) / (ymax - ymin)) * plotH;
+  const grid = '#A8BDD4';
+  const axis = '#5A6F88';
+
+  let svg = '';
+  for(let g = 0; g <= 3; g++){
+    const gy = padT + (plotH * g) / 3;
+    svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '"'
+      + ' stroke="' + grid + '" stroke-width="0.6" opacity="0.55"/>';
+  }
+  if(ymin < 0 && ymax > 0){
+    const zy = yAt(0);
+    svg += '<line x1="' + padL + '" y1="' + zy + '" x2="' + (W - padR) + '" y2="' + zy + '"'
+      + ' stroke="' + axis + '" stroke-width="1" opacity="0.45"/>';
+  }
+  if(horizon && histN > 0){
+    const bx = (xAt(histN - 1) + xAt(histN)) / 2;
+    svg += '<line x1="' + bx + '" y1="' + padT + '" x2="' + bx + '" y2="' + (padT + plotH) + '"'
+      + ' stroke="' + axis + '" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>';
+  }
+
+  for(const s of list){
+    const color = s.color || TREND_DETAIL_COMPARE_COLORS[0];
+    if(s.forecastNet.length && histN > 0){
+      const fLine = [s.histNet[histN - 1]].concat(s.forecastNet);
+      const fPts = fLine.map((v, k) =>
+        xAt(histN - 1 + k).toFixed(1) + ',' + yAt(v).toFixed(1)
+      ).join(' ');
+      svg += '<polyline fill="none" stroke="' + color + '" stroke-width="2"'
+        + ' stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"'
+        + ' points="' + fPts + '"/>';
+    }
+    const hPts = s.histNet.map((v, i) =>
+      xAt(i).toFixed(1) + ',' + yAt(v).toFixed(1)
+    ).join(' ');
+    svg += '<polyline fill="none" stroke="' + color + '" stroke-width="2.2"'
+      + ' stroke-linejoin="round" stroke-linecap="round" points="' + hPts + '"/>';
+    for(let i = 0; i < histN; i++){
+      svg += '<circle cx="' + xAt(i).toFixed(1) + '" cy="' + yAt(s.histNet[i]).toFixed(1)
+        + '" r="2.5" fill="' + color + '">'
+        + '<title>' + escapeHtml(s.label + ' ' + monthKeyYyMm(months[i]) + ' '
+          + formatAmount(Math.round(s.histNet[i]))) + '</title></circle>';
+    }
+  }
+
+  for(let g = 0; g <= 3; g++){
+    const val = ymax - ((ymax - ymin) * g) / 3;
+    const gy = padT + (plotH * g) / 3;
+    svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
+  }
+  const labelIdx = [];
+  if(total > 0) labelIdx.push(0);
+  if(histN > 1) labelIdx.push(histN - 1);
+  if(total - 1 > 0 && total - 1 !== histN - 1) labelIdx.push(total - 1);
+  for(const i of labelIdx){
+    svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
+  }
+
+  let legend = '<p class="trend-line-chart-legend">';
+  for(const s of list){
+    legend += '<span class="trend-legend-series" style="color:' + s.color + '">'
+      + '<i class="trend-line-chart-swatch" aria-hidden="true"'
+      + ' style="color:' + s.color + ';border-top-color:' + s.color + '"></i>'
+      + '<span class="trend-legend-label">' + escapeHtml(s.label) + '</span></span>';
+  }
+  legend += '</p>';
+
+  return '<div class="trend-line-chart-wrap">'
+    + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
+    + ' data-pad-l="' + padL + '" data-y-chars="' + yPad.yChars + '"'
+    + ' aria-label="Jämförelse av valda trender">'
+    + svg + '</svg>' + legend + '</div>';
+}
+
+function renderTrendDetailCompare(kind, names){
+  const picked = (names || []).map(n => String(n || '').trim()).filter(Boolean)
+    .slice(0, TREND_DETAIL_PICK_MAX);
+  if(!isTrendDetailType(kind) || !picked.length){
+    trendDetailDrill = null;
+    renderTrendDetailList(kind);
+    return;
+  }
+  trendDetailDrill = { kind: kind, names: picked };
+
+  const historyVal = trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
+    ? trendHistoryMenu.value
+    : '12';
+  const range = trendHistoryDateRange(historyVal);
+  const horizon = Number(trendHorizonMenu && trendHorizonMenu.value) || 12;
+  const listLabel = trendDetailListLabel(kind);
+  const backBtnId = 'trendDetailBackBtn';
+
+  const seriesList = [];
+  for(let i = 0; i < picked.length; i++){
+    const name = picked[i];
+    const raw = buildTrendForecast(range.from, range.to, horizon, trendDetailFilter(kind, name));
+    if(!raw.ok || !raw.months || raw.months.length < 2) continue;
+    const classif = classifyPayeeTrendSign(raw.netSeries);
+    let histNet = raw.netSeries.slice();
+    let forecastNet = (raw.forecast || []).map(p =>
+      p.netFit != null ? p.netFit : p.net
+    );
+    if(classif.isExpense){
+      const clampRaw = v => (classif.clampAtZero ? Math.min(0, v) : v);
+      histNet = histNet.map(v => -v);
+      forecastNet = forecastNet.map(v => -clampRaw(v));
+    }
+    seriesList.push({
+      label: name,
+      color: TREND_DETAIL_COMPARE_COLORS[i % TREND_DETAIL_COMPARE_COLORS.length],
+      months: raw.months,
+      histNet: histNet,
+      forecast: raw.forecast,
+      forecastNet: forecastNet
+    });
+  }
+
+  clearTrendCanvas();
+  if(trendPlaceholder) trendPlaceholder.hidden = true;
+  if(trendBody) trendBody.classList.add('has-report');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'report-table-wrap';
+  const updatedHtml = '<p class="report-table-updated">'
+    + escapeHtml(reportUpdatedLineHtml()) + '</p>';
+  let head = '<div class="report-table-head">'
+    + '<div class="report-table-title-row">'
+    + '<p class="report-table-title">JÄMFÖRELSE</p>'
+    + updatedHtml + '</div></div>';
+
+  const goBack = () => {
+    trendDetailDrill = null;
+    renderTrendDetailList(kind);
+    syncTrendNavChrome();
+  };
+
+  if(!seriesList.length){
+    wrap.innerHTML = head
+      + '<p class="report-empty-note">Kunde inte beräkna trend för valet.</p>'
+      + '<p class="report-empty-note"><button type="button" class="btn-quiet" id="'
+      + backBtnId + '">← ' + escapeHtml(listLabel) + '</button></p>';
+    trendBody.appendChild(wrap);
+    const back = wrap.querySelector('#' + backBtnId);
+    if(back) back.addEventListener('click', goBack);
+    resetTrendScroll();
+    syncTrendNavChrome();
+    return;
+  }
+
+  wrap.innerHTML = head
+    + '<div class="trend-body-scroll">'
+    + '<div class="trend-payee-toolbar">'
+    + '<button type="button" class="btn-quiet" id="' + backBtnId + '">'
+    + '← ' + escapeHtml(listLabel) + '</button>'
+    + '<p class="trend-payee-sign">' + escapeHtml(picked.length + ' valda') + '</p>'
+    + '</div>'
+    + buildTrendDetailCompareChart(seriesList)
+    + '</div>';
+  trendBody.appendChild(wrap);
+  sizeTrendChartText(wrap);
+  resetTrendScroll();
+  syncTrendNavChrome();
+  const back = wrap.querySelector('#' + backBtnId);
+  if(back) back.addEventListener('click', goBack);
+}
+
+/** Typ → Detalj: hela listan med bockrutor (max 5 för diagram). */
 function renderTrendDetailList(kind){
   trendDetailDrill = null;
   clearTrendCanvas();
   if(trendPlaceholder) trendPlaceholder.hidden = true;
   if(trendBody) trendBody.classList.add('has-report');
+  if(trendMessages) clear(trendMessages);
 
   const titles = {
     payee: 'PAYEE',
@@ -12147,7 +12418,9 @@ function renderTrendDetailList(kind){
     ? trendHistoryMenu.value
     : '12';
   const range = trendHistoryDateRange(historyVal);
-  const items = collectTrendDetailTopItems(kind, range.from, range.to, TREND_DETAIL_TOP_N);
+  const collected = collectTrendDetailListItems(kind, range.from, range.to);
+  const items = collected.items;
+  const ranked = collected.ranked;
 
   const wrap = document.createElement('div');
   wrap.className = 'report-table-wrap';
@@ -12162,68 +12435,94 @@ function renderTrendDetailList(kind){
   if(!items.length){
     wrap.innerHTML = head
       + '<p class="report-empty-note">Inga ' + escapeHtml(emptyLabels[kind] || 'poster')
-      + ' i vald historik.</p>';
+      + ' ännu.</p>';
     trendBody.appendChild(wrap);
     resetTrendScroll();
     syncTrendNavChrome();
     return;
   }
 
-  // Rensa bort sparade namn som inte längre är i topp-N (men behåll avbockade bland nuvarande).
+  // Behåll bara pick-namn som fortfarande finns i listan.
   const pickMap = trendDetailPickMap(kind);
   const nameSet = new Set(items.map(it => it.name));
   let pickChanged = false;
   for(const key of Object.keys(pickMap)){
-    if(!nameSet.has(key)){
+    if(!nameSet.has(key) || !pickMap[key]){
       delete pickMap[key];
       pickChanged = true;
     }
   }
-  if(pickChanged){
-    const store = loadTrendDetailPickStore();
-    if(!store[bookId] || typeof store[bookId] !== 'object') store[bookId] = {};
-    store[bookId][kind] = pickMap;
-    saveTrendDetailPickStore(store);
+  // Trimma om fler än max sparats.
+  const pickedNow = Object.keys(pickMap);
+  if(pickedNow.length > TREND_DETAIL_PICK_MAX){
+    pickedNow.sort((a, b) => a.localeCompare(b, 'sv'));
+    for(let i = TREND_DETAIL_PICK_MAX; i < pickedNow.length; i++){
+      delete pickMap[pickedNow[i]];
+    }
+    pickChanged = true;
   }
+  if(pickChanged) writeTrendDetailPickMap(kind, pickMap);
 
   let rows = '';
   for(const it of items){
     const on = isTrendDetailPicked(kind, it.name);
     rows += '<tr data-trend-drill-kind="' + escapeAttr(kind) + '"'
       + ' data-trend-drill-name="' + escapeAttr(it.name) + '"'
-      + (on ? '' : ' class="trend-off"')
-      + ' title="Dubbelklicka för historik och prognos">'
+      + (on ? ' class="trend-picked"' : '')
+      + ' title="Dubbelklicka för egen prognos">'
       + '<td class="cl-name">' + escapeHtml(it.name) + '</td>'
       + '<td class="cl-count num">' + escapeHtml(formatReportInt(Math.round(it.net))) + '</td>'
       + '<td class="cl-trend"><input type="checkbox" data-trend-detail-pick="'
       + escapeAttr(it.name) + '"'
       + (on ? ' checked' : '')
-      + ' aria-label="Inkludera ' + escapeAttr(it.name) + '"></td>'
+      + ' aria-label="Välj ' + escapeAttr(it.name) + ' till diagram"></td>'
       + '</tr>';
   }
 
-  const checkAllId = 'trendDetailCheckAllBtn';
+  const pickCount = countTrendDetailPicked(kind);
+  const topBtnId = 'trendDetailPickTopBtn';
+  const chartBtnId = 'trendDetailChartBtn';
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
     + '<div class="trend-detail-toolbar">'
-    + '<button type="button" class="btn-quiet" id="' + checkAllId + '">Bocka alla</button>'
+    + '<button type="button" class="btn-quiet" id="' + topBtnId + '">Bocka topp '
+    + TREND_DETAIL_PICK_MAX + '</button>'
+    + '<button type="button" class="btn-ok" id="' + chartBtnId + '"'
+    + (pickCount ? '' : ' disabled')
+    + '>Visa diagram</button>'
     + '<p class="report-empty-note trend-detail-note">'
-    + 'Topp ' + TREND_DETAIL_TOP_N + ' efter |netto| i vald historik. '
-    + 'Dubbelklicka på en rad för historik och prognos.</p>'
+    + 'Bocka högst ' + TREND_DETAIL_PICK_MAX
+    + ' för gemensamt diagram (' + pickCount + ' valda). '
+    + 'Dubbelklicka för egen prognos.</p>'
     + '</div>'
     + '<table class="care-list-table report-table"><thead><tr>'
     + '<th>' + escapeHtml(colLabels[kind] || 'Namn') + '</th>'
     + '<th class="cl-count num">Netto</th>'
-    + '<th class="cl-trend" title="Inkludera">✓</th>'
+    + '<th class="cl-trend" title="Välj till diagram">✓</th>'
     + '</tr></thead><tbody>' + rows + '</tbody></table>'
     + '</div>';
   trendBody.appendChild(wrap);
 
-  const checkAllBtn = wrap.querySelector('#' + checkAllId);
-  if(checkAllBtn){
-    checkAllBtn.addEventListener('click', () => {
-      setAllTrendDetailPicks(kind, items.map(it => it.name), true);
+  const topBtn = wrap.querySelector('#' + topBtnId);
+  if(topBtn){
+    topBtn.addEventListener('click', () => {
+      pickTrendDetailTopByAbs(kind, ranked, TREND_DETAIL_PICK_MAX);
       renderTrendDetailList(kind);
+    });
+  }
+  const chartBtn = wrap.querySelector('#' + chartBtnId);
+  if(chartBtn){
+    chartBtn.addEventListener('click', () => {
+      const names = listTrendDetailPickedNames(kind);
+      if(!names.length){
+        if(trendMessages){
+          clear(trendMessages);
+          addBox(trendMessages, 'notice',
+            'Bocka minst en rad (högst ' + TREND_DETAIL_PICK_MAX + ').');
+        }
+        return;
+      }
+      renderTrendDetailCompare(kind, names);
     });
   }
 
@@ -12236,9 +12535,26 @@ function renderTrendDetailList(kind){
     });
     box.addEventListener('change', () => {
       const name = box.getAttribute('data-trend-detail-pick') || '';
-      setTrendDetailPick(kind, name, box.checked);
+      const res = setTrendDetailPick(kind, name, box.checked);
+      if(!res.ok){
+        box.checked = false;
+        if(trendMessages){
+          clear(trendMessages);
+          addBox(trendMessages, 'notice', res.message || 'För många valda.');
+        }
+        return;
+      }
+      if(trendMessages) clear(trendMessages);
       const tr = box.closest('tr');
-      if(tr) tr.classList.toggle('trend-off', !box.checked);
+      if(tr) tr.classList.toggle('trend-picked', !!box.checked);
+      const n = countTrendDetailPicked(kind);
+      if(chartBtn) chartBtn.disabled = n === 0;
+      const note = wrap.querySelector('.trend-detail-note');
+      if(note){
+        note.textContent = 'Bocka högst ' + TREND_DETAIL_PICK_MAX
+          + ' för gemensamt diagram (' + n + ' valda). '
+          + 'Dubbelklicka för egen prognos.';
+      }
     });
   }
 
@@ -13523,7 +13839,11 @@ function renderTrendPage(){
   } else if(type === 'prognosInUt'){
     renderTrendPrognosInUt();
   } else if(isTrendDetailType(type) && trendDetailDrill){
-    renderTrendDetailPrognos(trendDetailDrill.kind, trendDetailDrill.name);
+    if(trendDetailDrill.names && trendDetailDrill.names.length){
+      renderTrendDetailCompare(trendDetailDrill.kind, trendDetailDrill.names);
+    } else {
+      renderTrendDetailPrognos(trendDetailDrill.kind, trendDetailDrill.name);
+    }
   } else if(isTrendDetailType(type)){
     renderTrendDetailList(type);
   } else {
@@ -13552,7 +13872,11 @@ function refreshTrendPagePreview(){
   if(type === 'nettoOverTid') renderTrendNettoOverTid();
   else if(type === 'prognosInUt') renderTrendPrognosInUt();
   else if(isTrendDetailType(type) && trendDetailDrill){
-    renderTrendDetailPrognos(trendDetailDrill.kind, trendDetailDrill.name);
+    if(trendDetailDrill.names && trendDetailDrill.names.length){
+      renderTrendDetailCompare(trendDetailDrill.kind, trendDetailDrill.names);
+    } else {
+      renderTrendDetailPrognos(trendDetailDrill.kind, trendDetailDrill.name);
+    }
   }
   else if(isTrendDetailType(type)) renderTrendDetailList(type);
   syncTrendNavChrome();
