@@ -4859,7 +4859,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v14';
+const APP_VERSION = '2026-09-25 v15';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7339,25 +7339,17 @@ function ensureStartPeriodAmtBar(wrap, id, extraClass){
 }
 
 /**
- * Undre halv: spök-saldo mot budget (samma stapellogik som övre, men prognos).
+ * Undre halv: spök-saldo (siffra alltid i delad vy).
+ * Stapel mot budget bara när budget finns.
  * @param {number|null} budget
- * @param {number} remaining  återstår från övre halv­an
+ * @param {number} remaining  återstår från övre halv­an (0 om ingen budget)
  */
 function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
   if(!wrap) return;
   const bar = lowerBar || ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBarLower', 'budget-amt-bar-lower');
   const ghostEl = el('startPeriodValueGhost');
-  if(!(budget > 0)){
-    wrap.removeAttribute('data-budget-lower-over');
-    if(bar) bar.style.width = '0';
-    if(ghostEl){
-      ghostEl.hidden = true;
-      ghostEl.textContent = '';
-      ghostEl.classList.remove('pos', 'neg');
-    }
-    return;
-  }
-  const ghostInfo = computeStartTeaserGhostSaldo(remaining, todayIsoDate());
+  const rem = typeof remaining === 'number' && Number.isFinite(remaining) ? remaining : 0;
+  const ghostInfo = computeStartTeaserGhostSaldo(rem, todayIsoDate());
   if(!ghostInfo){
     wrap.removeAttribute('data-budget-lower-over');
     if(bar) bar.style.width = '0';
@@ -7368,15 +7360,7 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
     }
     return;
   }
-  const ghost = ghostInfo.ghost;
-  const ghostRound = Math.round(ghost);
-  // Tolka spök-saldo som prognostiserat "återstår" → prognostiserat förbrukat.
-  const ghostActual = Math.max(0, budget - ghost);
-  const pct = budgetBarWidthPct(false, ghostActual, budget);
-  const isRed = budgetBarIsRed(false, ghostActual, budget);
-  wrap.setAttribute('data-budget-lower-over', isRed ? '1' : '0');
-  if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
-
+  const ghostRound = Number.isFinite(ghostInfo.ghost) ? Math.round(ghostInfo.ghost) : 0;
   if(ghostEl){
     ghostEl.hidden = false;
     ghostEl.classList.remove('pos', 'neg');
@@ -7387,13 +7371,13 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
   const tipExtra = ghostInfo.usePosted
     ? ('\nSpök-saldo ' + formatBudgetAmtEdit(ghostRound)
       + ' (återstår '
-      + formatBudgetAmtEdit(Math.round(remaining))
+      + formatBudgetAmtEdit(Math.round(rem))
       + ' + förhandspostat '
       + formatBudgetAmtEdit(Math.round(ghostInfo.futureNet))
       + ', ' + ghostInfo.futureCount + ' st)')
     : ('\nSpök-saldo ' + formatBudgetAmtEdit(ghostRound)
       + ' (återstår '
-      + formatBudgetAmtEdit(Math.round(remaining))
+      + formatBudgetAmtEdit(Math.round(rem))
       + ' + medel rest-månad '
       + formatBudgetAmtEdit(Math.round(ghostInfo.mean))
       + ', ' + ghostInfo.n + ' mån)');
@@ -7401,6 +7385,18 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
   if(base.indexOf('Spök-saldo') < 0){
     wrap.title = base + tipExtra;
   }
+
+  if(!(budget > 0)){
+    wrap.removeAttribute('data-budget-lower-over');
+    if(bar) bar.style.width = '0';
+    return;
+  }
+  // Tolka spök-saldo som prognostiserat "återstår" → prognostiserat förbrukat.
+  const ghostActual = Math.max(0, budget - ghostInfo.ghost);
+  const pct = budgetBarWidthPct(false, ghostActual, budget);
+  const isRed = budgetBarIsRed(false, ghostActual, budget);
+  wrap.setAttribute('data-budget-lower-over', isRed ? '1' : '0');
+  if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
 }
 
 function clearStartTeaserLowerBar(wrap, lowerBar){
