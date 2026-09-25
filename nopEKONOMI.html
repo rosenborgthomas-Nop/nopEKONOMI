@@ -3888,10 +3888,16 @@ td.num.dash .cell-content{
 
       <div>
         <div id="accountsEmptyBlock" hidden>
+          <h2>Tom bok</h2>
+          <p class="sub">Inga konton ännu. Börja manuellt eller importera — import är frivilligt.</p>
           <div class="import-choice-row">
             <div class="import-choice">
-              <p class="sub">MSMoney / Bank</p>
-              <button class="btn" id="toImportBtn" type="button">Import</button>
+              <p class="sub">Manuellt</p>
+              <button class="btn" id="toNewAccountBtn" type="button">Skapa konto…</button>
+            </div>
+            <div class="import-choice">
+              <p class="sub">MS Money / Bank (valfritt)</p>
+              <button class="btn" id="toImportBtn" type="button">Import…</button>
             </div>
           </div>
         </div>
@@ -4772,8 +4778,9 @@ td.num.dash .cell-content{
     <header id="importIntro">
       <h1>Import</h1>
       <p class="lede">
-        Bara tillåten i en tom bok. Importera alla konton du behöver i den här
+        Valfritt — bara tillåten i en tom bok. Importera alla konton du behöver i den här
         sessionen — en i taget eller flera filer direkt — innan du trycker Klar.
+        Du kan också hoppa över import och skapa konton manuellt under Registervård.
       </p>
     </header>
 
@@ -4874,7 +4881,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v24';
+const APP_VERSION = '2026-09-25 v25';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9290,6 +9297,8 @@ function renderStart(){
     accountsEmptyBlock.hidden = false;
     accountsList.hidden = true;
     if(toImportBtn) toImportBtn.hidden = !bookIsImportEmpty();
+    const toNewAccountBtn = el('toNewAccountBtn');
+    if(toNewAccountBtn) toNewAccountBtn.hidden = false;
     paintStartPeriodBar();
     return;
   }
@@ -21666,6 +21675,13 @@ el('toImportBtn').addEventListener('click', async () => {
   importSessionActive = true;
   show('import');
 });
+
+const toNewAccountBtn = el('toNewAccountBtn');
+if(toNewAccountBtn){
+  toNewAccountBtn.addEventListener('click', () => {
+    showCareHubSection('konto');
+  });
+}
 
 
 /* --- 9. Import ------------------------------------------------------- */
