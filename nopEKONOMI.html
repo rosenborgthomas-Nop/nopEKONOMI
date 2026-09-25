@@ -4706,7 +4706,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v02';
+const APP_VERSION = '2026-09-25 v03';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -12062,17 +12062,6 @@ function setTrendDetailPick(kind, name, on){
   return { ok: true };
 }
 
-/** Bocka de N med högst |netto|; övriga avbockas. */
-function pickTrendDetailTopByAbs(kind, rankedItems, n){
-  n = n || TREND_DETAIL_PICK_MAX;
-  const next = {};
-  const top = (rankedItems || []).slice(0, n);
-  for(const it of top){
-    if(it && it.name) next[it.name] = true;
-  }
-  writeTrendDetailPickMap(kind, next);
-}
-
 /**
  * Netto/antal per namn i historikintervallet (bocklista/alla).
  * Returnerar alla med aktivitet, sorterade på |netto| fallande.
@@ -12420,7 +12409,6 @@ function renderTrendDetailList(kind){
   const range = trendHistoryDateRange(historyVal);
   const collected = collectTrendDetailListItems(kind, range.from, range.to);
   const items = collected.items;
-  const ranked = collected.ranked;
 
   const wrap = document.createElement('div');
   wrap.className = 'report-table-wrap';
@@ -12480,13 +12468,21 @@ function renderTrendDetailList(kind){
   }
 
   const pickCount = countTrendDetailPicked(kind);
-  const topBtnId = 'trendDetailPickTopBtn';
+  const clearPickId = 'trendDetailClearPick';
   const chartBtnId = 'trendDetailChartBtn';
+  const syncPickChrome = () => {
+    const n = countTrendDetailPicked(kind);
+    if(chartBtn) chartBtn.disabled = n === 0;
+    const note = wrap.querySelector('.trend-detail-note');
+    if(note){
+      note.textContent = 'Bocka högst ' + TREND_DETAIL_PICK_MAX
+        + ' för gemensamt diagram (' + n + ' valda). '
+        + 'Dubbelklicka för egen prognos.';
+    }
+  };
   wrap.innerHTML = head
     + '<div class="trend-body-scroll">'
     + '<div class="trend-detail-toolbar">'
-    + '<button type="button" class="btn-quiet" id="' + topBtnId + '">Bocka topp '
-    + TREND_DETAIL_PICK_MAX + '</button>'
     + '<button type="button" class="btn-ok" id="' + chartBtnId + '"'
     + (pickCount ? '' : ' disabled')
     + '>Visa diagram</button>'
@@ -12498,18 +12494,14 @@ function renderTrendDetailList(kind){
     + '<table class="care-list-table report-table"><thead><tr>'
     + '<th>' + escapeHtml(colLabels[kind] || 'Namn') + '</th>'
     + '<th class="cl-count num">Netto</th>'
-    + '<th class="cl-trend" title="Välj till diagram">✓</th>'
+    + '<th class="cl-trend" title="Nollställ val">'
+    + '<input type="checkbox" id="' + clearPickId + '"'
+    + ' aria-label="Nollställ val" title="Nollställ val">'
+    + '</th>'
     + '</tr></thead><tbody>' + rows + '</tbody></table>'
     + '</div>';
   trendBody.appendChild(wrap);
 
-  const topBtn = wrap.querySelector('#' + topBtnId);
-  if(topBtn){
-    topBtn.addEventListener('click', () => {
-      pickTrendDetailTopByAbs(kind, ranked, TREND_DETAIL_PICK_MAX);
-      renderTrendDetailList(kind);
-    });
-  }
   const chartBtn = wrap.querySelector('#' + chartBtnId);
   if(chartBtn){
     chartBtn.addEventListener('click', () => {
@@ -12527,6 +12519,26 @@ function renderTrendDetailList(kind){
   }
 
   const boxes = wrap.querySelectorAll('input[data-trend-detail-pick]');
+  const clearPick = wrap.querySelector('#' + clearPickId);
+  if(clearPick){
+    clearPick.checked = false;
+    clearPick.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      clearPick.checked = false;
+      writeTrendDetailPickMap(kind, {});
+      for(const box of boxes){
+        box.checked = false;
+        const tr = box.closest('tr');
+        if(tr) tr.classList.remove('trend-picked');
+      }
+      if(trendMessages) clear(trendMessages);
+      syncPickChrome();
+    });
+    clearPick.addEventListener('change', () => {
+      clearPick.checked = false;
+    });
+  }
   for(const box of boxes){
     box.addEventListener('click', e => e.stopPropagation());
     box.addEventListener('dblclick', e => {
@@ -12547,14 +12559,7 @@ function renderTrendDetailList(kind){
       if(trendMessages) clear(trendMessages);
       const tr = box.closest('tr');
       if(tr) tr.classList.toggle('trend-picked', !!box.checked);
-      const n = countTrendDetailPicked(kind);
-      if(chartBtn) chartBtn.disabled = n === 0;
-      const note = wrap.querySelector('.trend-detail-note');
-      if(note){
-        note.textContent = 'Bocka högst ' + TREND_DETAIL_PICK_MAX
-          + ' för gemensamt diagram (' + n + ' valda). '
-          + 'Dubbelklicka för egen prognos.';
-      }
+      syncPickChrome();
     });
   }
 
