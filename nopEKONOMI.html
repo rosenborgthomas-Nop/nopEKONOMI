@@ -313,7 +313,11 @@ h1{
   box-shadow:none;
   color:var(--ink, #1a3050);
   font-size:14px;
+  font-weight:400;
   padding:8px 2.4em 8px 10px;
+}
+.start-period-wrap .start-period-select.start-period-select-bold{
+  font-weight:700;
 }
 .start-period-wrap .start-period-select:focus{
   outline:none;
@@ -4786,7 +4790,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-25 v11';
+const APP_VERSION = '2026-09-25 v12';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7303,6 +7307,7 @@ function paintStartPeriodBar(){
   if(menu.value !== startPeriodMode){
     menu.value = startPeriodMode;
   }
+  menu.classList.toggle('start-period-select-bold', startPeriodMode === 'currentMonth');
   const split = startPeriodMode === 'currentMonth';
   if(split) wrap.setAttribute('data-teaser-split', '1');
   else clearStartTeaserLowerBar(wrap, amtBarLower);
