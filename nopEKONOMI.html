@@ -5179,7 +5179,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v12';
+const APP_VERSION = '2026-09-26 v13';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7918,13 +7918,6 @@ function buildBudgetOutBarsSvgChunk(list){
   if(linePts.length){
     svg += '<polyline fill="none" stroke="' + lineColor + '" stroke-width="2.2"'
       + ' stroke-linejoin="round" stroke-linecap="round" points="' + linePts.join(' ') + '"/>';
-    list.forEach((r, i) => {
-      const x = padL + i * barSlot + gap / 2;
-      const bw = barSlot - gap;
-      const cx = x + bw / 2;
-      svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + yAt(r.budget).toFixed(1)
-        + '" r="2.4" fill="' + lineColor + '"/>';
-    });
   }
 
   return {
