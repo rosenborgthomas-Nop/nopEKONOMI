@@ -3446,9 +3446,13 @@ footer p{
   color:#E03131;
 }
 .budget-bars-split-meta{
-  margin:0 10px 8px;
+  margin:4px 10px 10px;
   font-size:12px;
   color:var(--text-on-paper-soft);
+}
+.budget-bars-split-meta-ghost{
+  font-style:italic;
+  font-weight:500;
 }
 .budget-bars-panel .chart-chunked-panel{
   margin:0 4px 8px;
@@ -5175,7 +5179,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v11';
+const APP_VERSION = '2026-09-26 v12';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7740,15 +7744,15 @@ function buildBudgetCurrentMonthSplitHtml(row){
     ? (row.ghostTip || ('Skugg-saldo ' + formatBudgetAmtEdit(ghost)))
     : 'Skuggbudget saknas';
 
-  const legend = '<p class="budget-bars-legend">'
-    + '<span><i class="budget-bars-swatch is-green" aria-hidden="true"></i>'
-    + '<i class="budget-bars-swatch is-red" aria-hidden="true"></i>Pågående</span>'
-    + '<span><i class="budget-bars-swatch is-ghost" aria-hidden="true"></i>'
-    + '<i class="budget-bars-swatch is-red" aria-hidden="true"></i>Skuggbudget'
-    + ' <span style="font-weight:500;opacity:0.85">(grön under / röd över)</span></span>'
-    + '</p>';
-
-  let html = legend;
+  let html = '<p class="budget-bars-split-meta">'
+    + escapeHtml(budgetLab)
+    + ' · Utfall ' + escapeHtml(formatBudgetAmtEdit(actual));
+  if(hasGhost){
+    html += ' <span class="budget-bars-split-meta-ghost">('
+      + escapeHtml(formatBudgetAmtEdit(Math.round(ghostActual)))
+      + ')</span>';
+  }
+  html += '</p>';
   html += '<div class="budget-bars-split" title="' + escapeHtml(tipLeft + (hasGhost ? '\n' + tipRight : '')) + '">';
   html += '<div class="budget-bars-split-half" data-budget-over="' + (leftRed ? '1' : '0') + '">'
     + '<span class="budget-bars-split-bar" style="width:' + (Math.round(leftPct * 10) / 10) + '%" aria-hidden="true"></span>'
@@ -7765,8 +7769,6 @@ function buildBudgetCurrentMonthSplitHtml(row){
     + (hasGhost ? escapeHtml(formatBudgetAmtEdit(ghost)) : '—')
     + '</span></div>';
   html += '</div>';
-  html += '<p class="budget-bars-split-meta">' + escapeHtml(budgetLab)
-    + ' · Utfall ' + escapeHtml(formatBudgetAmtEdit(actual)) + '</p>';
   return html;
 }
 
@@ -7788,16 +7790,7 @@ function budgetBarsYearGroups(rows){
 }
 
 function budgetBarsLegendHtml(opts){
-  opts = opts || {};
-  return '<p class="budget-bars-legend">'
-    + '<span><i class="budget-bars-swatch" aria-hidden="true"></i>Utfall</span>'
-    + (opts.hasGhost
-      ? ('<span><i class="budget-bars-swatch is-ghost" aria-hidden="true"></i>'
-        + '<i class="budget-bars-swatch is-red" aria-hidden="true"></i>Skuggbudget'
-        + ' <span style="font-weight:500;opacity:0.85">(grön under / röd över)</span></span>')
-      : '')
-    + '<span><i class="budget-bars-line" aria-hidden="true"></i>Budget UT</span>'
-    + '</p>';
+  return '';
 }
 
 /** SVG för en månadsserie (ett år / en chunk). */
@@ -8080,7 +8073,8 @@ function printBudgetBarsChart(){
     + '.budget-bars-split-label{position:relative;z-index:1;font-size:13px;font-weight:500;}'
     + '.budget-bars-split-value{position:relative;z-index:1;font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:600;}'
     + '.budget-bars-split-value.neg{color:#E03131;}'
-    + '.budget-bars-split-meta{margin:0 0 8px;font-size:12px;color:#5A6F88;}'
+    + '.budget-bars-split-meta{margin:4px 0 10px;font-size:12px;color:#5A6F88;}'
+    + '.budget-bars-split-meta-ghost{font-style:italic;font-weight:500;}'
     + '.chart-chunked-panel .netto-print-year-label{margin:0 0 6px;font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:700;}'
     + '</style>';
   return printHtmlDocument('Budget staplar', extraCss + head + body.innerHTML, { landscape: false });
@@ -17000,8 +16994,6 @@ const CARE_HUB_BUDGET_HELP =
   + 'sätts kategorin till underkategoriernas summa. '
   + 'Stapeln visar hur mycket som skett i aktuell månad: för utgifter grön '
   + 'under budget och röd över; för inkomster tvärtom (röd under mål, grön vid/över mål). '
-  + 'Under Staplar → Pågående månad visas även Skuggbudget: ljusgrön när prognosen '
-  + 'håller budgeten, röd när den går över. '
   + 'Ändringar sparas med OK och följer med i backupen.';
 
 function setCareHubTrendHelpOpen(on){
