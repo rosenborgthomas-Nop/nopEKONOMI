@@ -5250,7 +5250,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v25';
+const APP_VERSION = '2026-09-26 v26';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7937,9 +7937,13 @@ function buildBudgetOutBarsSvgChunk(list){
   const padT = 6;
   const padB = 6;
   const gap = mobileFit ? 4 : 7;
-  const barSlot = Math.max(mobileFit ? 22 : 28, Math.min(48, Math.floor((mobileFit ? 320 : 520) / Math.max(n, 1))));
+  // Samma trick som Netto: minsta plotbredd så få månader inte stretchar SVG (width:100%).
+  const targetPlotW = mobileFit ? Math.max(260, Math.min(320, netOverTimeChartPlotWidth())) : 520;
+  const barSlot = Math.max(mobileFit ? 22 : 28, Math.min(48, Math.floor(targetPlotW / Math.max(n, 1))));
   const barsWidth = n * barSlot;
-  const width = padL + padR + barsWidth;
+  const plotInner = Math.max(targetPlotW, barsWidth);
+  const width = padL + padR + plotInner;
+  const barOrigin = padL + (plotInner - barsWidth) / 2;
   const height = padT + plotH + labelH + padB;
   const baselineY = padT + plotH;
   const trackTop = padT + valueHead;
@@ -7961,7 +7965,7 @@ function buildBudgetOutBarsSvgChunk(list){
   // Budgetlinje BAKOM staplarna (syns i luckorna mellan dem).
   const linePts = [];
   list.forEach((r, i) => {
-    const x = padL + i * barSlot + gap / 2;
+    const x = barOrigin + i * barSlot + gap / 2;
     const bw = barSlot - gap;
     const cx = x + bw / 2;
     linePts.push(cx.toFixed(1) + ',' + yAt(r.budget).toFixed(1));
@@ -7977,7 +7981,7 @@ function buildBudgetOutBarsSvgChunk(list){
   }
 
   list.forEach((r, i) => {
-    const x = padL + i * barSlot + gap / 2;
+    const x = barOrigin + i * barSlot + gap / 2;
     const bw = barSlot - gap;
     const cx = x + bw / 2;
 
