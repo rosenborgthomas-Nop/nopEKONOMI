@@ -5250,7 +5250,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v24';
+const APP_VERSION = '2026-09-26 v25';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7757,6 +7757,34 @@ function collectBudgetOutMonthlySeries(){
   return rows;
 }
 
+/** Tooltip-text för skugg-saldo (Start + Budget-staplar). */
+function formatStartTeaserGhostTip(ghostRound, rem, ghostInfo){
+  const g = formatBudgetAmtEdit(ghostRound);
+  const r = formatBudgetAmtEdit(Math.round(rem));
+  if(!ghostInfo) return 'Skugg-saldo ' + g;
+  const meanTxt = formatBudgetAmtEdit(Math.round(ghostInfo.mean));
+  if(ghostInfo.usePosted){
+    const fut = formatBudgetAmtEdit(Math.round(ghostInfo.futureNet));
+    const nFut = ghostInfo.futureCount;
+    const nMean = ghostInfo.n;
+    if(ghostInfo.usedMean){
+      return 'Skugg-saldo ' + g
+        + ' (återstår ' + r
+        + ' + medel rest-månad ' + meanTxt
+        + ', ' + nMean + ' mån — värre än förhandspostat ' + fut
+        + ', ' + nFut + ' st)';
+    }
+    return 'Skugg-saldo ' + g
+      + ' (återstår ' + r
+      + ' + förhandspostat ' + fut
+      + ', ' + nFut + ' st — värre än medel ' + meanTxt + ')';
+  }
+  return 'Skugg-saldo ' + g
+    + ' (återstår ' + r
+    + ' + medel rest-månad ' + meanTxt
+    + ', ' + ghostInfo.n + ' mån)';
+}
+
 /** Skuggbudget-fält för pågående månad (samma logik som start-teaser). */
 function attachBudgetBarsGhost(row){
   if(!row || !row.isCurrentMonth) return row;
@@ -7770,15 +7798,7 @@ function attachBudgetBarsGhost(row){
   row.ghost = ghostRound;
   row.ghostActual = budget > 0 ? Math.max(0, budget - ghostInfo.ghost) : 0;
   row.ghostUsePosted = !!ghostInfo.usePosted;
-  row.ghostTip = ghostInfo.usePosted
-    ? ('Skugg-saldo ' + formatBudgetAmtEdit(ghostRound)
-      + ' (återstår ' + formatBudgetAmtEdit(Math.round(remaining))
-      + ' + förhandspostat ' + formatBudgetAmtEdit(Math.round(ghostInfo.futureNet))
-      + ', ' + ghostInfo.futureCount + ' st)')
-    : ('Skugg-saldo ' + formatBudgetAmtEdit(ghostRound)
-      + ' (återstår ' + formatBudgetAmtEdit(Math.round(remaining))
-      + ' + medel rest-månad ' + formatBudgetAmtEdit(Math.round(ghostInfo.mean))
-      + ', ' + ghostInfo.n + ' mån)');
+  row.ghostTip = formatStartTeaserGhostTip(ghostRound, remaining, ghostInfo);
   return row;
 }
 
@@ -7826,15 +7846,7 @@ function buildBudgetCurrentMonthSplitHtml(row){
     ? (budgetAmtBarTip(false, actual, budget) + '\nÅterstår ' + formatBudgetAmtEdit(remaining))
     : ('Förbrukat ' + formatBudgetAmtEdit(actual) + ' utan budget');
   const tipRight = hasGhost
-    ? (ghostInfo.usePosted
-      ? ('Skugg-saldo ' + formatBudgetAmtEdit(ghost)
-        + ' (återstår ' + formatBudgetAmtEdit(Math.round(remaining))
-        + ' + förhandspostat ' + formatBudgetAmtEdit(Math.round(ghostInfo.futureNet))
-        + ', ' + ghostInfo.futureCount + ' st)')
-      : ('Skugg-saldo ' + formatBudgetAmtEdit(ghost)
-        + ' (återstår ' + formatBudgetAmtEdit(Math.round(remaining))
-        + ' + medel rest-månad ' + formatBudgetAmtEdit(Math.round(ghostInfo.mean))
-        + ', ' + ghostInfo.n + ' mån)'))
+    ? formatStartTeaserGhostTip(ghost, remaining, ghostInfo)
     : 'Skuggbudget saknas';
 
   let html = '<p class="budget-bars-split-meta">'
@@ -8459,8 +8471,10 @@ function sumBocklistaNetInDateRange(fromIso, toIso, opts){
 }
 
 /**
- * Spök-saldo = återstår + (förhandspostad rest-månad ELLER medel av 6 historiska rest-perioder).
- * Förhandspostade rader efter idag trumfar halvårsmedlet.
+ * Skugg-saldo = återstår + prognos för rest av månaden.
+ * Prognos = historiskt medel (6 mån, morgondagens dagtal→månadsslut, bocklista).
+ * Finns förhandspostat: ta det sämre av förhandspostat och medlet (skuggan varnar
+ * även när kända poster inte täcker historiskt mönster — t.ex. stora slutposter).
  */
 function computeStartTeaserGhostSaldo(remaining, todayIso){
   const iso = todayIso || todayIsoDate();
@@ -8488,7 +8502,9 @@ function computeStartTeaserGhostSaldo(remaining, todayIso){
   }
 
   const usePosted = futureCount > 0;
-  const tail = usePosted ? futureNet : mean;
+  // Mer negativt netto = sämre för återstår. Utan förhandspostat: bara medel.
+  const tail = usePosted ? Math.min(futureNet, mean) : mean;
+  const usedMean = !usePosted || mean <= futureNet;
   return {
     ghost: rem + tail,
     mean: mean,
@@ -8497,6 +8513,7 @@ function computeStartTeaserGhostSaldo(remaining, todayIso){
     futureNet: futureNet,
     futureCount: futureCount,
     usePosted: usePosted,
+    usedMean: usedMean,
     tail: tail
   };
 }
@@ -8549,19 +8566,7 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining, ymax){
     if(ghostRound < 0) ghostEl.classList.add('neg');
   }
 
-  const tipExtra = ghostInfo.usePosted
-    ? ('\nSkugg-saldo ' + formatBudgetAmtEdit(ghostRound)
-      + ' (återstår '
-      + formatBudgetAmtEdit(Math.round(rem))
-      + ' + förhandspostat '
-      + formatBudgetAmtEdit(Math.round(ghostInfo.futureNet))
-      + ', ' + ghostInfo.futureCount + ' st)')
-    : ('\nSkugg-saldo ' + formatBudgetAmtEdit(ghostRound)
-      + ' (återstår '
-      + formatBudgetAmtEdit(Math.round(rem))
-      + ' + medel rest-månad '
-      + formatBudgetAmtEdit(Math.round(ghostInfo.mean))
-      + ', ' + ghostInfo.n + ' mån)');
+  const tipExtra = '\n' + formatStartTeaserGhostTip(ghostRound, rem, ghostInfo);
   const base = wrap.getAttribute('title') || '';
   if(base.indexOf('Skugg-saldo') < 0 && base.indexOf('Spök-saldo') < 0){
     wrap.title = base + tipExtra;
