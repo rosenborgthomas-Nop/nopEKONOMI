@@ -5179,7 +5179,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v14';
+const APP_VERSION = '2026-09-26 v15';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8462,8 +8462,13 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
   }
   // Tolka spök-saldo som prognostiserat "återstår" → prognostiserat förbrukat.
   const ghostActual = Math.max(0, budget - ghostInfo.ghost);
-  const pct = budgetBarWidthPct(false, ghostActual, budget);
-  const isRed = budgetBarIsRed(false, ghostActual, budget);
+  let pct = budgetBarWidthPct(false, ghostActual, budget);
+  let isRed = ghostRound < 0 || budgetBarIsRed(false, ghostActual, budget);
+  // Negativt skugg-saldo = över budget (även vid litet överskridande).
+  if(ghostRound < 0){
+    isRed = true;
+    pct = 100;
+  }
   wrap.setAttribute('data-budget-lower-over', isRed ? '1' : '0');
   if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
 }
