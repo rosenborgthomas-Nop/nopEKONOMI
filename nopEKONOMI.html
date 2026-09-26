@@ -3347,6 +3347,15 @@ footer p{
   border-radius:2px;
   background:#2B579A;
 }
+.budget-bars-panel .budget-bars-swatch.is-green{
+  background:#1FAE55;
+  opacity:0.7;
+}
+.budget-bars-panel .budget-bars-swatch.is-ghost{
+  background:#1FAE55;
+  opacity:0.45;
+  box-shadow:inset 0 0 0 1px rgba(26,48,80,0.25);
+}
 .budget-bars-panel .budget-bars-line{
   display:inline-block;
   width:16px;
@@ -3357,6 +3366,90 @@ footer p{
   width:100%;
   height:auto;
   display:block;
+}
+/* Delad stapel (pågående månad): övre = utfall, undre = skuggbudget. */
+.budget-bars-split{
+  margin:8px 10px 12px;
+  border:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 70%, transparent);
+  border-radius:8px;
+  background:var(--paper-surface, #E8EFF7);
+  overflow:hidden;
+  position:relative;
+  min-height:4.8rem;
+}
+.budget-bars-split::after{
+  content:'';
+  position:absolute;
+  left:0;
+  right:0;
+  top:50%;
+  height:1px;
+  background:color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 70%, transparent);
+  z-index:2;
+  pointer-events:none;
+}
+.budget-bars-split-half{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  height:2.4rem;
+  padding:0 12px 0 10px;
+  box-sizing:border-box;
+  z-index:1;
+}
+.budget-bars-split-bar{
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:0;
+  pointer-events:none;
+  z-index:0;
+}
+.budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{
+  background:#1FAE55;
+  opacity:0.58;
+}
+.budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{
+  background:#E03131;
+  opacity:0.62;
+}
+.budget-bars-split-half.is-ghost[data-budget-over="0"] .budget-bars-split-bar{
+  opacity:0.42;
+}
+.budget-bars-split-half.is-ghost[data-budget-over="1"] .budget-bars-split-bar{
+  opacity:0.5;
+}
+.budget-bars-split-label{
+  position:relative;
+  z-index:1;
+  font-size:13px;
+  font-weight:500;
+  color:var(--ink, #1a3050);
+  white-space:nowrap;
+}
+.budget-bars-split-half.is-ghost .budget-bars-split-label{
+  font-size:12px;
+  opacity:0.78;
+}
+.budget-bars-split-value{
+  position:relative;
+  z-index:1;
+  font-family:'JetBrains Mono', monospace;
+  font-size:13.5px;
+  font-weight:600;
+  color:var(--ink, #1a3050);
+  white-space:nowrap;
+}
+.budget-bars-split-value.neg{
+  color:#E03131;
+}
+.budget-bars-split-meta{
+  margin:0 10px 8px;
+  font-size:12px;
+  color:var(--text-on-paper-soft);
 }
 .care-list-shell{
   background:var(--paper);
@@ -5075,7 +5168,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v06';
+const APP_VERSION = '2026-09-26 v07';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7557,7 +7650,13 @@ function collectBudgetOutMonthlySeries(){
     if(from < range.from) from = range.from;
     if(to > range.to) to = range.to;
     if(from > to){
-      rows.push({ label: monthKeyYyMm(mk), month: mk, budget: hasBudget ? monthlyBudgetUt : 0, actual: 0 });
+      rows.push(attachBudgetBarsGhost({
+        label: monthKeyYyMm(mk),
+        month: mk,
+        budget: hasBudget ? monthlyBudgetUt : 0,
+        actual: 0,
+        isCurrentMonth: mk === budgetCurrentMonthKey()
+      }));
       continue;
     }
     const activityMap = buildBudgetMonthActivityMap(from, to, { onlyIncluded: true });
@@ -7565,32 +7664,116 @@ function collectBudgetOutMonthlySeries(){
     for(const name of expenseCats){
       actual += budgetActualForItem({ rowKind: 'cat', name: name }, activityMap, false);
     }
-    rows.push({
+    rows.push(attachBudgetBarsGhost({
       label: monthKeyYyMm(mk),
       month: mk,
       budget: hasBudget ? monthlyBudgetUt : 0,
-      actual: actual
-    });
+      actual: actual,
+      isCurrentMonth: mk === budgetCurrentMonthKey()
+    }));
   }
   return rows;
 }
 
-/** Enkel stapeldiagram: staplar = utfall, linje = budget UT. Samma färg på alla staplar. */
+/** Skuggbudget-fält för pågående månad (samma logik som start-teaser). */
+function attachBudgetBarsGhost(row){
+  if(!row || !row.isCurrentMonth) return row;
+  const budget = typeof row.budget === 'number' && Number.isFinite(row.budget) ? row.budget : 0;
+  const actual = typeof row.actual === 'number' && Number.isFinite(row.actual) ? row.actual : 0;
+  const remaining = Math.round(budget) - Math.round(actual);
+  const ghostInfo = computeStartTeaserGhostSaldo(remaining, todayIsoDate());
+  if(!ghostInfo) return row;
+  const ghostRound = Number.isFinite(ghostInfo.ghost) ? Math.round(ghostInfo.ghost) : 0;
+  row.remaining = remaining;
+  row.ghost = ghostRound;
+  row.ghostActual = budget > 0 ? Math.max(0, budget - ghostInfo.ghost) : 0;
+  row.ghostUsePosted = !!ghostInfo.usePosted;
+  row.ghostTip = ghostInfo.usePosted
+    ? ('Skugg-saldo ' + formatBudgetAmtEdit(ghostRound)
+      + ' (återstår ' + formatBudgetAmtEdit(Math.round(remaining))
+      + ' + förhandspostat ' + formatBudgetAmtEdit(Math.round(ghostInfo.futureNet))
+      + ', ' + ghostInfo.futureCount + ' st)')
+    : ('Skugg-saldo ' + formatBudgetAmtEdit(ghostRound)
+      + ' (återstår ' + formatBudgetAmtEdit(Math.round(remaining))
+      + ' + medel rest-månad ' + formatBudgetAmtEdit(Math.round(ghostInfo.mean))
+      + ', ' + ghostInfo.n + ' mån)');
+  return row;
+}
+
+/** Delad horisontell stapel för enbart pågående månad. */
+function buildBudgetCurrentMonthSplitHtml(row){
+  const budget = row.budget > 0 ? row.budget : 0;
+  const actual = Math.max(0, row.actual || 0);
+  const remaining = typeof row.remaining === 'number' ? row.remaining : (Math.round(budget) - Math.round(actual));
+  const hasGhost = typeof row.ghost === 'number' && Number.isFinite(row.ghost);
+  const ghost = hasGhost ? row.ghost : 0;
+  const ghostActual = typeof row.ghostActual === 'number' ? row.ghostActual : 0;
+
+  const upperPct = budget > 0 ? budgetBarWidthPct(false, actual, budget) : 0;
+  const upperRed = budget > 0 && budgetBarIsRed(false, actual, budget);
+  const lowerPct = budget > 0 && hasGhost ? budgetBarWidthPct(false, ghostActual, budget) : 0;
+  const lowerRed = budget > 0 && hasGhost && budgetBarIsRed(false, ghostActual, budget);
+
+  const budgetLab = budget > 0
+    ? ('Budget UT ' + formatBudgetAmtEdit(budget))
+    : 'Ingen budget satt';
+  const tipUpper = budget > 0
+    ? (budgetAmtBarTip(false, actual, budget) + '\nÅterstår ' + formatBudgetAmtEdit(remaining))
+    : ('Förbrukat ' + formatBudgetAmtEdit(actual) + ' utan budget');
+  const tipLower = hasGhost
+    ? (row.ghostTip || ('Skugg-saldo ' + formatBudgetAmtEdit(ghost)))
+    : 'Skuggbudget saknas';
+
+  const legend = '<p class="budget-bars-legend">'
+    + '<span><i class="budget-bars-swatch is-green" aria-hidden="true"></i>Pågående</span>'
+    + '<span><i class="budget-bars-swatch is-ghost" aria-hidden="true"></i>Skuggbudget</span>'
+    + '</p>';
+
+  let html = legend;
+  html += '<div class="budget-bars-split" title="' + escapeHtml(tipUpper + (hasGhost ? '\n' + tipLower : '')) + '">';
+  html += '<div class="budget-bars-split-half" data-budget-over="' + (upperRed ? '1' : '0') + '">'
+    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(upperPct * 10) / 10) + '%" aria-hidden="true"></span>'
+    + '<span class="budget-bars-split-label">Pågående'
+    + (budget > 0 ? ' (' + escapeHtml(formatBudgetAmtEdit(budget)) + ')' : '')
+    + '</span>'
+    + '<span class="budget-bars-split-value' + (remaining < 0 ? ' neg' : '') + '">'
+    + escapeHtml(formatBudgetAmtEdit(remaining))
+    + '</span></div>';
+  html += '<div class="budget-bars-split-half is-ghost" data-budget-over="' + (lowerRed ? '1' : '0') + '">'
+    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(lowerPct * 10) / 10) + '%" aria-hidden="true"></span>'
+    + '<span class="budget-bars-split-label">Skuggbudget</span>'
+    + '<span class="budget-bars-split-value' + (hasGhost && ghost < 0 ? ' neg' : '') + '">'
+    + (hasGhost ? escapeHtml(formatBudgetAmtEdit(ghost)) : '—')
+    + '</span></div>';
+  html += '</div>';
+  html += '<p class="budget-bars-split-meta">' + escapeHtml(budgetLab)
+    + ' · Utfall ' + escapeHtml(formatBudgetAmtEdit(actual)) + '</p>';
+  return html;
+}
+
+/** Enkel stapeldiagram: staplar = utfall, linje = budget UT. Pågående månad = delad + skugg. */
 function buildBudgetOutBarsChart(rows){
   const list = (rows || []).filter(r => r && r.label);
   if(!list.length){
     return '<p class="sub" style="margin:8px 12px">Inget att visa för perioden.</p>';
   }
 
+  if(list.length === 1 && list[0].isCurrentMonth){
+    return buildBudgetCurrentMonthSplitHtml(list[0]);
+  }
+
   const barColor = '#2B579A';
   const barSoft = 'rgba(43,87,154,0.12)';
   const lineColor = '#1A3050';
   const axis = '#5A6F88';
+  const green = '#1FAE55';
+  const red = '#E03131';
 
   let ymax = 0;
   for(const r of list){
     if(r.actual > ymax) ymax = r.actual;
     if(r.budget > ymax) ymax = r.budget;
+    if(typeof r.ghostActual === 'number' && r.ghostActual > ymax) ymax = r.ghostActual;
   }
   if(ymax <= 0) ymax = 1;
   ymax *= 1.08;
@@ -7614,6 +7797,7 @@ function buildBudgetOutBarsChart(rows){
   const baselineY = padT + plotH;
   const trackTop = padT + valueHead;
   const yAt = v => baselineY - (Math.max(0, v) / ymax) * barMaxH;
+  let hasGhostCol = false;
 
   let svg = '';
   for(let g = 0; g <= 3; g++){
@@ -7632,20 +7816,51 @@ function buildBudgetOutBarsChart(rows){
   list.forEach((r, i) => {
     const x = padL + i * barSlot + gap / 2;
     const bw = barSlot - gap;
-    const h = Math.max(0, baselineY - yAt(r.actual));
-    const y = yAt(r.actual);
     const cx = x + bw / 2;
     linePts.push(cx.toFixed(1) + ',' + yAt(r.budget).toFixed(1));
 
-    const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
-      + ', budget ' + formatReportInt(Math.round(r.budget));
-    svg += '<g>';
-    svg += '<title>' + escapeHtml(tip) + '</title>';
-    svg += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + barMaxH
-      + '" rx="2" fill="' + barSoft + '"/>';
-    if(h > 0){
-      svg += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h
-        + '" rx="2" fill="' + barColor + '"/>';
+    if(r.isCurrentMonth && typeof r.ghost === 'number'){
+      hasGhostCol = true;
+      const midY = trackTop + barMaxH / 2;
+      const halfH = barMaxH / 2;
+      const upperPct = r.budget > 0 ? budgetBarWidthPct(false, r.actual, r.budget) / 100 : 0;
+      const lowerPct = r.budget > 0 ? budgetBarWidthPct(false, r.ghostActual || 0, r.budget) / 100 : 0;
+      const upperRed = r.budget > 0 && budgetBarIsRed(false, r.actual, r.budget);
+      const lowerRed = r.budget > 0 && budgetBarIsRed(false, r.ghostActual || 0, r.budget);
+      const upperFillH = Math.max(0, halfH * upperPct);
+      const lowerFillH = Math.max(0, halfH * lowerPct);
+      const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
+        + ', budget ' + formatReportInt(Math.round(r.budget))
+        + (r.ghostTip ? '\n' + r.ghostTip : '');
+      svg += '<g>';
+      svg += '<title>' + escapeHtml(tip) + '</title>';
+      svg += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + halfH
+        + '" rx="2" fill="' + barSoft + '"/>';
+      svg += '<rect x="' + x + '" y="' + midY + '" width="' + bw + '" height="' + halfH
+        + '" rx="2" fill="rgba(43,87,154,0.07)"/>';
+      if(upperFillH > 0){
+        svg += '<rect x="' + x + '" y="' + (midY - upperFillH) + '" width="' + bw + '" height="' + upperFillH
+          + '" rx="2" fill="' + (upperRed ? red : green) + '" opacity="0.72"/>';
+      }
+      if(lowerFillH > 0){
+        svg += '<rect x="' + x + '" y="' + (baselineY - lowerFillH) + '" width="' + bw + '" height="' + lowerFillH
+          + '" rx="2" fill="' + (lowerRed ? red : green) + '" opacity="0.48"/>';
+      }
+      svg += '<line x1="' + x + '" y1="' + midY + '" x2="' + (x + bw) + '" y2="' + midY
+        + '" stroke="rgba(90,111,136,0.55)" stroke-width="1"/>';
+    } else {
+      const h = Math.max(0, baselineY - yAt(r.actual));
+      const y = yAt(r.actual);
+      const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
+        + ', budget ' + formatReportInt(Math.round(r.budget));
+      svg += '<g>';
+      svg += '<title>' + escapeHtml(tip) + '</title>';
+      svg += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + barMaxH
+        + '" rx="2" fill="' + barSoft + '"/>';
+      if(h > 0){
+        svg += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h
+          + '" rx="2" fill="' + barColor + '"/>';
+      }
     }
     if(rotateLabels){
       svg += '<text transform="translate(' + cx + ' ' + (baselineY + 10) + ') rotate(-50)"'
@@ -7673,6 +7888,9 @@ function buildBudgetOutBarsChart(rows){
 
   const legend = '<p class="budget-bars-legend">'
     + '<span><i class="budget-bars-swatch" aria-hidden="true"></i>Utfall</span>'
+    + (hasGhostCol
+      ? '<span><i class="budget-bars-swatch is-ghost" aria-hidden="true"></i>Skuggbudget</span>'
+      : '')
     + '<span><i class="budget-bars-line" aria-hidden="true"></i>Budget UT</span>'
     + '</p>';
 
@@ -7721,23 +7939,32 @@ function buildBudgetBarsClipboardPayload(){
   if(!rows.length) return null;
   const range = budgetPeriodRange();
   const periodLab = budgetPeriodLabel();
+  const hasGhost = rows.some(r => typeof r.ghost === 'number');
   const tsvLines = [];
   const htmlRows = [];
   tsvLines.push(['Period', periodLab || '', range && range.from || '', range && range.to || ''].join('\t'));
   htmlRows.push('<tr><td>Period</td><td>' + escapeHtml(periodLab || '') + '</td>'
     + '<td>' + escapeHtml(range && range.from || '') + '</td>'
     + '<td>' + escapeHtml(range && range.to || '') + '</td></tr>');
-  tsvLines.push(['Månad', 'Budget UT', 'Utfall'].join('\t'));
-  htmlRows.push('<tr><th>Månad</th><th>Budget UT</th><th>Utfall</th></tr>');
+  const head = hasGhost
+    ? ['Månad', 'Budget UT', 'Utfall', 'Återstår', 'Skuggbudget']
+    : ['Månad', 'Budget UT', 'Utfall'];
+  tsvLines.push(head.join('\t'));
+  htmlRows.push('<tr>' + head.map(h => '<th>' + h + '</th>').join('') + '</tr>');
   for(const r of rows){
-    tsvLines.push([
+    const cells = [
       r.label,
       formatBudgetAmtEdit(r.budget),
       formatBudgetAmtEdit(r.actual)
-    ].join('\t'));
-    htmlRows.push('<tr><td>' + escapeHtml(r.label) + '</td>'
-      + '<td>' + escapeHtml(formatBudgetAmtEdit(r.budget)) + '</td>'
-      + '<td>' + escapeHtml(formatBudgetAmtEdit(r.actual)) + '</td></tr>');
+    ];
+    if(hasGhost){
+      cells.push(
+        typeof r.remaining === 'number' ? formatBudgetAmtEdit(r.remaining) : '',
+        typeof r.ghost === 'number' ? formatBudgetAmtEdit(r.ghost) : ''
+      );
+    }
+    tsvLines.push(cells.join('\t'));
+    htmlRows.push('<tr>' + cells.map(c => '<td>' + escapeHtml(c) + '</td>').join('') + '</tr>');
   }
   const tsv = tsvLines.join('\n');
   return {
