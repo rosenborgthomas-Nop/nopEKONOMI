@@ -5250,7 +5250,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v23';
+const APP_VERSION = '2026-09-26 v24';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7946,27 +7946,41 @@ function buildBudgetOutBarsSvgChunk(list){
   svg += '<line x1="' + padL + '" y1="' + baselineY + '" x2="' + (width - padR) + '" y2="' + baselineY
     + '" stroke="rgba(168,189,212,0.85)" stroke-width="1"/>';
 
+  // Budgetlinje BAKOM staplarna (syns i luckorna mellan dem).
   const linePts = [];
   list.forEach((r, i) => {
     const x = padL + i * barSlot + gap / 2;
     const bw = barSlot - gap;
     const cx = x + bw / 2;
     linePts.push(cx.toFixed(1) + ',' + yAt(r.budget).toFixed(1));
+  });
+  if(linePts.length === 1){
+    const y = yAt(list[0].budget || 0);
+    svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (width - padR)
+      + '" y2="' + y.toFixed(1) + '" stroke="' + lineColor + '" stroke-width="2.2"'
+      + ' stroke-linecap="round"/>';
+  } else if(linePts.length > 1){
+    svg += '<polyline fill="none" stroke="' + lineColor + '" stroke-width="2.2"'
+      + ' stroke-linejoin="round" stroke-linecap="round" points="' + linePts.join(' ') + '"/>';
+  }
+
+  list.forEach((r, i) => {
+    const x = padL + i * barSlot + gap / 2;
+    const bw = barSlot - gap;
+    const cx = x + bw / 2;
 
     if(r.isCurrentMonth && typeof r.ghost === 'number'){
+      // Samma skala som övriga månader: höjd = värde / ymax (kan gå förbi budgetlinjen).
       const halfGap = 1.5;
       const halfW = Math.max(3, (bw - halfGap) / 2);
-      let leftPct = r.budget > 0 ? budgetBarWidthPct(false, r.actual, r.budget) / 100 : 0;
-      let rightPct = r.budget > 0 ? budgetBarWidthPct(false, r.ghostActual || 0, r.budget) / 100 : 0;
       const rem = typeof r.remaining === 'number'
         ? r.remaining
         : (Math.round(r.budget || 0) - Math.round(r.actual || 0));
-      let leftRed = rem < 0 || (r.budget > 0 && budgetBarIsRed(false, r.actual, r.budget));
-      let rightRed = r.ghost < 0 || (r.budget > 0 && budgetBarIsRed(false, r.ghostActual || 0, r.budget));
-      if(rem < 0) leftPct = 1;
-      if(r.ghost < 0) rightPct = 1;
-      const leftH = Math.max(0, barMaxH * leftPct);
-      const rightH = Math.max(0, barMaxH * rightPct);
+      const ghostAct = typeof r.ghostActual === 'number' ? r.ghostActual : 0;
+      const leftRed = rem < 0 || (r.budget > 0 && r.actual > r.budget);
+      const rightRed = r.ghost < 0 || (r.budget > 0 && ghostAct > r.budget);
+      const leftH = Math.max(0, baselineY - yAt(r.actual));
+      const rightH = Math.max(0, baselineY - yAt(ghostAct));
       const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
         + ', budget ' + formatReportInt(Math.round(r.budget))
         + (r.ghostTip ? '\n' + r.ghostTip : '');
@@ -7978,11 +7992,11 @@ function buildBudgetOutBarsSvgChunk(list){
         + '" rx="2" fill="rgba(43,87,154,0.07)"/>';
       if(leftH > 0){
         svg += '<rect x="' + x + '" y="' + (baselineY - leftH) + '" width="' + halfW + '" height="' + leftH
-          + '" rx="2" fill="' + (leftRed ? red : green) + '" opacity="0.72"/>';
+          + '" rx="2" fill="' + (leftRed ? red : green) + '" opacity="0.85"/>';
       }
       if(rightH > 0){
         svg += '<rect x="' + (x + halfW + halfGap) + '" y="' + (baselineY - rightH) + '" width="' + halfW
-          + '" height="' + rightH + '" rx="2" fill="' + (rightRed ? red : green) + '" opacity="0.48"/>';
+          + '" height="' + rightH + '" rx="2" fill="' + (rightRed ? red : green) + '" opacity="0.7"/>';
       }
     } else {
       const h = Math.max(0, baselineY - yAt(r.actual));
@@ -7990,7 +8004,7 @@ function buildBudgetOutBarsSvgChunk(list){
       const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
         + ', budget ' + formatReportInt(Math.round(r.budget));
       const moodFill = r.isCurrentMonth && r.budget > 0
-        ? (budgetBarIsRed(false, r.actual, r.budget) ? red : green)
+        ? ((r.actual > r.budget) ? red : green)
         : barColor;
       svg += '<g>';
       svg += '<title>' + escapeHtml(tip) + '</title>';
@@ -8014,16 +8028,6 @@ function buildBudgetOutBarsSvgChunk(list){
     }
     svg += '</g>';
   });
-
-  if(linePts.length === 1){
-    const y = yAt(list[0].budget || 0);
-    svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (width - padR)
-      + '" y2="' + y.toFixed(1) + '" stroke="' + lineColor + '" stroke-width="2.2"'
-      + ' stroke-linecap="round"/>';
-  } else if(linePts.length > 1){
-    svg += '<polyline fill="none" stroke="' + lineColor + '" stroke-width="2.2"'
-      + ' stroke-linejoin="round" stroke-linecap="round" points="' + linePts.join(' ') + '"/>';
-  }
 
   return {
     hasGhost: hasGhostCol,
