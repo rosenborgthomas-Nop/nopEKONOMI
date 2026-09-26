@@ -18770,6 +18770,10 @@ if(budgetPeriodMenu){
     if(careListKind !== 'budget') return;
     flushBudgetMonthInputs();
     budgetPeriodMode = budgetPeriodMenu.value || 'currentMonth';
+    if(budgetBarsVisible){
+      syncBudgetPeriodBar();
+      return;
+    }
     const keepIdx = careListHighlightIdx;
     renderCareList();
     if(keepIdx >= 0 && keepIdx < careListItems.length){
