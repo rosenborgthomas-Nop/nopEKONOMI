@@ -256,15 +256,29 @@ h1{
   top:50%;
   bottom:0;
 }
-/* Budgetstreck = linjen mellan staplar och siffror (alltid synlig, inte inuti fyllnad). */
+/* Budgetstreck = egen kolumn mellan staplar och siffror. */
 .start-period-wrap .start-period-budget-rail{
   display:none;
+  flex:0 0 3px;
+  width:3px;
+  align-self:stretch;
+  background:#1A3050;
+  opacity:0.9;
+  z-index:3;
+  pointer-events:none;
+}
+.start-period-wrap[data-teaser-split="1"] .start-period-budget-rail{
+  display:block;
 }
 .start-period-wrap[data-teaser-split="1"] .start-period-values{
-  border-left:2px solid #1A3050;
+  border-left:none;
 }
 .start-period-wrap[data-teaser-split="1"] .start-period-lead::before{
   display:none;
+}
+/* Lämna lucka före budgetstrecket så linjen syns även vid 100 % fyllnad. */
+.start-period-wrap[data-teaser-split="1"] .start-period-lead .budget-amt-bar{
+  max-width:calc(100% - 4px);
 }
 .start-period-wrap::after{
   content:'';
@@ -3424,11 +3438,11 @@ footer p{
 }
 /* Egen kolumn för budgetstreck — alltid synlig mellan staplar och siffror. */
 .budget-bars-split-budget-rail{
-  flex:0 0 2px;
+  flex:0 0 3px;
   align-self:stretch;
-  width:2px;
+  width:3px;
   background:#1A3050;
-  opacity:0.85;
+  opacity:0.9;
   z-index:3;
   pointer-events:none;
 }
@@ -3446,6 +3460,7 @@ footer p{
   top:0;
   bottom:0;
   width:0;
+  max-width:calc(100% - 4px);
   pointer-events:none;
   z-index:1;
 }
@@ -3497,9 +3512,6 @@ footer p{
   color:var(--ink, #1a3050);
   white-space:nowrap;
   box-sizing:border-box;
-}
-.budget-bars-split-value.neg{
-  color:#E03131;
 }
 .budget-bars-split-value.neg{
   color:#E03131;
@@ -4201,10 +4213,9 @@ td.num.dash .cell-content{
     <main class="panel">
       <div id="startPeriodBar" class="start-period-bar" hidden>
         <span class="start-period-wrap" id="startPeriodWrap">
-          <span class="budget-amt-bar budget-amt-bar-upper" id="startPeriodAmtBar" aria-hidden="true"></span>
-          <span class="budget-amt-bar budget-amt-bar-lower" id="startPeriodAmtBarLower" aria-hidden="true"></span>
-          <span class="start-period-budget-rail" id="startPeriodBudgetRail" aria-hidden="true"></span>
           <span class="start-period-lead" id="startPeriodLead">
+            <span class="budget-amt-bar budget-amt-bar-upper" id="startPeriodAmtBar" aria-hidden="true"></span>
+            <span class="budget-amt-bar budget-amt-bar-lower" id="startPeriodAmtBarLower" aria-hidden="true"></span>
             <span class="start-period-labels" id="startPeriodLabels" aria-hidden="true">
               <span id="startPeriodLabelReal" class="start-period-label start-period-label-real">Pågående</span>
               <span class="start-period-label start-period-label-ghost">Skuggbudget</span>
@@ -4219,6 +4230,7 @@ td.num.dash .cell-content{
               <option value="allt">Allt</option>
             </select>
           </span>
+          <span class="start-period-budget-rail" id="startPeriodBudgetRail" aria-hidden="true"></span>
           <span class="start-period-values" id="startPeriodValues">
             <span id="startPeriodValue" class="start-period-value start-period-value-real" aria-live="polite"></span>
             <span id="startPeriodValueGhost" class="start-period-value start-period-value-ghost" hidden aria-live="polite"></span>
@@ -5239,7 +5251,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v21';
+const APP_VERSION = '2026-09-26 v22';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8143,9 +8155,9 @@ function printBudgetBarsChart(){
     + '.budget-bars-split{margin:8px 0 12px;display:flex;flex-direction:row;align-items:stretch;border:1px solid #b8c4d4;border-radius:8px;background:#E8EFF7;overflow:hidden;position:relative;min-height:4.8rem;}'
     + '.budget-bars-split-main{position:relative;flex:1 1 auto;min-width:0;display:flex;flex-direction:column;}'
     + '.budget-bars-split-main::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:#b8c4d4;z-index:2;}'
-    + '.budget-bars-split-budget-rail{flex:0 0 2px;align-self:stretch;width:2px;background:#1A3050;opacity:0.85;}'
+    + '.budget-bars-split-budget-rail{flex:0 0 3px;align-self:stretch;width:3px;background:#1A3050;opacity:0.9;}'
     + '.budget-bars-split-half{position:relative;flex:1 1 50%;min-height:2.4rem;display:flex;align-items:center;}'
-    + '.budget-bars-split-bar{position:absolute;left:0;top:0;bottom:0;width:0;}'
+    + '.budget-bars-split-bar{position:absolute;left:0;top:0;bottom:0;width:0;max-width:calc(100% - 4px);}'
     + '.budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{background:#1FAE55;opacity:0.58;}'
     + '.budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{background:#E03131;opacity:0.62;}'
     + '.budget-bars-split-label{position:relative;z-index:2;padding:0 10px;font-size:13px;font-weight:500;}'
