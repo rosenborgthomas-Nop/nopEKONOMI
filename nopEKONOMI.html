@@ -3367,7 +3367,7 @@ footer p{
   height:auto;
   display:block;
 }
-/* Delad stapel (pågående månad): övre = utfall, undre = skuggbudget. */
+/* Delad stapel (pågående månad): vänster = pågående, höger = skuggbudget. */
 .budget-bars-split{
   margin:8px 10px 12px;
   border:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 70%, transparent);
@@ -3375,36 +3375,42 @@ footer p{
   background:var(--paper-surface, #E8EFF7);
   overflow:hidden;
   position:relative;
-  min-height:4.8rem;
+  display:flex;
+  flex-direction:row;
+  align-items:stretch;
+  min-height:5.6rem;
 }
 .budget-bars-split::after{
   content:'';
   position:absolute;
-  left:0;
-  right:0;
-  top:50%;
-  height:1px;
+  top:0;
+  bottom:0;
+  left:50%;
+  width:1px;
   background:color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 70%, transparent);
   z-index:2;
   pointer-events:none;
 }
 .budget-bars-split-half{
   position:relative;
+  flex:1 1 50%;
+  min-width:0;
   display:flex;
-  align-items:center;
+  flex-direction:column;
+  align-items:stretch;
   justify-content:space-between;
-  gap:10px;
-  height:2.4rem;
-  padding:0 12px 0 10px;
+  gap:6px;
+  padding:8px 12px 10px;
   box-sizing:border-box;
   z-index:1;
 }
 .budget-bars-split-bar{
   position:absolute;
   left:0;
-  top:0;
+  right:0;
   bottom:0;
-  width:0;
+  height:0;
+  width:100%;
   pointer-events:none;
   z-index:0;
 }
@@ -3438,10 +3444,11 @@ footer p{
   position:relative;
   z-index:1;
   font-family:'JetBrains Mono', monospace;
-  font-size:13.5px;
+  font-size:14px;
   font-weight:600;
   color:var(--ink, #1a3050);
   white-space:nowrap;
+  align-self:flex-end;
 }
 .budget-bars-split-value.neg{
   color:#E03131;
@@ -3450,6 +3457,14 @@ footer p{
   margin:0 10px 8px;
   font-size:12px;
   color:var(--text-on-paper-soft);
+}
+.budget-bars-panel .chart-chunked-panel{
+  margin:0 4px 8px;
+}
+.budget-bars-panel .chart-chunk-section + .chart-chunk-section{
+  margin-top:10px;
+  padding-top:10px;
+  border-top:1px solid rgba(168,189,212,0.55);
 }
 .care-list-shell{
   background:var(--paper);
@@ -5168,7 +5183,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v07';
+const APP_VERSION = '2026-09-26 v08';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7700,7 +7715,7 @@ function attachBudgetBarsGhost(row){
   return row;
 }
 
-/** Delad horisontell stapel för enbart pågående månad. */
+/** Delad stapel sida-vid-sida för enbart pågående månad. */
 function buildBudgetCurrentMonthSplitHtml(row){
   const budget = row.budget > 0 ? row.budget : 0;
   const actual = Math.max(0, row.actual || 0);
@@ -7709,18 +7724,18 @@ function buildBudgetCurrentMonthSplitHtml(row){
   const ghost = hasGhost ? row.ghost : 0;
   const ghostActual = typeof row.ghostActual === 'number' ? row.ghostActual : 0;
 
-  const upperPct = budget > 0 ? budgetBarWidthPct(false, actual, budget) : 0;
-  const upperRed = budget > 0 && budgetBarIsRed(false, actual, budget);
-  const lowerPct = budget > 0 && hasGhost ? budgetBarWidthPct(false, ghostActual, budget) : 0;
-  const lowerRed = budget > 0 && hasGhost && budgetBarIsRed(false, ghostActual, budget);
+  const leftPct = budget > 0 ? budgetBarWidthPct(false, actual, budget) : 0;
+  const leftRed = budget > 0 && budgetBarIsRed(false, actual, budget);
+  const rightPct = budget > 0 && hasGhost ? budgetBarWidthPct(false, ghostActual, budget) : 0;
+  const rightRed = budget > 0 && hasGhost && budgetBarIsRed(false, ghostActual, budget);
 
   const budgetLab = budget > 0
     ? ('Budget UT ' + formatBudgetAmtEdit(budget))
     : 'Ingen budget satt';
-  const tipUpper = budget > 0
+  const tipLeft = budget > 0
     ? (budgetAmtBarTip(false, actual, budget) + '\nÅterstår ' + formatBudgetAmtEdit(remaining))
     : ('Förbrukat ' + formatBudgetAmtEdit(actual) + ' utan budget');
-  const tipLower = hasGhost
+  const tipRight = hasGhost
     ? (row.ghostTip || ('Skugg-saldo ' + formatBudgetAmtEdit(ghost)))
     : 'Skuggbudget saknas';
 
@@ -7730,17 +7745,17 @@ function buildBudgetCurrentMonthSplitHtml(row){
     + '</p>';
 
   let html = legend;
-  html += '<div class="budget-bars-split" title="' + escapeHtml(tipUpper + (hasGhost ? '\n' + tipLower : '')) + '">';
-  html += '<div class="budget-bars-split-half" data-budget-over="' + (upperRed ? '1' : '0') + '">'
-    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(upperPct * 10) / 10) + '%" aria-hidden="true"></span>'
+  html += '<div class="budget-bars-split" title="' + escapeHtml(tipLeft + (hasGhost ? '\n' + tipRight : '')) + '">';
+  html += '<div class="budget-bars-split-half" data-budget-over="' + (leftRed ? '1' : '0') + '">'
+    + '<span class="budget-bars-split-bar" style="height:' + (Math.round(leftPct * 10) / 10) + '%" aria-hidden="true"></span>'
     + '<span class="budget-bars-split-label">Pågående'
     + (budget > 0 ? ' (' + escapeHtml(formatBudgetAmtEdit(budget)) + ')' : '')
     + '</span>'
     + '<span class="budget-bars-split-value' + (remaining < 0 ? ' neg' : '') + '">'
     + escapeHtml(formatBudgetAmtEdit(remaining))
     + '</span></div>';
-  html += '<div class="budget-bars-split-half is-ghost" data-budget-over="' + (lowerRed ? '1' : '0') + '">'
-    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(lowerPct * 10) / 10) + '%" aria-hidden="true"></span>'
+  html += '<div class="budget-bars-split-half is-ghost" data-budget-over="' + (rightRed ? '1' : '0') + '">'
+    + '<span class="budget-bars-split-bar" style="height:' + (Math.round(rightPct * 10) / 10) + '%" aria-hidden="true"></span>'
     + '<span class="budget-bars-split-label">Skuggbudget</span>'
     + '<span class="budget-bars-split-value' + (hasGhost && ghost < 0 ? ' neg' : '') + '">'
     + (hasGhost ? escapeHtml(formatBudgetAmtEdit(ghost)) : '—')
@@ -7751,17 +7766,36 @@ function buildBudgetCurrentMonthSplitHtml(row){
   return html;
 }
 
-/** Enkel stapeldiagram: staplar = utfall, linje = budget UT. Pågående månad = delad + skugg. */
-function buildBudgetOutBarsChart(rows){
-  const list = (rows || []).filter(r => r && r.label);
-  if(!list.length){
-    return '<p class="sub" style="margin:8px 12px">Inget att visa för perioden.</p>';
+function budgetBarsYearGroups(rows){
+  const map = Object.create(null);
+  const years = [];
+  for(const r of rows){
+    const y = String(r.month || '').slice(0, 4) || '';
+    if(!y) continue;
+    if(!map[y]){
+      map[y] = [];
+      years.push(y);
+    }
+    map[y].push(r);
   }
+  years.sort();
+  years.reverse();
+  return years.map(y => ({ year: y, rows: map[y] }));
+}
 
-  if(list.length === 1 && list[0].isCurrentMonth){
-    return buildBudgetCurrentMonthSplitHtml(list[0]);
-  }
+function budgetBarsLegendHtml(opts){
+  opts = opts || {};
+  return '<p class="budget-bars-legend">'
+    + '<span><i class="budget-bars-swatch" aria-hidden="true"></i>Utfall</span>'
+    + (opts.hasGhost
+      ? '<span><i class="budget-bars-swatch is-ghost" aria-hidden="true"></i>Skuggbudget</span>'
+      : '')
+    + '<span><i class="budget-bars-line" aria-hidden="true"></i>Budget UT</span>'
+    + '</p>';
+}
 
+/** SVG för en månadsserie (ett år / en chunk). */
+function buildBudgetOutBarsSvgChunk(list){
   const barColor = '#2B579A';
   const barSoft = 'rgba(43,87,154,0.12)';
   const lineColor = '#1A3050';
@@ -7770,10 +7804,12 @@ function buildBudgetOutBarsChart(rows){
   const red = '#E03131';
 
   let ymax = 0;
+  let hasGhostCol = false;
   for(const r of list){
     if(r.actual > ymax) ymax = r.actual;
     if(r.budget > ymax) ymax = r.budget;
     if(typeof r.ghostActual === 'number' && r.ghostActual > ymax) ymax = r.ghostActual;
+    if(r.isCurrentMonth && typeof r.ghost === 'number') hasGhostCol = true;
   }
   if(ymax <= 0) ymax = 1;
   ymax *= 1.08;
@@ -7797,7 +7833,6 @@ function buildBudgetOutBarsChart(rows){
   const baselineY = padT + plotH;
   const trackTop = padT + valueHead;
   const yAt = v => baselineY - (Math.max(0, v) / ymax) * barMaxH;
-  let hasGhostCol = false;
 
   let svg = '';
   for(let g = 0; g <= 3; g++){
@@ -7820,34 +7855,31 @@ function buildBudgetOutBarsChart(rows){
     linePts.push(cx.toFixed(1) + ',' + yAt(r.budget).toFixed(1));
 
     if(r.isCurrentMonth && typeof r.ghost === 'number'){
-      hasGhostCol = true;
-      const midY = trackTop + barMaxH / 2;
-      const halfH = barMaxH / 2;
-      const upperPct = r.budget > 0 ? budgetBarWidthPct(false, r.actual, r.budget) / 100 : 0;
-      const lowerPct = r.budget > 0 ? budgetBarWidthPct(false, r.ghostActual || 0, r.budget) / 100 : 0;
-      const upperRed = r.budget > 0 && budgetBarIsRed(false, r.actual, r.budget);
-      const lowerRed = r.budget > 0 && budgetBarIsRed(false, r.ghostActual || 0, r.budget);
-      const upperFillH = Math.max(0, halfH * upperPct);
-      const lowerFillH = Math.max(0, halfH * lowerPct);
+      const halfGap = 1.5;
+      const halfW = Math.max(3, (bw - halfGap) / 2);
+      const leftPct = r.budget > 0 ? budgetBarWidthPct(false, r.actual, r.budget) / 100 : 0;
+      const rightPct = r.budget > 0 ? budgetBarWidthPct(false, r.ghostActual || 0, r.budget) / 100 : 0;
+      const leftRed = r.budget > 0 && budgetBarIsRed(false, r.actual, r.budget);
+      const rightRed = r.budget > 0 && budgetBarIsRed(false, r.ghostActual || 0, r.budget);
+      const leftH = Math.max(0, barMaxH * leftPct);
+      const rightH = Math.max(0, barMaxH * rightPct);
       const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
         + ', budget ' + formatReportInt(Math.round(r.budget))
         + (r.ghostTip ? '\n' + r.ghostTip : '');
       svg += '<g>';
       svg += '<title>' + escapeHtml(tip) + '</title>';
-      svg += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + halfH
+      svg += '<rect x="' + x + '" y="' + trackTop + '" width="' + halfW + '" height="' + barMaxH
         + '" rx="2" fill="' + barSoft + '"/>';
-      svg += '<rect x="' + x + '" y="' + midY + '" width="' + bw + '" height="' + halfH
+      svg += '<rect x="' + (x + halfW + halfGap) + '" y="' + trackTop + '" width="' + halfW + '" height="' + barMaxH
         + '" rx="2" fill="rgba(43,87,154,0.07)"/>';
-      if(upperFillH > 0){
-        svg += '<rect x="' + x + '" y="' + (midY - upperFillH) + '" width="' + bw + '" height="' + upperFillH
-          + '" rx="2" fill="' + (upperRed ? red : green) + '" opacity="0.72"/>';
+      if(leftH > 0){
+        svg += '<rect x="' + x + '" y="' + (baselineY - leftH) + '" width="' + halfW + '" height="' + leftH
+          + '" rx="2" fill="' + (leftRed ? red : green) + '" opacity="0.72"/>';
       }
-      if(lowerFillH > 0){
-        svg += '<rect x="' + x + '" y="' + (baselineY - lowerFillH) + '" width="' + bw + '" height="' + lowerFillH
-          + '" rx="2" fill="' + (lowerRed ? red : green) + '" opacity="0.48"/>';
+      if(rightH > 0){
+        svg += '<rect x="' + (x + halfW + halfGap) + '" y="' + (baselineY - rightH) + '" width="' + halfW
+          + '" height="' + rightH + '" rx="2" fill="' + (rightRed ? red : green) + '" opacity="0.48"/>';
       }
-      svg += '<line x1="' + x + '" y1="' + midY + '" x2="' + (x + bw) + '" y2="' + midY
-        + '" stroke="rgba(90,111,136,0.55)" stroke-width="1"/>';
     } else {
       const h = Math.max(0, baselineY - yAt(r.actual));
       const y = yAt(r.actual);
@@ -7886,18 +7918,47 @@ function buildBudgetOutBarsChart(rows){
     });
   }
 
-  const legend = '<p class="budget-bars-legend">'
-    + '<span><i class="budget-bars-swatch" aria-hidden="true"></i>Utfall</span>'
-    + (hasGhostCol
-      ? '<span><i class="budget-bars-swatch is-ghost" aria-hidden="true"></i>Skuggbudget</span>'
-      : '')
-    + '<span><i class="budget-bars-line" aria-hidden="true"></i>Budget UT</span>'
-    + '</p>';
+  return {
+    hasGhost: hasGhostCol,
+    svg: '<svg class="payee-chart-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img"'
+      + ' aria-label="Budget UT månadsvis">'
+      + svg + '</svg>'
+  };
+}
 
-  return legend
-    + '<svg class="payee-chart-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img"'
-    + ' aria-label="Budget UT månadsvis: staplar utfall, linje budget">'
-    + svg + '</svg>';
+/** Stapeldiagram: månadsvis. >12 mån = årsvisa chunkar (som Netto över tid). */
+function buildBudgetOutBarsChart(rows){
+  const list = (rows || []).filter(r => r && r.label);
+  if(!list.length){
+    return '<p class="sub" style="margin:8px 12px">Inget att visa för perioden.</p>';
+  }
+
+  if(list.length === 1 && list[0].isCurrentMonth){
+    return buildBudgetCurrentMonthSplitHtml(list[0]);
+  }
+
+  const groups = budgetBarsYearGroups(list);
+  const chunked = list.length > CHART_STACKED_ROW_THRESHOLD && groups.length > 1;
+
+  if(chunked){
+    let hasGhost = false;
+    let body = '';
+    for(const g of groups){
+      const built = buildBudgetOutBarsSvgChunk(g.rows);
+      if(built.hasGhost) hasGhost = true;
+      body += '<div class="chart-chunk-section">';
+      body += chartChunkYearLabelHtml(g.year, null);
+      body += built.svg;
+      body += '</div>';
+    }
+    return '<div class="chart-chunked-panel">'
+      + budgetBarsLegendHtml({ hasGhost: hasGhost })
+      + body
+      + '</div>';
+  }
+
+  const built = buildBudgetOutBarsSvgChunk(list);
+  return budgetBarsLegendHtml({ hasGhost: built.hasGhost }) + built.svg;
 }
 
 function renderBudgetBarsPanel(){
@@ -7987,16 +8048,26 @@ function printBudgetBarsChart(){
   }
   head += '</p>'
     + '<p class="report-table-updated">' + escapeHtml(reportUpdatedLineHtml()) + '</p></div>';
-  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Budget staplar</title>'
-    + '<style>body{font-family:sans-serif;padding:16px} svg{max-width:100%;height:auto}</style>'
-    + '</head><body>' + head + body.innerHTML + '</body></html>';
-  const w = window.open('', '_blank');
-  if(!w) return false;
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-  try{ w.focus(); w.print(); } catch(e){ /* ignore */ }
-  return true;
+  const extraCss = '<style>'
+    + '.budget-bars-legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin:4px 0 8px;font-size:12px;font-weight:600;color:#5A6F88;}'
+    + '.budget-bars-legend span{display:inline-flex;align-items:center;gap:6px;}'
+    + '.budget-bars-swatch{display:inline-block;width:12px;height:10px;border-radius:2px;background:#2B579A;}'
+    + '.budget-bars-swatch.is-green{background:#1FAE55;opacity:0.7;}'
+    + '.budget-bars-swatch.is-ghost{background:#1FAE55;opacity:0.45;}'
+    + '.budget-bars-line{display:inline-block;width:16px;height:0;border-top:2.5px solid #1A3050;}'
+    + '.budget-bars-split{margin:8px 0 12px;border:1px solid #b8c4d4;border-radius:8px;background:#E8EFF7;overflow:hidden;position:relative;display:flex;flex-direction:row;min-height:5.6rem;}'
+    + '.budget-bars-split::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:#b8c4d4;}'
+    + '.budget-bars-split-half{position:relative;flex:1 1 50%;display:flex;flex-direction:column;justify-content:space-between;padding:8px 12px 10px;}'
+    + '.budget-bars-split-bar{position:absolute;left:0;right:0;bottom:0;width:100%;height:0;}'
+    + '.budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{background:#1FAE55;opacity:0.58;}'
+    + '.budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{background:#E03131;opacity:0.62;}'
+    + '.budget-bars-split-label{position:relative;z-index:1;font-size:13px;font-weight:500;}'
+    + '.budget-bars-split-value{position:relative;z-index:1;font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:600;align-self:flex-end;}'
+    + '.budget-bars-split-value.neg{color:#E03131;}'
+    + '.budget-bars-split-meta{margin:0 0 8px;font-size:12px;color:#5A6F88;}'
+    + '.chart-chunked-panel .netto-print-year-label{margin:0 0 6px;font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:700;}'
+    + '</style>';
+  return printHtmlDocument('Budget staplar', extraCss + head + body.innerHTML, { landscape: false });
 }
 
 /**
