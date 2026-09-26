@@ -5171,7 +5171,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v09';
+const APP_VERSION = '2026-09-26 v10';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7713,9 +7713,16 @@ function buildBudgetCurrentMonthSplitHtml(row){
   const ghostActual = typeof row.ghostActual === 'number' ? row.ghostActual : 0;
 
   const leftPct = budget > 0 ? budgetBarWidthPct(false, actual, budget) : 0;
-  const leftRed = budget > 0 && budgetBarIsRed(false, actual, budget);
-  const rightPct = budget > 0 && hasGhost ? budgetBarWidthPct(false, ghostActual, budget) : 0;
-  const rightRed = budget > 0 && hasGhost && budgetBarIsRed(false, ghostActual, budget);
+  let leftRed = remaining < 0 || (budget > 0 && budgetBarIsRed(false, actual, budget));
+  let rightPct = budget > 0 && hasGhost ? budgetBarWidthPct(false, ghostActual, budget) : 0;
+  let rightRed = hasGhost && (ghost < 0 || (budget > 0 && budgetBarIsRed(false, ghostActual, budget)));
+  // Negativt saldo = över budget: visa röd fylld stapel (även vid litet överskridande).
+  if(remaining < 0) leftRed = true;
+  if(hasGhost && ghost < 0){
+    rightRed = true;
+    rightPct = 100;
+  }
+  if(leftRed && remaining < 0) leftPct = 100;
 
   const budgetLab = budget > 0
     ? ('Budget UT ' + formatBudgetAmtEdit(budget))
@@ -7845,10 +7852,15 @@ function buildBudgetOutBarsSvgChunk(list){
     if(r.isCurrentMonth && typeof r.ghost === 'number'){
       const halfGap = 1.5;
       const halfW = Math.max(3, (bw - halfGap) / 2);
-      const leftPct = r.budget > 0 ? budgetBarWidthPct(false, r.actual, r.budget) / 100 : 0;
-      const rightPct = r.budget > 0 ? budgetBarWidthPct(false, r.ghostActual || 0, r.budget) / 100 : 0;
-      const leftRed = r.budget > 0 && budgetBarIsRed(false, r.actual, r.budget);
-      const rightRed = r.budget > 0 && budgetBarIsRed(false, r.ghostActual || 0, r.budget);
+      let leftPct = r.budget > 0 ? budgetBarWidthPct(false, r.actual, r.budget) / 100 : 0;
+      let rightPct = r.budget > 0 ? budgetBarWidthPct(false, r.ghostActual || 0, r.budget) / 100 : 0;
+      const rem = typeof r.remaining === 'number'
+        ? r.remaining
+        : (Math.round(r.budget || 0) - Math.round(r.actual || 0));
+      let leftRed = rem < 0 || (r.budget > 0 && budgetBarIsRed(false, r.actual, r.budget));
+      let rightRed = r.ghost < 0 || (r.budget > 0 && budgetBarIsRed(false, r.ghostActual || 0, r.budget));
+      if(rem < 0) leftPct = 1;
+      if(r.ghost < 0) rightPct = 1;
       const leftH = Math.max(0, barMaxH * leftPct);
       const rightH = Math.max(0, barMaxH * rightPct);
       const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
