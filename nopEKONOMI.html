@@ -3310,9 +3310,20 @@ footer p{
   color:var(--text-on-paper);
   border-radius:10px;
   box-shadow:0 12px 28px -18px rgba(0,0,0,0.45);
-  overflow:hidden;
+  overflow:auto;
+  min-height:0;
 }
 .budget-bars-panel[hidden]{
+  display:none !important;
+}
+#careListStageList.is-budget-bars .care-list-shell{
+  display:none !important;
+}
+#careListStageList.is-budget-bars .budget-bars-panel{
+  flex:1 1 auto;
+  margin-bottom:0;
+}
+#careListStageList.is-budget-bars .budget-bars-btn{
   display:none !important;
 }
 .budget-bars-panel .budget-bars-legend{
@@ -5064,7 +5075,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v05';
+const APP_VERSION = '2026-09-26 v06';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7462,33 +7473,105 @@ function syncBudgetPeriodBar(){
   if(budgetBarsVisible) renderBudgetBarsPanel();
 }
 
-/** Budget UT-staplar: synliga när Staplar är aktivt. */
+/** Budget UT-staplar: egen vy ovanför listan (månadsvis). */
 let budgetBarsVisible = false;
+
+function syncBudgetBarsChrome(){
+  const stage = el('careListStageList');
+  if(stage) stage.classList.toggle('is-budget-bars', !!budgetBarsVisible && careListKind === 'budget');
+  const cancelBtn = el('careListCancelBtn');
+  const okBtn = el('careListOkBtn');
+  const printBtn = el('careListPrintBtn');
+  if(careListKind !== 'budget'){
+    if(cancelBtn) cancelBtn.hidden = false;
+    if(okBtn){
+      okBtn.hidden = false;
+      okBtn.textContent = 'OK';
+    }
+    return;
+  }
+  if(budgetBarsVisible){
+    if(cancelBtn) cancelBtn.hidden = true;
+    if(okBtn){
+      okBtn.hidden = false;
+      okBtn.textContent = 'OK';
+    }
+    if(printBtn) printBtn.hidden = false;
+  } else {
+    if(cancelBtn) cancelBtn.hidden = false;
+    if(okBtn){
+      okBtn.hidden = false;
+      okBtn.textContent = 'Spara';
+    }
+    if(printBtn) printBtn.hidden = false;
+  }
+}
 
 function hideBudgetBarsPanel(){
   budgetBarsVisible = false;
   const panel = el('budgetBarsPanel');
-  const btn = el('budgetBarsBtn');
   if(panel) panel.hidden = true;
-  if(btn) btn.textContent = 'Staplar';
+  syncBudgetBarsChrome();
 }
 
-function collectBudgetOutChartRows(){
+/** Månadsvis Budget UT + utfall för vald period. */
+function collectBudgetOutMonthlySeries(){
+  const range = budgetPeriodRange();
+  if(!range || !range.from || !range.to || !book) return [];
+  syncTrendIncludeMap(book);
+  syncBudgetMonthMap(book);
+  rebuildBookLookup();
+  const signMaps = buildBudgetSignMaps();
+  const monthMap = book.budgetMonth || {};
+  const catSubs = buildTrendCategorySubsMap(book);
+  const includeMap = book.trendInclude || {};
+  const cats = (bookLookup.categories || []).slice();
+
+  let monthlyBudgetUt = 0;
+  let hasBudget = false;
+  const expenseCats = [];
+  for(const name of cats){
+    if(trendCategoryCheckState(name, includeMap, catSubs) === 'none') continue;
+    if(budgetSignForItem({ rowKind: 'cat', name: name }, signMaps) === 'in') continue;
+    expenseCats.push(name);
+    const monthly = Object.prototype.hasOwnProperty.call(monthMap, name)
+      && typeof monthMap[name] === 'number'
+      && Number.isFinite(monthMap[name])
+      ? monthMap[name]
+      : null;
+    if(monthly != null && monthly > 0){
+      monthlyBudgetUt += Math.round(monthly);
+      hasBudget = true;
+    }
+  }
+
+  let months = monthKeysInRange(range.from, range.to);
+  if(months.length > 36) months = months.slice(-36);
+
   const rows = [];
-  const items = Array.isArray(careListItems) ? careListItems : [];
-  for(const it of items){
-    if(!it || it.rowKind !== 'cat') continue;
-    if(it.isIncome) continue;
-    const budget = Math.max(0, Number(it.monthAmt) || 0);
-    const actual = Math.max(0, Number(it.spentAmt) || 0);
-    if(budget <= 0 && actual <= 0) continue;
+  for(const mk of months){
+    const y = Number(mk.slice(0, 4));
+    const m = Number(mk.slice(5, 7));
+    let from = startOfMonthIso(y, m);
+    let to = endOfCalendarMonthIso(y, m);
+    if(from < range.from) from = range.from;
+    if(to > range.to) to = range.to;
+    if(from > to){
+      rows.push({ label: monthKeyYyMm(mk), month: mk, budget: hasBudget ? monthlyBudgetUt : 0, actual: 0 });
+      continue;
+    }
+    const activityMap = buildBudgetMonthActivityMap(from, to, { onlyIncluded: true });
+    let actual = 0;
+    for(const name of expenseCats){
+      actual += budgetActualForItem({ rowKind: 'cat', name: name }, activityMap, false);
+    }
     rows.push({
-      label: String(it.name || ''),
-      budget: budget,
+      label: monthKeyYyMm(mk),
+      month: mk,
+      budget: hasBudget ? monthlyBudgetUt : 0,
       actual: actual
     });
   }
-  rows.sort((a, b) => a.label.localeCompare(b.label, 'sv'));
   return rows;
 }
 
@@ -7496,7 +7579,7 @@ function collectBudgetOutChartRows(){
 function buildBudgetOutBarsChart(rows){
   const list = (rows || []).filter(r => r && r.label);
   if(!list.length){
-    return '<p class="sub" style="margin:8px 12px">Inga utgiftskategorier med budget eller utfall i perioden.</p>';
+    return '<p class="sub" style="margin:8px 12px">Inget att visa för perioden.</p>';
   }
 
   const barColor = '#2B579A';
@@ -7533,7 +7616,6 @@ function buildBudgetOutBarsChart(rows){
   const yAt = v => baselineY - (Math.max(0, v) / ymax) * barMaxH;
 
   let svg = '';
-  // Y-ticks
   for(let g = 0; g <= 3; g++){
     const val = ymax - (ymax * g) / 3;
     const gy = padT + valueHead + (barMaxH * g) / 3;
@@ -7565,16 +7647,14 @@ function buildBudgetOutBarsChart(rows){
       svg += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h
         + '" rx="2" fill="' + barColor + '"/>';
     }
-
-    const lab = r.label.length > 14 ? r.label.slice(0, 13) + '…' : r.label;
     if(rotateLabels){
       svg += '<text transform="translate(' + cx + ' ' + (baselineY + 10) + ') rotate(-50)"'
         + ' text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
-        + escapeHtml(lab) + '</text>';
+        + escapeHtml(r.label) + '</text>';
     } else {
       svg += '<text x="' + cx + '" y="' + (baselineY + 16) + '" text-anchor="middle"'
         + ' font-family="JetBrains Mono, monospace" font-size="10" fill="' + axis + '">'
-        + escapeHtml(lab) + '</text>';
+        + escapeHtml(r.label) + '</text>';
     }
     svg += '</g>';
   });
@@ -7598,14 +7678,13 @@ function buildBudgetOutBarsChart(rows){
 
   return legend
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img"'
-    + ' aria-label="Budget UT: staplar utfall, linje budget">'
+    + ' aria-label="Budget UT månadsvis: staplar utfall, linje budget">'
     + svg + '</svg>';
 }
 
 function renderBudgetBarsPanel(){
   const panel = el('budgetBarsPanel');
   const body = el('budgetBarsBody');
-  const btn = el('budgetBarsBtn');
   if(!panel || !body) return;
   if(careListKind !== 'budget'){
     hideBudgetBarsPanel();
@@ -7613,18 +7692,84 @@ function renderBudgetBarsPanel(){
   }
   budgetBarsVisible = true;
   panel.hidden = false;
-  if(btn) btn.textContent = 'Dölj staplar';
-  body.innerHTML = buildBudgetOutBarsChart(collectBudgetOutChartRows());
+  syncBudgetBarsChrome();
+  body.innerHTML = buildBudgetOutBarsChart(collectBudgetOutMonthlySeries());
+}
+
+function enterBudgetBarsMode(){
+  if(careListKind !== 'budget') return;
+  try{ flushBudgetMonthInputs(); } catch(e){ /* ignore */ }
+  renderBudgetBarsPanel();
+}
+
+function exitBudgetBarsMode(){
+  if(!budgetBarsVisible) return;
+  hideBudgetBarsPanel();
+  if(careListKind === 'budget'){
+    try{ renderCareList(); } catch(e){ /* ignore */ }
+  }
 }
 
 function toggleBudgetBarsPanel(){
   if(careListKind !== 'budget') return;
-  if(budgetBarsVisible){
-    hideBudgetBarsPanel();
-    return;
+  if(budgetBarsVisible) exitBudgetBarsMode();
+  else enterBudgetBarsMode();
+}
+
+function buildBudgetBarsClipboardPayload(){
+  const rows = collectBudgetOutMonthlySeries();
+  if(!rows.length) return null;
+  const range = budgetPeriodRange();
+  const periodLab = budgetPeriodLabel();
+  const tsvLines = [];
+  const htmlRows = [];
+  tsvLines.push(['Period', periodLab || '', range && range.from || '', range && range.to || ''].join('\t'));
+  htmlRows.push('<tr><td>Period</td><td>' + escapeHtml(periodLab || '') + '</td>'
+    + '<td>' + escapeHtml(range && range.from || '') + '</td>'
+    + '<td>' + escapeHtml(range && range.to || '') + '</td></tr>');
+  tsvLines.push(['Månad', 'Budget UT', 'Utfall'].join('\t'));
+  htmlRows.push('<tr><th>Månad</th><th>Budget UT</th><th>Utfall</th></tr>');
+  for(const r of rows){
+    tsvLines.push([
+      r.label,
+      formatBudgetAmtEdit(r.budget),
+      formatBudgetAmtEdit(r.actual)
+    ].join('\t'));
+    htmlRows.push('<tr><td>' + escapeHtml(r.label) + '</td>'
+      + '<td>' + escapeHtml(formatBudgetAmtEdit(r.budget)) + '</td>'
+      + '<td>' + escapeHtml(formatBudgetAmtEdit(r.actual)) + '</td></tr>');
   }
-  try{ flushBudgetMonthInputs(); } catch(e){ /* ignore */ }
-  renderBudgetBarsPanel();
+  const tsv = tsvLines.join('\n');
+  return {
+    tsv: tsv,
+    html: '<table border="1" cellspacing="0" cellpadding="2">' + htmlRows.join('') + '</table>',
+    text: tsv
+  };
+}
+
+function printBudgetBarsChart(){
+  const body = el('budgetBarsBody');
+  if(!body || !body.innerHTML) return false;
+  const range = budgetPeriodRange();
+  const periodLab = budgetPeriodLabel();
+  const title = 'BUDGET UT · Staplar'
+    + (periodLab ? ' · ' + escapeHtml(periodLab) : '');
+  let head = '<div class="report-table-head"><p class="report-table-title">' + title;
+  if(range && range.from && range.to){
+    head += reportPeriodRangeTitleHtml(range.from, range.to, null);
+  }
+  head += '</p>'
+    + '<p class="report-table-updated">' + escapeHtml(reportUpdatedLineHtml()) + '</p></div>';
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Budget staplar</title>'
+    + '<style>body{font-family:sans-serif;padding:16px} svg{max-width:100%;height:auto}</style>'
+    + '</head><body>' + head + body.innerHTML + '</body></html>';
+  const w = window.open('', '_blank');
+  if(!w) return false;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  try{ w.focus(); w.print(); } catch(e){ /* ignore */ }
+  return true;
 }
 
 /**
@@ -11550,7 +11695,9 @@ function showReportExportChoice(ctx){
   reportExportPending = ctx;
   const title = el('reportExportTitle');
   if(title){
-    title.textContent = ctx && ctx.isBudget ? 'Exportera budget' : 'Exportera rapport';
+    title.textContent = ctx && ctx.isBudgetBars
+      ? 'Exportera staplar'
+      : (ctx && ctx.isBudget ? 'Exportera budget' : 'Exportera rapport');
   }
   const overlay = el('reportExportOverlay');
   if(overlay) overlay.hidden = false;
@@ -11594,7 +11741,8 @@ async function executeReportExport(action){
         return;
       }
       if(action === 'print'){
-        if(!printBudgetList()){
+        const ok = ctx.isBudgetBars ? printBudgetBarsChart() : printBudgetList();
+        if(!ok){
           if(msgEl) addBox(msgEl, 'notice', 'Kunde inte öppna utskrift.');
         }
       }
@@ -17356,6 +17504,16 @@ function buildBudgetClipboardText(){
 }
 
 function getBudgetExportContext(){
+  if(budgetBarsVisible){
+    const payload = buildBudgetBarsClipboardPayload();
+    if(!payload) return null;
+    return {
+      text: payload.tsv,
+      html: payload.html,
+      isBudget: true,
+      isBudgetBars: true
+    };
+  }
   const payload = buildBudgetClipboardPayload();
   if(!payload) return null;
   return {
@@ -17728,6 +17886,7 @@ function renderCareList(){
   if(careListPrintBtn) careListPrintBtn.hidden = careListKind !== 'budget';
   syncCareHubMenuVisibility();
   syncBudgetPeriodBar();
+  syncBudgetBarsChrome();
   clear(careListMessages);
   hideBudgetLeaveConfirm();
   hideBudgetAmtInfoPops();
@@ -18623,12 +18782,16 @@ if(budgetPeriodMenu){
 const budgetBarsBtn = el('budgetBarsBtn');
 if(budgetBarsBtn){
   budgetBarsBtn.addEventListener('click', () => {
-    toggleBudgetBarsPanel();
+    enterBudgetBarsMode();
   });
 }
 
 careListCancelBtn.addEventListener('click', closeCareList);
 careListOkBtn.addEventListener('click', () => {
+  if(careListKind === 'budget' && budgetBarsVisible){
+    exitBudgetBarsMode();
+    return;
+  }
   if(careListKind === 'trend'){
     confirmCareListTrend();
     return;
