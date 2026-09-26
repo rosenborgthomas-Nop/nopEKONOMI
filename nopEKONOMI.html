@@ -455,6 +455,14 @@ h1{
   margin-bottom:14px;
   line-height:1.45;
 }
+.notice.notice-action{
+  cursor:pointer;
+  text-decoration:underline;
+  text-underline-offset:2px;
+}
+.notice.notice-action:active{
+  filter:brightness(0.97);
+}
 .report{
   font-family:'JetBrains Mono', monospace;
   font-size:12.5px;
@@ -5003,7 +5011,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v03';
+const APP_VERSION = '2026-09-26 v04';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5414,20 +5422,64 @@ let bookKnownSavedAt = 0;
 let bookFileCheckBusy = false;
 
 function updateBookFileSyncStatusUi(){
+  // Gamla meny-raden dold — meddelandet visas som .notice i startMessages.
   const hint = typeof el === 'function' ? el('startFileSyncHint') : null;
-  if(!hint) return;
-  if(!bookId || !isFileBook(bookId)){
+  if(hint){
     hint.hidden = true;
     hint.textContent = '';
+  }
+
+  const msgs = typeof el === 'function' ? el('startMessages') : null;
+  if(!msgs) return;
+
+  const existing = el('startFileSyncNotice');
+  const pending = !!(bookId && isFileBook(bookId) && hasBookFileSyncPending(bookId));
+  const onStart = typeof views !== 'undefined' && views.start && !views.start.hidden;
+
+  if(!pending || !onStart){
+    if(existing) existing.remove();
     return;
   }
-  if(hasBookFileSyncPending(bookId)){
-    hint.hidden = false;
-    hint.textContent = 'Ej sparad till bokmapp/Drive — tryck här';
-    return;
+
+  let box = existing;
+  if(!box){
+    box = document.createElement('div');
+    box.id = 'startFileSyncNotice';
+    box.className = 'notice notice-action';
+    box.setAttribute('role', 'button');
+    box.tabIndex = 0;
+    box.title = 'Tryck för att spara till bokmapp/Drive';
+    box.addEventListener('click', e => {
+      e.stopPropagation();
+      runStartFileSyncFlush();
+    });
+    box.addEventListener('keydown', e => {
+      if(e.key === 'Enter' || e.key === ' '){
+        e.preventDefault();
+        runStartFileSyncFlush();
+      }
+    });
+    msgs.appendChild(box);
   }
-  hint.hidden = true;
-  hint.textContent = '';
+  box.textContent = 'Ej sparad till bokmapp/Drive — tryck här';
+}
+
+async function runStartFileSyncFlush(){
+  const msgs = el('startMessages');
+  const box = el('startFileSyncNotice');
+  if(box) box.style.opacity = '0.6';
+  const res = await flushBookFileToFolderInteractive();
+  if(box) box.style.opacity = '';
+  if(!msgs) return;
+  if(res.ok){
+    clear(msgs);
+    addBox(msgs, 'report', 'Sparad till bokmapp/Drive.');
+    updateBookFileSyncStatusUi();
+  } else {
+    clear(msgs);
+    addBox(msgs, 'notice', res.message || 'Kunde inte spara till Drive.');
+    updateBookFileSyncStatusUi();
+  }
 }
 
 function payloadSavedAt(raw, lastModified){
@@ -9352,29 +9404,7 @@ if(startBackupHelpBtn){
 
 const startFileSyncHint = el('startFileSyncHint');
 if(startFileSyncHint){
-  const runFlush = async () => {
-    if(startFileSyncHint.hidden) return;
-    startFileSyncHint.style.opacity = '0.6';
-    const res = await flushBookFileToFolderInteractive();
-    startFileSyncHint.style.opacity = '';
-    if(res.ok){
-      clear(startMessages);
-      addBox(startMessages, 'report', 'Sparad till bokmapp/Drive.');
-    } else {
-      clear(startMessages);
-      addBox(startMessages, 'notice', res.message || 'Kunde inte spara till Drive.');
-    }
-  };
-  startFileSyncHint.addEventListener('click', e => {
-    e.stopPropagation();
-    runFlush();
-  });
-  startFileSyncHint.addEventListener('keydown', e => {
-    if(e.key === 'Enter' || e.key === ' '){
-      e.preventDefault();
-      runFlush();
-    }
-  });
+  startFileSyncHint.hidden = true;
 }
 
 function paintStartBackupHint(at, backupPosts){
@@ -9408,13 +9438,13 @@ function renderStart(){
   const rec = lastBackupRecord(bookId);
   paintStartBackupHint(rec && rec.at, rec && rec.posts);
   refreshStartBackupHintFromDisk();
-  updateBookFileSyncStatusUi();
 
   clear(startMessages);
   for(const msg of importReport) addBox(startMessages, 'report', msg);
   for(const msg of importErrors) addBox(startMessages, 'notice', msg);
   importReport = [];
   importErrors = [];
+  updateBookFileSyncStatusUi();
 
   clear(accountsList);
 
