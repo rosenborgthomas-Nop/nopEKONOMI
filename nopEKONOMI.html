@@ -249,36 +249,38 @@ h1{
   display:none;
 }
 .start-period-wrap[data-teaser-split="1"] .budget-amt-bar-upper{
-  bottom:50%;
+  bottom:calc(50% + 2px);
 }
 .start-period-wrap[data-teaser-split="1"] .budget-amt-bar-lower{
   display:block;
-  top:50%;
+  top:calc(50% + 2px);
   bottom:0;
 }
-/* Budgetstreck = egen kolumn mellan staplar och siffror. */
+/* Budgetstreck vid Budget UT (andel av skalan), bakom fyllnad. */
 .start-period-wrap .start-period-budget-rail{
   display:none;
-  flex:0 0 3px;
-  width:3px;
-  align-self:stretch;
+  position:absolute;
+  top:0;
+  bottom:0;
+  width:2px;
+  margin-left:-1px;
   background:#1A3050;
-  opacity:0.9;
-  z-index:3;
+  opacity:0.85;
+  z-index:0;
   pointer-events:none;
 }
 .start-period-wrap[data-teaser-split="1"] .start-period-budget-rail{
   display:block;
 }
 .start-period-wrap[data-teaser-split="1"] .start-period-values{
-  border-left:none;
+  border-left:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 55%, transparent);
 }
 .start-period-wrap[data-teaser-split="1"] .start-period-lead::before{
   display:none;
 }
-/* Lämna lucka före budgetstrecket så linjen syns även vid 100 % fyllnad. */
 .start-period-wrap[data-teaser-split="1"] .start-period-lead .budget-amt-bar{
-  max-width:calc(100% - 4px);
+  max-width:100%;
+  z-index:1;
 }
 .start-period-wrap::after{
   content:'';
@@ -3424,32 +3426,28 @@ footer p{
   min-width:0;
   display:flex;
   flex-direction:column;
+  gap:5px;
+  padding:3px 0;
 }
 .budget-bars-split-main::after{
-  content:'';
-  position:absolute;
-  left:0;
-  right:0;
-  top:50%;
-  height:1px;
-  background:color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 70%, transparent);
-  z-index:2;
-  pointer-events:none;
+  display:none;
 }
-/* Egen kolumn för budgetstreck — alltid synlig mellan staplar och siffror. */
+/* Budgetstreck vid Budget UT — bakom fyllnad, syns i luckan mellan halvoma. */
 .budget-bars-split-budget-rail{
-  flex:0 0 3px;
-  align-self:stretch;
-  width:3px;
+  position:absolute;
+  top:0;
+  bottom:0;
+  width:2px;
+  margin-left:-1px;
   background:#1A3050;
-  opacity:0.9;
-  z-index:3;
+  opacity:0.85;
+  z-index:0;
   pointer-events:none;
 }
 .budget-bars-split-half{
   position:relative;
   flex:1 1 50%;
-  min-height:2.4rem;
+  min-height:2.2rem;
   display:flex;
   align-items:center;
   z-index:1;
@@ -3460,23 +3458,23 @@ footer p{
   top:0;
   bottom:0;
   width:0;
-  max-width:calc(100% - 4px);
+  max-width:100%;
   pointer-events:none;
   z-index:1;
 }
 .budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{
   background:#1FAE55;
-  opacity:0.58;
+  opacity:0.72;
 }
 .budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{
   background:#E03131;
-  opacity:0.62;
+  opacity:0.78;
 }
 .budget-bars-split-half.is-ghost[data-budget-over="0"] .budget-bars-split-bar{
-  opacity:0.42;
+  opacity:0.55;
 }
 .budget-bars-split-half.is-ghost[data-budget-over="1"] .budget-bars-split-bar{
-  opacity:0.5;
+  opacity:0.62;
 }
 .budget-bars-split-label{
   position:relative;
@@ -3498,6 +3496,7 @@ footer p{
   flex-direction:column;
   z-index:2;
   background:var(--paper-surface, #E8EFF7);
+  border-left:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 55%, transparent);
 }
 .budget-bars-split-value{
   display:flex;
@@ -4216,6 +4215,7 @@ td.num.dash .cell-content{
           <span class="start-period-lead" id="startPeriodLead">
             <span class="budget-amt-bar budget-amt-bar-upper" id="startPeriodAmtBar" aria-hidden="true"></span>
             <span class="budget-amt-bar budget-amt-bar-lower" id="startPeriodAmtBarLower" aria-hidden="true"></span>
+            <span class="start-period-budget-rail" id="startPeriodBudgetRail" aria-hidden="true"></span>
             <span class="start-period-labels" id="startPeriodLabels" aria-hidden="true">
               <span id="startPeriodLabelReal" class="start-period-label start-period-label-real">Pågående</span>
               <span class="start-period-label start-period-label-ghost">Skuggbudget</span>
@@ -4230,7 +4230,6 @@ td.num.dash .cell-content{
               <option value="allt">Allt</option>
             </select>
           </span>
-          <span class="start-period-budget-rail" id="startPeriodBudgetRail" aria-hidden="true"></span>
           <span class="start-period-values" id="startPeriodValues">
             <span id="startPeriodValue" class="start-period-value start-period-value-real" aria-live="polite"></span>
             <span id="startPeriodValueGhost" class="start-period-value start-period-value-ghost" hidden aria-live="polite"></span>
@@ -5251,7 +5250,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v22';
+const APP_VERSION = '2026-09-26 v23';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7783,6 +7782,22 @@ function attachBudgetBarsGhost(row){
   return row;
 }
 
+/** Skala för liggande Pågående/Skugg-staplar: max av budget, utfall, skugg-utfall. */
+function budgetSplitTrackMax(budget, actual, ghostActual){
+  let ymax = Math.max(
+    budget > 0 ? budget : 0,
+    actual > 0 ? actual : 0,
+    ghostActual > 0 ? ghostActual : 0
+  );
+  if(ymax <= 0) ymax = 1;
+  return ymax;
+}
+
+function budgetSplitTrackPct(value, ymax){
+  if(!(ymax > 0)) return 0;
+  return Math.min(100, (Math.max(0, value) / ymax) * 100);
+}
+
 /** Liggande delade staplar för enbart pågående månad (samma siffror som Start). */
 function buildBudgetCurrentMonthSplitHtml(row){
   // Samma källa som startsidans teaser — undvik avvikande Budget UT / utfall.
@@ -7797,18 +7812,12 @@ function buildBudgetCurrentMonthSplitHtml(row){
   const ghost = hasGhost && Number.isFinite(ghostInfo.ghost) ? Math.round(ghostInfo.ghost) : 0;
   const ghostActual = hasGhost && budget > 0 ? Math.max(0, budget - ghostInfo.ghost) : 0;
 
-  let leftPct = budget > 0 ? budgetBarWidthPct(false, actual, budget) : 0;
-  let leftRed = remaining < 0 || (budget > 0 && budgetBarIsRed(false, actual, budget));
-  let rightPct = budget > 0 && hasGhost ? budgetBarWidthPct(false, ghostActual, budget) : 0;
-  let rightRed = hasGhost && (ghost < 0 || (budget > 0 && budgetBarIsRed(false, ghostActual, budget)));
-  if(remaining < 0){
-    leftRed = true;
-    leftPct = 100;
-  }
-  if(hasGhost && ghost < 0){
-    rightRed = true;
-    rightPct = 100;
-  }
+  const ymax = budgetSplitTrackMax(budget, actual, ghostActual);
+  const leftPct = budgetSplitTrackPct(actual, ymax);
+  const rightPct = hasGhost ? budgetSplitTrackPct(ghostActual, ymax) : 0;
+  const railPct = budget > 0 ? budgetSplitTrackPct(budget, ymax) : 0;
+  const leftRed = remaining < 0 || (budget > 0 && actual > budget);
+  const rightRed = hasGhost && (ghost < 0 || ghostActual > budget);
 
   const budgetLab = budget > 0
     ? ('Budget UT ' + formatBudgetAmtEdit(budget))
@@ -7839,6 +7848,10 @@ function buildBudgetCurrentMonthSplitHtml(row){
   html += '</p>';
   html += '<div class="budget-bars-split" title="' + escapeHtml(tipLeft + (hasGhost ? '\n' + tipRight : '')) + '">';
   html += '<div class="budget-bars-split-main">';
+  if(budget > 0){
+    html += '<span class="budget-bars-split-budget-rail" style="left:'
+      + (Math.round(railPct * 10) / 10) + '%" aria-hidden="true"></span>';
+  }
   html += '<div class="budget-bars-split-half" data-budget-over="' + (leftRed ? '1' : '0') + '">'
     + '<span class="budget-bars-split-bar" style="width:' + (Math.round(leftPct * 10) / 10) + '%"></span>'
     + '<span class="budget-bars-split-label">Pågående'
@@ -7848,7 +7861,6 @@ function buildBudgetCurrentMonthSplitHtml(row){
     + '<span class="budget-bars-split-bar" style="width:' + (Math.round(rightPct * 10) / 10) + '%"></span>'
     + '<span class="budget-bars-split-label">Skuggbudget</span></div>';
   html += '</div>';
-  html += '<span class="budget-bars-split-budget-rail" aria-hidden="true"></span>';
   html += '<div class="budget-bars-split-values">'
     + '<span class="budget-bars-split-value' + (remaining < 0 ? ' neg' : '') + '">'
     + escapeHtml(formatBudgetAmtEdit(remaining))
@@ -8153,15 +8165,14 @@ function printBudgetBarsChart(){
     + '.budget-bars-line{display:inline-block;width:16px;height:0;border-top:2.5px solid #1A3050;}'
     + '.budget-bars-split{margin:8px 0 12px;display:flex;flex-direction:column;gap:8px;}'
     + '.budget-bars-split{margin:8px 0 12px;display:flex;flex-direction:row;align-items:stretch;border:1px solid #b8c4d4;border-radius:8px;background:#E8EFF7;overflow:hidden;position:relative;min-height:4.8rem;}'
-    + '.budget-bars-split-main{position:relative;flex:1 1 auto;min-width:0;display:flex;flex-direction:column;}'
-    + '.budget-bars-split-main::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:#b8c4d4;z-index:2;}'
-    + '.budget-bars-split-budget-rail{flex:0 0 3px;align-self:stretch;width:3px;background:#1A3050;opacity:0.9;}'
-    + '.budget-bars-split-half{position:relative;flex:1 1 50%;min-height:2.4rem;display:flex;align-items:center;}'
-    + '.budget-bars-split-bar{position:absolute;left:0;top:0;bottom:0;width:0;max-width:calc(100% - 4px);}'
-    + '.budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{background:#1FAE55;opacity:0.58;}'
-    + '.budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{background:#E03131;opacity:0.62;}'
+    + '.budget-bars-split-main{position:relative;flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:5px;padding:3px 0;}'
+    + '.budget-bars-split-budget-rail{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:#1A3050;opacity:0.85;z-index:0;}'
+    + '.budget-bars-split-half{position:relative;flex:1 1 50%;min-height:2.2rem;display:flex;align-items:center;z-index:1;}'
+    + '.budget-bars-split-bar{position:absolute;left:0;top:0;bottom:0;width:0;max-width:100%;}'
+    + '.budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{background:#1FAE55;opacity:0.72;}'
+    + '.budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{background:#E03131;opacity:0.78;}'
     + '.budget-bars-split-label{position:relative;z-index:2;padding:0 10px;font-size:13px;font-weight:500;}'
-    + '.budget-bars-split-values{flex:0 0 auto;display:flex;flex-direction:column;}'
+    + '.budget-bars-split-values{flex:0 0 auto;display:flex;flex-direction:column;border-left:1px solid #b8c4d4;}'
     + '.budget-bars-split-value{display:flex;align-items:center;justify-content:flex-end;height:50%;min-height:2.4rem;padding:0 12px 0 10px;font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:600;}'
     + '.budget-bars-split-value.neg{color:#E03131;}'
     + '.budget-bars-split-meta{margin:4px 0 10px;font-size:12px;color:#5A6F88;}'
@@ -8504,13 +8515,14 @@ function ensureStartPeriodAmtBar(wrap, id, extraClass){
 }
 
 /**
- * Undre halv: spök-saldo (siffra alltid i delad vy).
- * Stapel mot budget bara när budget finns.
+ * Undre halv: skugg-saldo (siffra alltid i delad vy).
+ * Bredd mot gemensam skala (ymax) så stapeln kan gå förbi budgetstrecket.
  * @param {number|null} budget
- * @param {number} remaining  återstår från övre halv­an (0 om ingen budget)
+ * @param {number} remaining
+ * @param {number} [ymax]
  */
-function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
-  if(!wrap) return;
+function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining, ymax){
+  if(!wrap) return null;
   const bar = lowerBar || ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBarLower', 'budget-amt-bar-lower');
   const ghostEl = el('startPeriodValueGhost');
   const rem = typeof remaining === 'number' && Number.isFinite(remaining) ? remaining : 0;
@@ -8523,7 +8535,7 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
       ghostEl.textContent = '';
       ghostEl.classList.remove('pos', 'neg');
     }
-    return;
+    return null;
   }
   const ghostRound = Number.isFinite(ghostInfo.ghost) ? Math.round(ghostInfo.ghost) : 0;
   if(ghostEl){
@@ -8551,22 +8563,18 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining){
     wrap.title = base + tipExtra;
   }
 
+  const ghostActual = budget > 0 ? Math.max(0, budget - ghostInfo.ghost) : 0;
   if(!(budget > 0)){
     wrap.removeAttribute('data-budget-lower-over');
     if(bar) bar.style.width = '0';
-    return;
+    return { ghostActual: ghostActual, ghost: ghostRound };
   }
-  // Tolka spök-saldo som prognostiserat "återstår" → prognostiserat förbrukat.
-  const ghostActual = Math.max(0, budget - ghostInfo.ghost);
-  let pct = budgetBarWidthPct(false, ghostActual, budget);
-  let isRed = ghostRound < 0 || budgetBarIsRed(false, ghostActual, budget);
-  // Negativt skugg-saldo = över budget (även vid litet överskridande).
-  if(ghostRound < 0){
-    isRed = true;
-    pct = 100;
-  }
+  const scale = ymax > 0 ? ymax : budgetSplitTrackMax(budget, 0, ghostActual);
+  const pct = budgetSplitTrackPct(ghostActual, scale);
+  const isRed = ghostRound < 0 || ghostActual > budget;
   wrap.setAttribute('data-budget-lower-over', isRed ? '1' : '0');
   if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
+  return { ghostActual: ghostActual, ghost: ghostRound };
 }
 
 function clearStartTeaserLowerBar(wrap, lowerBar){
@@ -8581,10 +8589,19 @@ function clearStartTeaserLowerBar(wrap, lowerBar){
     ghostEl.textContent = '';
     ghostEl.classList.remove('pos', 'neg');
   }
+  const rail = el('startPeriodBudgetRail');
+  if(rail) rail.style.left = '';
 }
 
-function syncStartPeriodBudgetRail(wrap, split){
-  /* Budgetstreck = CSS border på values-kolumnen i split-läge. */
+function syncStartPeriodBudgetRail(lead, budget, ymax){
+  const rail = el('startPeriodBudgetRail');
+  if(!rail) return;
+  if(!(budget > 0) || !(ymax > 0)){
+    rail.style.left = '';
+    return;
+  }
+  const pct = budgetSplitTrackPct(budget, ymax);
+  rail.style.left = (Math.round(pct * 10) / 10) + '%';
 }
 
 function paintStartPeriodBar(){
@@ -8636,14 +8653,17 @@ function paintStartPeriodBar(){
       valueEl.textContent = '';
     }
     if(bar) bar.style.width = '0';
-    if(split) paintStartTeaserLowerBar(wrap, amtBarLower, null, 0);
-    syncStartPeriodBudgetRail(wrap, split);
+    if(split) paintStartTeaserLowerBar(wrap, amtBarLower, null, 0, 0);
+    syncStartPeriodBudgetRail(el('startPeriodLead'), 0, 0);
     return;
   }
   wrap.removeAttribute('data-budget-unbudgeted');
-  const pct = budgetBarWidthPct(false, actual, budget);
-  const red = budgetBarIsRed(false, actual, budget);
   const remaining = Math.round(budget) - Math.round(actual);
+  const ghostProbe = computeStartTeaserGhostSaldo(remaining, todayIsoDate());
+  const ghostActual = ghostProbe ? Math.max(0, budget - ghostProbe.ghost) : 0;
+  const ymax = budgetSplitTrackMax(budget, actual, ghostActual);
+  const pct = budgetSplitTrackPct(actual, ymax);
+  const red = remaining < 0 || actual > budget;
   wrap.setAttribute('data-budget-over', red ? '1' : '0');
   wrap.setAttribute('data-budget-side', 'out');
   wrap.title = budgetAmtBarTip(false, actual, budget)
@@ -8652,8 +8672,8 @@ function paintStartPeriodBar(){
   if(remaining < 0) valueEl.classList.add('neg');
   bar = ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBar', 'budget-amt-bar-upper');
   if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
-  if(split) paintStartTeaserLowerBar(wrap, amtBarLower, budget, remaining);
-  syncStartPeriodBudgetRail(wrap, split);
+  if(split) paintStartTeaserLowerBar(wrap, amtBarLower, budget, remaining, ymax);
+  syncStartPeriodBudgetRail(el('startPeriodLead'), budget, ymax);
 }
 function computeStartBudgetUtTotals(mode){
   const empty = { outBudget: null, outActual: 0 };
