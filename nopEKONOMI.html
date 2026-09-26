@@ -3367,50 +3367,38 @@ footer p{
   height:auto;
   display:block;
 }
-/* Delad stapel (pågående månad): vänster = pågående, höger = skuggbudget. */
+/* Delad stapel (pågående månad): liggande staplar — Pågående / Skuggbudget. */
 .budget-bars-split{
   margin:8px 10px 12px;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.budget-bars-split::after{
+  display:none;
+}
+.budget-bars-split-half{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  min-height:2.4rem;
+  padding:0 12px 0 10px;
+  box-sizing:border-box;
   border:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 70%, transparent);
   border-radius:8px;
   background:var(--paper-surface, #E8EFF7);
   overflow:hidden;
-  position:relative;
-  display:flex;
-  flex-direction:row;
-  align-items:stretch;
-  min-height:5.6rem;
-}
-.budget-bars-split::after{
-  content:'';
-  position:absolute;
-  top:0;
-  bottom:0;
-  left:50%;
-  width:1px;
-  background:color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 70%, transparent);
-  z-index:2;
-  pointer-events:none;
-}
-.budget-bars-split-half{
-  position:relative;
-  flex:1 1 50%;
-  min-width:0;
-  display:flex;
-  flex-direction:column;
-  align-items:stretch;
-  justify-content:space-between;
-  gap:6px;
-  padding:8px 12px 10px;
-  box-sizing:border-box;
   z-index:1;
 }
 .budget-bars-split-bar{
   position:absolute;
   left:0;
-  right:0;
+  top:0;
   bottom:0;
-  height:0;
-  width:100%;
+  width:0;
+  height:100%;
   pointer-events:none;
   z-index:0;
 }
@@ -3448,7 +3436,7 @@ footer p{
   font-weight:600;
   color:var(--ink, #1a3050);
   white-space:nowrap;
-  align-self:flex-end;
+  align-self:center;
 }
 .budget-bars-split-value.neg{
   color:#E03131;
@@ -5183,7 +5171,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v08';
+const APP_VERSION = '2026-09-26 v09';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7715,7 +7703,7 @@ function attachBudgetBarsGhost(row){
   return row;
 }
 
-/** Delad stapel sida-vid-sida för enbart pågående månad. */
+/** Liggande delade staplar för enbart pågående månad. */
 function buildBudgetCurrentMonthSplitHtml(row){
   const budget = row.budget > 0 ? row.budget : 0;
   const actual = Math.max(0, row.actual || 0);
@@ -7747,7 +7735,7 @@ function buildBudgetCurrentMonthSplitHtml(row){
   let html = legend;
   html += '<div class="budget-bars-split" title="' + escapeHtml(tipLeft + (hasGhost ? '\n' + tipRight : '')) + '">';
   html += '<div class="budget-bars-split-half" data-budget-over="' + (leftRed ? '1' : '0') + '">'
-    + '<span class="budget-bars-split-bar" style="height:' + (Math.round(leftPct * 10) / 10) + '%" aria-hidden="true"></span>'
+    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(leftPct * 10) / 10) + '%" aria-hidden="true"></span>'
     + '<span class="budget-bars-split-label">Pågående'
     + (budget > 0 ? ' (' + escapeHtml(formatBudgetAmtEdit(budget)) + ')' : '')
     + '</span>'
@@ -7755,7 +7743,7 @@ function buildBudgetCurrentMonthSplitHtml(row){
     + escapeHtml(formatBudgetAmtEdit(remaining))
     + '</span></div>';
   html += '<div class="budget-bars-split-half is-ghost" data-budget-over="' + (rightRed ? '1' : '0') + '">'
-    + '<span class="budget-bars-split-bar" style="height:' + (Math.round(rightPct * 10) / 10) + '%" aria-hidden="true"></span>'
+    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(rightPct * 10) / 10) + '%" aria-hidden="true"></span>'
     + '<span class="budget-bars-split-label">Skuggbudget</span>'
     + '<span class="budget-bars-split-value' + (hasGhost && ghost < 0 ? ' neg' : '') + '">'
     + (hasGhost ? escapeHtml(formatBudgetAmtEdit(ghost)) : '—')
@@ -7885,13 +7873,18 @@ function buildBudgetOutBarsSvgChunk(list){
       const y = yAt(r.actual);
       const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
         + ', budget ' + formatReportInt(Math.round(r.budget));
+      const moodFill = r.isCurrentMonth && r.budget > 0
+        ? (budgetBarIsRed(false, r.actual, r.budget) ? red : green)
+        : barColor;
       svg += '<g>';
       svg += '<title>' + escapeHtml(tip) + '</title>';
       svg += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + barMaxH
         + '" rx="2" fill="' + barSoft + '"/>';
       if(h > 0){
         svg += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h
-          + '" rx="2" fill="' + barColor + '"/>';
+          + '" rx="2" fill="' + moodFill + '"'
+          + (r.isCurrentMonth && r.budget > 0 ? ' opacity="0.85"' : '')
+          + '/>';
       }
     }
     if(rotateLabels){
@@ -8055,14 +8048,13 @@ function printBudgetBarsChart(){
     + '.budget-bars-swatch.is-green{background:#1FAE55;opacity:0.7;}'
     + '.budget-bars-swatch.is-ghost{background:#1FAE55;opacity:0.45;}'
     + '.budget-bars-line{display:inline-block;width:16px;height:0;border-top:2.5px solid #1A3050;}'
-    + '.budget-bars-split{margin:8px 0 12px;border:1px solid #b8c4d4;border-radius:8px;background:#E8EFF7;overflow:hidden;position:relative;display:flex;flex-direction:row;min-height:5.6rem;}'
-    + '.budget-bars-split::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:#b8c4d4;}'
-    + '.budget-bars-split-half{position:relative;flex:1 1 50%;display:flex;flex-direction:column;justify-content:space-between;padding:8px 12px 10px;}'
-    + '.budget-bars-split-bar{position:absolute;left:0;right:0;bottom:0;width:100%;height:0;}'
+    + '.budget-bars-split{margin:8px 0 12px;display:flex;flex-direction:column;gap:8px;}'
+    + '.budget-bars-split-half{position:relative;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:2.4rem;padding:0 12px 0 10px;border:1px solid #b8c4d4;border-radius:8px;background:#E8EFF7;overflow:hidden;}'
+    + '.budget-bars-split-bar{position:absolute;left:0;top:0;bottom:0;width:0;height:100%;}'
     + '.budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{background:#1FAE55;opacity:0.58;}'
     + '.budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{background:#E03131;opacity:0.62;}'
     + '.budget-bars-split-label{position:relative;z-index:1;font-size:13px;font-weight:500;}'
-    + '.budget-bars-split-value{position:relative;z-index:1;font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:600;align-self:flex-end;}'
+    + '.budget-bars-split-value{position:relative;z-index:1;font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:600;}'
     + '.budget-bars-split-value.neg{color:#E03131;}'
     + '.budget-bars-split-meta{margin:0 0 8px;font-size:12px;color:#5A6F88;}'
     + '.chart-chunked-panel .netto-print-year-label{margin:0 0 6px;font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:700;}'
