@@ -378,21 +378,18 @@ h1{
 .start-period-wrap[data-teaser-split="1"] .start-period-lead::after{
   display:none;
 }
-.start-period-wrap[data-teaser-split="1"] .start-period-labels{
-  align-items:flex-start;
+.start-period-wrap[data-teaser-split="1"] .start-period-label-real::after{
+  display:none;
 }
-/* Handtaget direkt efter Pågående-texten (etiketten får textbredd, inte hela fältet). */
-.start-period-wrap[data-teaser-split="1"] .start-period-label-real{
-  position:relative;
-  width:max-content;
-  max-width:100%;
+/* Handtag till höger om siffrorna, som en vanlig rullgardin. */
+.start-period-wrap[data-teaser-split="1"] .start-period-values{
   padding-right:1.35em;
 }
-.start-period-wrap[data-teaser-split="1"] .start-period-label-real::after{
+.start-period-wrap[data-teaser-split="1"] .start-period-values::after{
   content:'';
   position:absolute;
-  right:0.15em;
-  top:50%;
+  right:8px;
+  top:25%;
   margin-top:-2px;
   width:0;
   height:0;
@@ -401,10 +398,7 @@ h1{
   border-top:5px solid var(--ink, #1a3050);
   opacity:0.55;
   pointer-events:none;
-}
-.start-period-wrap[data-teaser-split="1"] .start-period-label-ghost{
-  width:max-content;
-  max-width:100%;
+  z-index:2;
 }
 .start-period-values{
   position:relative;
@@ -5195,7 +5189,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v17';
+const APP_VERSION = '2026-09-26 v18';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
