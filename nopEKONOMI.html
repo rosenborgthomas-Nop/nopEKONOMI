@@ -256,33 +256,15 @@ h1{
   top:50%;
   bottom:0;
 }
-/* Budgetstreck bakom fyllnaden: syns i lucka mellan halvoma, inte inuti färgen. */
-.start-period-wrap[data-teaser-split="1"] .start-period-budget-rail{
-  display:block;
-  position:absolute;
-  top:0;
-  bottom:0;
-  width:2px;
-  background:#1A3050;
-  opacity:0.7;
-  z-index:0;
-  pointer-events:none;
-}
+/* Budgetstreck = linjen mellan staplar och siffror (alltid synlig, inte inuti fyllnad). */
 .start-period-wrap .start-period-budget-rail{
   display:none;
 }
+.start-period-wrap[data-teaser-split="1"] .start-period-values{
+  border-left:2px solid #1A3050;
+}
 .start-period-wrap[data-teaser-split="1"] .start-period-lead::before{
   display:none;
-}
-.start-period-wrap .budget-amt-bar{
-  z-index:1;
-}
-.start-period-wrap[data-teaser-split="1"] .budget-amt-bar-upper,
-.start-period-wrap[data-teaser-split="1"] .budget-amt-bar-lower{
-  opacity:0.92;
-}
-.start-period-wrap[data-teaser-split="1"]::after{
-  z-index:2;
 }
 .start-period-wrap::after{
   content:'';
@@ -3440,16 +3422,14 @@ footer p{
   z-index:2;
   pointer-events:none;
 }
-/* Ett kontinuerligt budgetstreck bakom fyllnaderna — syns mellan/utanför. */
+/* Egen kolumn för budgetstreck — alltid synlig mellan staplar och siffror. */
 .budget-bars-split-budget-rail{
-  position:absolute;
-  top:0;
-  bottom:0;
-  right:0;
+  flex:0 0 2px;
+  align-self:stretch;
   width:2px;
   background:#1A3050;
-  opacity:0.7;
-  z-index:0;
+  opacity:0.85;
+  z-index:3;
   pointer-events:none;
 }
 .budget-bars-split-half{
@@ -3471,17 +3451,17 @@ footer p{
 }
 .budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{
   background:#1FAE55;
-  opacity:0.92;
+  opacity:0.58;
 }
 .budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{
   background:#E03131;
-  opacity:0.92;
+  opacity:0.62;
 }
 .budget-bars-split-half.is-ghost[data-budget-over="0"] .budget-bars-split-bar{
-  opacity:0.78;
+  opacity:0.42;
 }
 .budget-bars-split-half.is-ghost[data-budget-over="1"] .budget-bars-split-bar{
-  opacity:0.85;
+  opacity:0.5;
 }
 .budget-bars-split-label{
   position:relative;
@@ -3501,7 +3481,6 @@ footer p{
   flex:0 0 auto;
   display:flex;
   flex-direction:column;
-  border-left:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 55%, transparent);
   z-index:2;
   background:var(--paper-surface, #E8EFF7);
 }
@@ -5260,7 +5239,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v20';
+const APP_VERSION = '2026-09-26 v21';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7848,7 +7827,6 @@ function buildBudgetCurrentMonthSplitHtml(row){
   html += '</p>';
   html += '<div class="budget-bars-split" title="' + escapeHtml(tipLeft + (hasGhost ? '\n' + tipRight : '')) + '">';
   html += '<div class="budget-bars-split-main">';
-  html += '<span class="budget-bars-split-budget-rail" aria-hidden="true"></span>';
   html += '<div class="budget-bars-split-half" data-budget-over="' + (leftRed ? '1' : '0') + '">'
     + '<span class="budget-bars-split-bar" style="width:' + (Math.round(leftPct * 10) / 10) + '%"></span>'
     + '<span class="budget-bars-split-label">Pågående'
@@ -7858,6 +7836,7 @@ function buildBudgetCurrentMonthSplitHtml(row){
     + '<span class="budget-bars-split-bar" style="width:' + (Math.round(rightPct * 10) / 10) + '%"></span>'
     + '<span class="budget-bars-split-label">Skuggbudget</span></div>';
   html += '</div>';
+  html += '<span class="budget-bars-split-budget-rail" aria-hidden="true"></span>';
   html += '<div class="budget-bars-split-values">'
     + '<span class="budget-bars-split-value' + (remaining < 0 ? ' neg' : '') + '">'
     + escapeHtml(formatBudgetAmtEdit(remaining))
@@ -8164,13 +8143,13 @@ function printBudgetBarsChart(){
     + '.budget-bars-split{margin:8px 0 12px;display:flex;flex-direction:row;align-items:stretch;border:1px solid #b8c4d4;border-radius:8px;background:#E8EFF7;overflow:hidden;position:relative;min-height:4.8rem;}'
     + '.budget-bars-split-main{position:relative;flex:1 1 auto;min-width:0;display:flex;flex-direction:column;}'
     + '.budget-bars-split-main::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:#b8c4d4;z-index:2;}'
-    + '.budget-bars-split-budget-rail{position:absolute;top:0;bottom:0;right:0;width:2px;background:#1A3050;opacity:0.7;z-index:0;}'
-    + '.budget-bars-split-half{position:relative;flex:1 1 50%;min-height:2.4rem;display:flex;align-items:center;z-index:1;}'
+    + '.budget-bars-split-budget-rail{flex:0 0 2px;align-self:stretch;width:2px;background:#1A3050;opacity:0.85;}'
+    + '.budget-bars-split-half{position:relative;flex:1 1 50%;min-height:2.4rem;display:flex;align-items:center;}'
     + '.budget-bars-split-bar{position:absolute;left:0;top:0;bottom:0;width:0;}'
-    + '.budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{background:#1FAE55;opacity:0.92;}'
-    + '.budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{background:#E03131;opacity:0.92;}'
+    + '.budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{background:#1FAE55;opacity:0.58;}'
+    + '.budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{background:#E03131;opacity:0.62;}'
     + '.budget-bars-split-label{position:relative;z-index:2;padding:0 10px;font-size:13px;font-weight:500;}'
-    + '.budget-bars-split-values{flex:0 0 auto;display:flex;flex-direction:column;border-left:1px solid #b8c4d4;}'
+    + '.budget-bars-split-values{flex:0 0 auto;display:flex;flex-direction:column;}'
     + '.budget-bars-split-value{display:flex;align-items:center;justify-content:flex-end;height:50%;min-height:2.4rem;padding:0 12px 0 10px;font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:600;}'
     + '.budget-bars-split-value.neg{color:#E03131;}'
     + '.budget-bars-split-meta{margin:4px 0 10px;font-size:12px;color:#5A6F88;}'
@@ -8590,20 +8569,10 @@ function clearStartTeaserLowerBar(wrap, lowerBar){
     ghostEl.textContent = '';
     ghostEl.classList.remove('pos', 'neg');
   }
-  const rail = el('startPeriodBudgetRail');
-  if(rail) rail.style.left = '';
 }
 
 function syncStartPeriodBudgetRail(wrap, split){
-  const rail = el('startPeriodBudgetRail');
-  const lead = el('startPeriodLead');
-  if(!rail || !wrap || !lead) return;
-  if(!split){
-    rail.style.left = '';
-    return;
-  }
-  // Placera vid högerkant av stapelbanan (före siffrorna).
-  rail.style.left = Math.max(0, lead.offsetWidth - 1) + 'px';
+  /* Budgetstreck = CSS border på values-kolumnen i split-läge. */
 }
 
 function paintStartPeriodBar(){
