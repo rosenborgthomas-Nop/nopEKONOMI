@@ -3298,6 +3298,55 @@ footer p{
   overflow:hidden;
   text-overflow:ellipsis;
 }
+.budget-period-bar .budget-bars-btn{
+  flex:0 0 auto;
+  margin-left:auto;
+}
+.budget-bars-panel{
+  flex:0 0 auto;
+  margin:0 0 10px;
+  padding:10px 8px 6px;
+  background:var(--paper);
+  color:var(--text-on-paper);
+  border-radius:10px;
+  box-shadow:0 12px 28px -18px rgba(0,0,0,0.45);
+  overflow:hidden;
+}
+.budget-bars-panel[hidden]{
+  display:none !important;
+}
+.budget-bars-panel .budget-bars-legend{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px 16px;
+  margin:4px 8px 8px;
+  font-size:12px;
+  font-weight:600;
+  color:var(--text-on-paper-soft);
+}
+.budget-bars-panel .budget-bars-legend span{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.budget-bars-panel .budget-bars-swatch{
+  display:inline-block;
+  width:12px;
+  height:10px;
+  border-radius:2px;
+  background:#2B579A;
+}
+.budget-bars-panel .budget-bars-line{
+  display:inline-block;
+  width:16px;
+  height:0;
+  border-top:2.5px solid #1A3050;
+}
+.budget-bars-panel .payee-chart-svg{
+  width:100%;
+  height:auto;
+  display:block;
+}
 .care-list-shell{
   background:var(--paper);
   color:var(--text-on-paper);
@@ -4259,6 +4308,10 @@ td.num.dash .cell-content{
                 <option value="allt">Allt</option>
               </select>
               <span id="budgetPeriodDates" class="budget-period-dates" aria-live="polite"></span>
+              <button type="button" class="btn-quiet budget-bars-btn" id="budgetBarsBtn">Staplar</button>
+            </div>
+            <div id="budgetBarsPanel" class="budget-bars-panel" hidden>
+              <div id="budgetBarsBody"></div>
             </div>
             <div class="care-list-shell">
               <div class="table-scroll care-list-scroll" id="careListScroll" tabindex="0">
@@ -5011,7 +5064,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v04';
+const APP_VERSION = '2026-09-26 v05';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7389,6 +7442,7 @@ function syncBudgetPeriodBar(){
   bar.hidden = !on;
   if(!on){
     if(datesEl) datesEl.textContent = '';
+    hideBudgetBarsPanel();
     return;
   }
   if(menu && menu.value !== budgetPeriodMode){
@@ -7405,6 +7459,172 @@ function syncBudgetPeriodBar(){
       datesEl.removeAttribute('title');
     }
   }
+  if(budgetBarsVisible) renderBudgetBarsPanel();
+}
+
+/** Budget UT-staplar: synliga när Staplar är aktivt. */
+let budgetBarsVisible = false;
+
+function hideBudgetBarsPanel(){
+  budgetBarsVisible = false;
+  const panel = el('budgetBarsPanel');
+  const btn = el('budgetBarsBtn');
+  if(panel) panel.hidden = true;
+  if(btn) btn.textContent = 'Staplar';
+}
+
+function collectBudgetOutChartRows(){
+  const rows = [];
+  const items = Array.isArray(careListItems) ? careListItems : [];
+  for(const it of items){
+    if(!it || it.rowKind !== 'cat') continue;
+    if(it.isIncome) continue;
+    const budget = Math.max(0, Number(it.monthAmt) || 0);
+    const actual = Math.max(0, Number(it.spentAmt) || 0);
+    if(budget <= 0 && actual <= 0) continue;
+    rows.push({
+      label: String(it.name || ''),
+      budget: budget,
+      actual: actual
+    });
+  }
+  rows.sort((a, b) => a.label.localeCompare(b.label, 'sv'));
+  return rows;
+}
+
+/** Enkel stapeldiagram: staplar = utfall, linje = budget UT. Samma färg på alla staplar. */
+function buildBudgetOutBarsChart(rows){
+  const list = (rows || []).filter(r => r && r.label);
+  if(!list.length){
+    return '<p class="sub" style="margin:8px 12px">Inga utgiftskategorier med budget eller utfall i perioden.</p>';
+  }
+
+  const barColor = '#2B579A';
+  const barSoft = 'rgba(43,87,154,0.12)';
+  const lineColor = '#1A3050';
+  const axis = '#5A6F88';
+
+  let ymax = 0;
+  for(const r of list){
+    if(r.actual > ymax) ymax = r.actual;
+    if(r.budget > ymax) ymax = r.budget;
+  }
+  if(ymax <= 0) ymax = 1;
+  ymax *= 1.08;
+
+  const n = list.length;
+  const mobileFit = isReportMobileLayout();
+  const rotateLabels = n > (mobileFit ? 5 : 8);
+  const valueHead = 18;
+  const plotH = mobileFit ? 170 : 190;
+  const barMaxH = plotH - valueHead;
+  const labelH = rotateLabels ? 52 : 28;
+  const padL = mobileFit ? 36 : 44;
+  const padR = mobileFit ? 12 : 16;
+  const padT = 6;
+  const padB = 6;
+  const gap = mobileFit ? 4 : 7;
+  const barSlot = Math.max(mobileFit ? 22 : 28, Math.min(48, Math.floor((mobileFit ? 320 : 520) / Math.max(n, 1))));
+  const barsWidth = n * barSlot;
+  const width = padL + padR + barsWidth;
+  const height = padT + plotH + labelH + padB;
+  const baselineY = padT + plotH;
+  const trackTop = padT + valueHead;
+  const yAt = v => baselineY - (Math.max(0, v) / ymax) * barMaxH;
+
+  let svg = '';
+  // Y-ticks
+  for(let g = 0; g <= 3; g++){
+    const val = ymax - (ymax * g) / 3;
+    const gy = padT + valueHead + (barMaxH * g) / 3;
+    svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (width - padR) + '" y2="' + gy + '"'
+      + ' stroke="rgba(168,189,212,0.55)" stroke-width="0.6"/>';
+    svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
+      + ' font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
+  }
+  svg += '<line x1="' + padL + '" y1="' + baselineY + '" x2="' + (width - padR) + '" y2="' + baselineY
+    + '" stroke="rgba(168,189,212,0.85)" stroke-width="1"/>';
+
+  const linePts = [];
+  list.forEach((r, i) => {
+    const x = padL + i * barSlot + gap / 2;
+    const bw = barSlot - gap;
+    const h = Math.max(0, baselineY - yAt(r.actual));
+    const y = yAt(r.actual);
+    const cx = x + bw / 2;
+    linePts.push(cx.toFixed(1) + ',' + yAt(r.budget).toFixed(1));
+
+    const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
+      + ', budget ' + formatReportInt(Math.round(r.budget));
+    svg += '<g>';
+    svg += '<title>' + escapeHtml(tip) + '</title>';
+    svg += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + barMaxH
+      + '" rx="2" fill="' + barSoft + '"/>';
+    if(h > 0){
+      svg += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h
+        + '" rx="2" fill="' + barColor + '"/>';
+    }
+
+    const lab = r.label.length > 14 ? r.label.slice(0, 13) + '…' : r.label;
+    if(rotateLabels){
+      svg += '<text transform="translate(' + cx + ' ' + (baselineY + 10) + ') rotate(-50)"'
+        + ' text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+        + escapeHtml(lab) + '</text>';
+    } else {
+      svg += '<text x="' + cx + '" y="' + (baselineY + 16) + '" text-anchor="middle"'
+        + ' font-family="JetBrains Mono, monospace" font-size="10" fill="' + axis + '">'
+        + escapeHtml(lab) + '</text>';
+    }
+    svg += '</g>';
+  });
+
+  if(linePts.length){
+    svg += '<polyline fill="none" stroke="' + lineColor + '" stroke-width="2.2"'
+      + ' stroke-linejoin="round" stroke-linecap="round" points="' + linePts.join(' ') + '"/>';
+    list.forEach((r, i) => {
+      const x = padL + i * barSlot + gap / 2;
+      const bw = barSlot - gap;
+      const cx = x + bw / 2;
+      svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + yAt(r.budget).toFixed(1)
+        + '" r="2.4" fill="' + lineColor + '"/>';
+    });
+  }
+
+  const legend = '<p class="budget-bars-legend">'
+    + '<span><i class="budget-bars-swatch" aria-hidden="true"></i>Utfall</span>'
+    + '<span><i class="budget-bars-line" aria-hidden="true"></i>Budget UT</span>'
+    + '</p>';
+
+  return legend
+    + '<svg class="payee-chart-svg" viewBox="0 0 ' + width + ' ' + height + '" role="img"'
+    + ' aria-label="Budget UT: staplar utfall, linje budget">'
+    + svg + '</svg>';
+}
+
+function renderBudgetBarsPanel(){
+  const panel = el('budgetBarsPanel');
+  const body = el('budgetBarsBody');
+  const btn = el('budgetBarsBtn');
+  if(!panel || !body) return;
+  if(careListKind !== 'budget'){
+    hideBudgetBarsPanel();
+    return;
+  }
+  budgetBarsVisible = true;
+  panel.hidden = false;
+  if(btn) btn.textContent = 'Dölj staplar';
+  body.innerHTML = buildBudgetOutBarsChart(collectBudgetOutChartRows());
+}
+
+function toggleBudgetBarsPanel(){
+  if(careListKind !== 'budget') return;
+  if(budgetBarsVisible){
+    hideBudgetBarsPanel();
+    return;
+  }
+  try{ flushBudgetMonthInputs(); } catch(e){ /* ignore */ }
+  renderBudgetBarsPanel();
 }
 
 /**
@@ -18397,6 +18617,13 @@ if(budgetPeriodMenu){
       careListHighlightIdx = keepIdx;
       updateCareListHighlight();
     }
+  });
+}
+
+const budgetBarsBtn = el('budgetBarsBtn');
+if(budgetBarsBtn){
+  budgetBarsBtn.addEventListener('click', () => {
+    toggleBudgetBarsPanel();
   });
 }
 
