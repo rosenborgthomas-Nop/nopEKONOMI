@@ -256,6 +256,22 @@ h1{
   top:50%;
   bottom:0;
 }
+/* Budget UT-streck vid slutet av stapelbanan (före siffrorna). */
+.start-period-wrap[data-teaser-split="1"] .start-period-lead::before{
+  content:'';
+  position:absolute;
+  right:0;
+  top:3px;
+  bottom:3px;
+  width:2px;
+  background:#1A3050;
+  opacity:0.72;
+  pointer-events:none;
+  z-index:3;
+}
+.start-period-wrap[data-teaser-split="1"] .start-period-lead .budget-amt-bar{
+  max-width:100%;
+}
 .start-period-wrap::after{
   content:'';
   display:none;
@@ -3394,11 +3410,10 @@ footer p{
 .budget-bars-split-half{
   position:relative;
   display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
+  align-items:stretch;
+  gap:0;
   min-height:2.4rem;
-  padding:0 12px 0 10px;
+  padding:0;
   box-sizing:border-box;
   border:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 70%, transparent);
   border-radius:8px;
@@ -3406,15 +3421,33 @@ footer p{
   overflow:hidden;
   z-index:1;
 }
+.budget-bars-split-track{
+  position:relative;
+  flex:1 1 auto;
+  min-width:0;
+  align-self:stretch;
+  z-index:0;
+}
 .budget-bars-split-bar{
   position:absolute;
   left:0;
   top:0;
   bottom:0;
   width:0;
-  height:100%;
+  height:auto;
   pointer-events:none;
   z-index:0;
+}
+.budget-bars-split-budget-tick{
+  position:absolute;
+  right:0;
+  top:3px;
+  bottom:3px;
+  width:2px;
+  background:#1A3050;
+  opacity:0.72;
+  pointer-events:none;
+  z-index:2;
 }
 .budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{
   background:#1FAE55;
@@ -3433,10 +3466,15 @@ footer p{
 .budget-bars-split-label{
   position:relative;
   z-index:1;
+  display:flex;
+  align-items:center;
+  height:100%;
+  padding:0 0 0 10px;
   font-size:13px;
   font-weight:500;
   color:var(--ink, #1a3050);
   white-space:nowrap;
+  pointer-events:none;
 }
 .budget-bars-split-half.is-ghost .budget-bars-split-label{
   font-size:12px;
@@ -3445,12 +3483,17 @@ footer p{
 .budget-bars-split-value{
   position:relative;
   z-index:1;
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  padding:0 12px 0 8px;
   font-family:'JetBrains Mono', monospace;
   font-size:14px;
   font-weight:600;
   color:var(--ink, #1a3050);
   white-space:nowrap;
-  align-self:center;
+  border-left:1px solid color-mix(in srgb, var(--paper-line-strong, #b8c4d4) 45%, transparent);
+  box-sizing:border-box;
 }
 .budget-bars-split-value.neg{
   color:#E03131;
@@ -5189,7 +5232,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v18';
+const APP_VERSION = '2026-09-26 v19';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -7765,16 +7808,20 @@ function buildBudgetCurrentMonthSplitHtml(row){
   html += '</p>';
   html += '<div class="budget-bars-split" title="' + escapeHtml(tipLeft + (hasGhost ? '\n' + tipRight : '')) + '">';
   html += '<div class="budget-bars-split-half" data-budget-over="' + (leftRed ? '1' : '0') + '">'
-    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(leftPct * 10) / 10) + '%" aria-hidden="true"></span>'
+    + '<span class="budget-bars-split-track" aria-hidden="true">'
+    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(leftPct * 10) / 10) + '%"></span>'
+    + '<span class="budget-bars-split-budget-tick"></span>'
     + '<span class="budget-bars-split-label">Pågående'
     + (budget > 0 ? ' (' + escapeHtml(formatBudgetAmtEdit(budget)) + ')' : '')
-    + '</span>'
+    + '</span></span>'
     + '<span class="budget-bars-split-value' + (remaining < 0 ? ' neg' : '') + '">'
     + escapeHtml(formatBudgetAmtEdit(remaining))
     + '</span></div>';
   html += '<div class="budget-bars-split-half is-ghost" data-budget-over="' + (rightRed ? '1' : '0') + '">'
-    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(rightPct * 10) / 10) + '%" aria-hidden="true"></span>'
-    + '<span class="budget-bars-split-label">Skuggbudget</span>'
+    + '<span class="budget-bars-split-track" aria-hidden="true">'
+    + '<span class="budget-bars-split-bar" style="width:' + (Math.round(rightPct * 10) / 10) + '%"></span>'
+    + '<span class="budget-bars-split-budget-tick"></span>'
+    + '<span class="budget-bars-split-label">Skuggbudget</span></span>'
     + '<span class="budget-bars-split-value' + (hasGhost && ghost < 0 ? ' neg' : '') + '">'
     + (hasGhost ? escapeHtml(formatBudgetAmtEdit(ghost)) : '—')
     + '</span></div>';
@@ -8074,12 +8121,14 @@ function printBudgetBarsChart(){
     + '.budget-bars-swatch.is-red{background:#E03131;opacity:0.7;}'
     + '.budget-bars-line{display:inline-block;width:16px;height:0;border-top:2.5px solid #1A3050;}'
     + '.budget-bars-split{margin:8px 0 12px;display:flex;flex-direction:column;gap:8px;}'
-    + '.budget-bars-split-half{position:relative;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:2.4rem;padding:0 12px 0 10px;border:1px solid #b8c4d4;border-radius:8px;background:#E8EFF7;overflow:hidden;}'
-    + '.budget-bars-split-bar{position:absolute;left:0;top:0;bottom:0;width:0;height:100%;}'
+    + '.budget-bars-split-half{position:relative;display:flex;align-items:stretch;min-height:2.4rem;padding:0;border:1px solid #b8c4d4;border-radius:8px;background:#E8EFF7;overflow:hidden;}'
+    + '.budget-bars-split-track{position:relative;flex:1 1 auto;min-width:0;align-self:stretch;}'
+    + '.budget-bars-split-bar{position:absolute;left:0;top:0;bottom:0;width:0;}'
+    + '.budget-bars-split-budget-tick{position:absolute;right:0;top:3px;bottom:3px;width:2px;background:#1A3050;opacity:0.72;}'
     + '.budget-bars-split-half[data-budget-over="0"] .budget-bars-split-bar{background:#1FAE55;opacity:0.58;}'
     + '.budget-bars-split-half[data-budget-over="1"] .budget-bars-split-bar{background:#E03131;opacity:0.62;}'
-    + '.budget-bars-split-label{position:relative;z-index:1;font-size:13px;font-weight:500;}'
-    + '.budget-bars-split-value{position:relative;z-index:1;font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:600;}'
+    + '.budget-bars-split-label{position:relative;z-index:1;display:flex;align-items:center;height:100%;padding:0 0 0 10px;font-size:13px;font-weight:500;}'
+    + '.budget-bars-split-value{position:relative;z-index:1;flex:0 0 auto;display:flex;align-items:center;padding:0 12px 0 8px;font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:600;border-left:1px solid #b8c4d4;}'
     + '.budget-bars-split-value.neg{color:#E03131;}'
     + '.budget-bars-split-meta{margin:4px 0 10px;font-size:12px;color:#5A6F88;}'
     + '.budget-bars-split-meta-ghost{font-style:italic;font-weight:500;}'
@@ -8405,15 +8454,18 @@ function computeStartTeaserGhostSaldo(remaining, todayIso){
 
 function ensureStartPeriodAmtBar(wrap, id, extraClass){
   let bar = el(id);
-  if(bar) return bar;
-  if(!wrap) return null;
+  const lead = el('startPeriodLead');
+  const parent = lead || wrap;
+  if(!parent) return null;
+  if(bar){
+    if(bar.parentNode !== parent) parent.insertBefore(bar, parent.firstChild);
+    return bar;
+  }
   bar = document.createElement('span');
   bar.className = 'budget-amt-bar' + (extraClass ? ' ' + extraClass : '');
   bar.id = id;
   bar.setAttribute('aria-hidden', 'true');
-  const menu = el('startPeriodMenu');
-  if(menu && menu.parentNode === wrap) wrap.insertBefore(bar, menu);
-  else wrap.insertBefore(bar, wrap.firstChild);
+  parent.insertBefore(bar, parent.firstChild);
   return bar;
 }
 
