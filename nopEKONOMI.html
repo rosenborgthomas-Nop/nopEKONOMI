@@ -7712,17 +7712,19 @@ function buildBudgetCurrentMonthSplitHtml(row){
   const ghost = hasGhost ? row.ghost : 0;
   const ghostActual = typeof row.ghostActual === 'number' ? row.ghostActual : 0;
 
-  const leftPct = budget > 0 ? budgetBarWidthPct(false, actual, budget) : 0;
+  let leftPct = budget > 0 ? budgetBarWidthPct(false, actual, budget) : 0;
   let leftRed = remaining < 0 || (budget > 0 && budgetBarIsRed(false, actual, budget));
   let rightPct = budget > 0 && hasGhost ? budgetBarWidthPct(false, ghostActual, budget) : 0;
   let rightRed = hasGhost && (ghost < 0 || (budget > 0 && budgetBarIsRed(false, ghostActual, budget)));
   // Negativt saldo = över budget: visa röd fylld stapel (även vid litet överskridande).
-  if(remaining < 0) leftRed = true;
+  if(remaining < 0){
+    leftRed = true;
+    leftPct = 100;
+  }
   if(hasGhost && ghost < 0){
     rightRed = true;
     rightPct = 100;
   }
-  if(leftRed && remaining < 0) leftPct = 100;
 
   const budgetLab = budget > 0
     ? ('Budget UT ' + formatBudgetAmtEdit(budget))
