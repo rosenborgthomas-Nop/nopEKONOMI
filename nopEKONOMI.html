@@ -321,7 +321,7 @@ h1{
   display:flex;
   align-items:center;
   height:50%;
-  padding:0 2.2em 0 10px;
+  padding:0 10px;
   font-size:14px;
   font-weight:400;
   color:var(--ink, #1a3050);
@@ -376,11 +376,19 @@ h1{
   z-index:2;
 }
 .start-period-wrap[data-teaser-split="1"] .start-period-lead::after{
+  display:none;
+}
+/* Handtaget direkt efter Pågående-etiketten (inte mitt i fältet). */
+.start-period-wrap[data-teaser-split="1"] .start-period-label-real{
+  position:relative;
+  padding-right:1.35em;
+}
+.start-period-wrap[data-teaser-split="1"] .start-period-label-real::after{
   content:'';
   position:absolute;
-  right:10px;
-  top:25%;
-  margin-top:-3px;
+  right:0.15em;
+  top:50%;
+  margin-top:-2px;
   width:0;
   height:0;
   border-left:4px solid transparent;
@@ -388,7 +396,6 @@ h1{
   border-top:5px solid var(--ink, #1a3050);
   opacity:0.55;
   pointer-events:none;
-  z-index:1;
 }
 .start-period-values{
   position:relative;
@@ -5179,7 +5186,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v15';
+const APP_VERSION = '2026-09-26 v16';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
