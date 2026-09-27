@@ -5261,7 +5261,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-27 v03';
+const APP_VERSION = '2026-09-27 v04';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -17093,7 +17093,7 @@ function bindChartBarTooltips(){
   }
 
   function placeTip(clientX, clientY, preferAbove){
-    const gap = 18;
+    const gap = preferAbove ? 52 : 18;
     let x = clientX - tipW / 2;
     let y = preferAbove ? (clientY - tipH - gap) : (clientY + gap);
     if(preferAbove && y < 8) y = clientY + gap;
