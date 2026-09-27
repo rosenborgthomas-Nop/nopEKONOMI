@@ -2894,7 +2894,15 @@ body.app-select-open{
   font-size:14px;
   font-weight:600;
   color:var(--text-on-dark);
-  white-space:nowrap;
+  white-space:pre-wrap;
+}
+.chart-tooltip .ct-value + .ct-value{
+  margin-top:2px;
+  font-weight:500;
+  font-size:13px;
+}
+.chart-line-hit{
+  cursor:pointer;
 }
 .payee-chart-note{
   margin:10px 0 0;
@@ -5250,7 +5258,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-26 v28';
+const APP_VERSION = '2026-09-27 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -13579,6 +13587,25 @@ function trendHorizonLabel(n){
   return n + ' månader';
 }
 
+/**
+ * Pekbar vertikal remsa per månad i linjediagram (mobil + desktop).
+ * valueLines = ["In  1 200", "Ut  800", ...] visas i chartTooltip.
+ */
+function trendLineMonthHitMarkup(xAt, i, total, padT, plotH, label, valueLines){
+  if(!(total > 0) || !valueLines || !valueLines.length) return '';
+  const xi = xAt(i);
+  const step = total > 1 ? Math.abs(xAt(1) - xAt(0)) : 28;
+  const half = Math.max(8, step / 2);
+  const xLeft = i <= 0 ? xi - half : (xAt(i - 1) + xi) / 2;
+  const xRight = i >= total - 1 ? xi + half : (xi + xAt(i + 1)) / 2;
+  const x = Math.min(xLeft, xRight);
+  const w = Math.max(10, Math.abs(xRight - xLeft));
+  return '<rect class="chart-bar-hitarea chart-line-hit" x="' + x.toFixed(1) + '" y="' + padT
+    + '" width="' + w.toFixed(1) + '" height="' + plotH + '" fill="transparent"'
+    + ' data-chart-label="' + escapeAttr(label) + '"'
+    + ' data-chart-value="' + escapeAttr(valueLines.join('\n')) + '"/>';
+}
+
 /** Linjediagram: historik In/Ut/Netto + prognos ankrad i sista historikpunkten. */
 function buildTrendInUtLineChart(data, opts){
   opts = opts || {};
@@ -13753,6 +13780,27 @@ function buildTrendInUtLineChart(data, opts){
     svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
       + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
+  }
+
+  // Pekzoner: en remsa per månad med alla synliga linjers värden.
+  for(let i = 0; i < total; i++){
+    const mk = monthKeyYyMm(allMonths[i]);
+    const lines = [];
+    if(i < histN){
+      if(!onlyNet){
+        lines.push('In  ' + formatReportInt(Math.round(data.incomeSeries[i])));
+        lines.push('Ut  ' + formatReportInt(Math.round(data.expenseSeries[i])));
+      }
+      lines.push('Netto  ' + formatReportInt(Math.round(histNet[i])));
+    } else {
+      const fi = i - histN;
+      if(!onlyNet){
+        lines.push('In  ' + formatReportInt(Math.round(forecastInVals[fi])));
+        lines.push('Ut  ' + formatReportInt(Math.round(forecastUtVals[fi])));
+      }
+      lines.push('Netto  ' + formatReportInt(Math.round(forecastNetVals[fi])));
+    }
+    svg += trendLineMonthHitMarkup(xAt, i, total, padT, plotH, mk, lines);
   }
 
   let legend = '<p class="trend-line-chart-legend">';
@@ -14230,6 +14278,20 @@ function buildTrendDetailCompareChart(seriesList){
     svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
       + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
+  }
+
+  for(let i = 0; i < total; i++){
+    const mk = monthKeyYyMm(allMonths[i]);
+    const lines = [];
+    for(const s of list){
+      let v = null;
+      if(i < histN) v = s.histNet[i];
+      else if(s.forecastNet && s.forecastNet.length) v = s.forecastNet[i - histN];
+      if(!Number.isFinite(v)) continue;
+      const shown = s.side === 'neg' ? -Math.abs(v) : v;
+      lines.push(s.label + '  ' + formatReportInt(Math.round(shown)));
+    }
+    if(lines.length) svg += trendLineMonthHitMarkup(xAt, i, total, padT, plotH, mk, lines);
   }
 
   let legend = '<p class="trend-line-chart-legend">';
@@ -15414,6 +15476,19 @@ function buildTrendNettoLineChart(data, opts){
     svg += '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
       + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
       + escapeHtml(monthKeyYyMm(allMonths[i])) + '</text>';
+  }
+
+  for(let i = 0; i < total; i++){
+    const mk = monthKeyYyMm(allMonths[i]);
+    const lines = [];
+    for(const s of seriesList){
+      let v = null;
+      if(i < s.histN) v = s.histVals[i];
+      else if(s.forecastVals && s.forecastVals.length) v = s.forecastVals[i - s.histN];
+      if(!Number.isFinite(v)) continue;
+      lines.push(s.label + '  ' + formatReportInt(Math.round(v)));
+    }
+    if(lines.length) svg += trendLineMonthHitMarkup(xAt, i, total, padT, plotH, mk, lines);
   }
 
   // Legend: Slutdest + diff + % mot sista historiska (samma modell för Alla och Bocklista).
@@ -16964,9 +17039,11 @@ function bindChartBarTooltips(){
   let activeHit = null;
   let tipW = 0;
   let tipH = 0;
+  let sticky = false;
 
   function hideTip(){
     activeHit = null;
+    sticky = false;
     tip.classList.remove('is-on');
     tip.innerHTML = '';
   }
@@ -16976,8 +17053,11 @@ function bindChartBarTooltips(){
       activeHit = hit;
       const label = hit.getAttribute('data-chart-label') || '';
       const value = hit.getAttribute('data-chart-value') || '';
+      const lines = String(value).split('\n').map(s => s.trim()).filter(Boolean);
       tip.innerHTML = '<div class="ct-label">' + escapeHtml(label) + '</div>'
-        + '<div class="ct-value">' + escapeHtml(value) + '</div>';
+        + (lines.length
+          ? lines.map(line => '<div class="ct-value">' + escapeHtml(line) + '</div>').join('')
+          : '<div class="ct-value">' + escapeHtml(value) + '</div>');
       tip.classList.add('is-on');
       const rect = tip.getBoundingClientRect();
       tipW = rect.width;
@@ -17001,15 +17081,29 @@ function bindChartBarTooltips(){
   }
 
   document.addEventListener('pointermove', e => {
+    if(sticky && (e.pointerType === 'touch' || e.pointerType === 'pen')) return;
     const hit = hitFromEvent(e);
     if(!hit){
-      if(activeHit) hideTip();
+      if(activeHit && !sticky) hideTip();
       return;
     }
     showTip(hit, e.clientX, e.clientY);
   });
 
-  document.addEventListener('pointerleave', hideTip);
+  // Mobil: tryck på punkt/månad → visa värden; tryck utanför → dölj.
+  document.addEventListener('pointerdown', e => {
+    const hit = hitFromEvent(e);
+    if(hit){
+      sticky = (e.pointerType === 'touch' || e.pointerType === 'pen');
+      showTip(hit, e.clientX, e.clientY);
+      return;
+    }
+    if(sticky) hideTip();
+  }, { passive: true });
+
+  document.addEventListener('pointerleave', () => {
+    if(!sticky) hideTip();
+  });
   document.addEventListener('scroll', hideTip, true);
 }
 
