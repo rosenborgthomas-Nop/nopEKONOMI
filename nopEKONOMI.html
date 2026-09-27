@@ -5261,7 +5261,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-27 v05';
+const APP_VERSION = '2026-09-27 v06';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5678,6 +5678,8 @@ let bookKnownSavedAt = 0;
 let bookFileCheckBusy = false;
 /** true = JSON i bokmappen nås denna session (läs/skriv). Filböcker utan kontakt = skrivskydd. */
 let bookDriveContact = false;
+/** Senaste städmeddelanden från healBookTaxonomy (visas vid öppning). */
+let lastTaxonomyHealNotes = [];
 
 function isBookReadOnly(){
   return !!(bookId && isFileBook(bookId) && !bookDriveContact);
@@ -5732,6 +5734,8 @@ async function enterBookLiveFromFile(parsed){
 function enterBookReadOnlyFromMirror(id){
   book = readBook(id);
   migrateMixedSplitRows(book);
+  const heal = healBookTaxonomy(book);
+  lastTaxonomyHealNotes = (heal && heal.notes) ? heal.notes.slice() : [];
   setBookDriveContact(false);
   markBookClean();
 }
@@ -5839,6 +5843,8 @@ async function applyBookFromFilePayload(parsed){
   const data = parsed.raw && parsed.raw.book ? parsed.raw.book : parsed.raw;
   book = sanitizeBook(data);
   migrateMixedSplitRows(book);
+  const heal = healBookTaxonomy(book);
+  lastTaxonomyHealNotes = (heal && heal.notes) ? heal.notes.slice() : [];
   writeBook(bookId, book);
   bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
   bookSessionDirty = false;
@@ -5846,6 +5852,11 @@ async function applyBookFromFilePayload(parsed){
   bookDriveContact = true;
   rebuildBookLookup();
   updateBookFileSyncStatusUi();
+  if(heal.changed){
+    try{
+      await writeBookPreferGranted(bookId, book);
+    } catch(e){ /* spegeln är redan uppdaterad */ }
+  }
 }
 
 // Vid återkomst till fliken: återställ kontakt / ladda om om Drive-filen är nyare.
@@ -7194,7 +7205,15 @@ function syncTrendIncludeMap(bookData){
   const map = bookData.trendInclude;
   const lookup = buildBookLookup(bookData);
   const knownCats = new Set(lookup.categories || []);
+  const catByLower = Object.create(null);
+  for(const cat of knownCats) catByLower[cat.toLowerCase()] = cat;
   const catSubs = buildTrendCategorySubsMap(bookData);
+  const subByLower = Object.create(null);
+  for(const cat of Object.keys(catSubs)){
+    const m = Object.create(null);
+    for(const sub of catSubs[cat]) m[sub.toLowerCase()] = sub;
+    subByLower[cat] = m;
+  }
   let changed = false;
 
   for(const cat of knownCats){
@@ -7219,19 +7238,42 @@ function syncTrendIncludeMap(bookData){
 
   for(const key of Object.keys(map)){
     const parsed = parseTrendIncludeKey(key);
-    if(!parsed.cat || isTransferCategory(parsed.cat) || !knownCats.has(parsed.cat)){
+    const canonCat = parsed.cat ? catByLower[parsed.cat.toLowerCase()] : '';
+    if(!canonCat || isTransferCategory(canonCat)){
       delete map[key];
       changed = true;
       continue;
     }
     if(parsed.kind === 'sub'){
-      const subs = catSubs[parsed.cat] || [];
-      if(subs.indexOf(parsed.sub) < 0){
+      const subCanon = (subByLower[canonCat] || Object.create(null))[parsed.sub.toLowerCase()];
+      if(!subCanon){
+        delete map[key];
+        changed = true;
+        continue;
+      }
+      const want = trendIncludeSubKey(canonCat, subCanon);
+      if(want !== key){
+        if(!Object.prototype.hasOwnProperty.call(map, want)) map[want] = !!map[key];
         delete map[key];
         changed = true;
       }
+      continue;
     }
-    // kind 'empty' och 'cat' behålls så länge kategorin finns.
+    if(parsed.kind === 'empty'){
+      const want = trendEmptySubKey(canonCat);
+      if(want !== key){
+        if(!Object.prototype.hasOwnProperty.call(map, want)) map[want] = !!map[key];
+        delete map[key];
+        changed = true;
+      }
+      continue;
+    }
+    // kind 'cat'
+    if(canonCat !== key){
+      if(!Object.prototype.hasOwnProperty.call(map, canonCat)) map[canonCat] = !!map[key];
+      delete map[key];
+      changed = true;
+    }
   }
   return changed;
 }
@@ -7368,7 +7410,15 @@ function syncBudgetIncludeMap(bookData){
   const map = bookData.budgetInclude;
   const lookup = buildBookLookup(bookData);
   const knownCats = new Set(lookup.categories || []);
+  const catByLower = Object.create(null);
+  for(const cat of knownCats) catByLower[cat.toLowerCase()] = cat;
   const catSubs = buildTrendCategorySubsMap(bookData);
+  const subByLower = Object.create(null);
+  for(const cat of Object.keys(catSubs)){
+    const m = Object.create(null);
+    for(const sub of catSubs[cat]) m[sub.toLowerCase()] = sub;
+    subByLower[cat] = m;
+  }
   let changed = false;
 
   for(const cat of knownCats){
@@ -7393,17 +7443,40 @@ function syncBudgetIncludeMap(bookData){
 
   for(const key of Object.keys(map)){
     const parsed = parseTrendIncludeKey(key);
-    if(!parsed.cat || isTransferCategory(parsed.cat) || !knownCats.has(parsed.cat)){
+    const canonCat = parsed.cat ? catByLower[parsed.cat.toLowerCase()] : '';
+    if(!canonCat || isTransferCategory(canonCat)){
       delete map[key];
       changed = true;
       continue;
     }
     if(parsed.kind === 'sub'){
-      const subs = catSubs[parsed.cat] || [];
-      if(subs.indexOf(parsed.sub) < 0){
+      const subCanon = (subByLower[canonCat] || Object.create(null))[parsed.sub.toLowerCase()];
+      if(!subCanon){
+        delete map[key];
+        changed = true;
+        continue;
+      }
+      const want = trendIncludeSubKey(canonCat, subCanon);
+      if(want !== key){
+        if(!Object.prototype.hasOwnProperty.call(map, want)) map[want] = !!map[key];
         delete map[key];
         changed = true;
       }
+      continue;
+    }
+    if(parsed.kind === 'empty'){
+      const want = trendEmptySubKey(canonCat);
+      if(want !== key){
+        if(!Object.prototype.hasOwnProperty.call(map, want)) map[want] = !!map[key];
+        delete map[key];
+        changed = true;
+      }
+      continue;
+    }
+    if(canonCat !== key){
+      if(!Object.prototype.hasOwnProperty.call(map, canonCat)) map[canonCat] = !!map[key];
+      delete map[key];
+      changed = true;
     }
   }
   return changed;
@@ -9992,11 +10065,18 @@ async function openBook(id){
     if(!isFileBook(id)){
       book = await readBookAsync(id, true);
       migrateMixedSplitRows(book);
+      const heal = healBookTaxonomy(book);
+      lastTaxonomyHealNotes = (heal && heal.notes) ? heal.notes.slice() : [];
       bookDriveContact = true; // lokal-only bok: ingen Drive att sakna
       markBookClean();
       rebuildBookLookup();
       updateBookFileSyncStatusUi();
       show('start');
+      if(lastTaxonomyHealNotes.length){
+        addBox(startMessages, 'report',
+          'Register städat: ' + lastTaxonomyHealNotes.slice(0, 3).join(' '));
+        lastTaxonomyHealNotes = [];
+      }
       return;
     }
 
@@ -10026,10 +10106,15 @@ async function openBook(id){
         } else {
           book = readBook(id);
           migrateMixedSplitRows(book);
+          const heal = healBookTaxonomy(book);
+          lastTaxonomyHealNotes = (heal && heal.notes) ? heal.notes.slice() : [];
           clearBookFileSyncPending(id);
           bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
           setBookDriveContact(true);
           markBookClean();
+          if(heal.changed){
+            try{ await writeBookPreferGranted(id, book); } catch(e){ /* ignore */ }
+          }
         }
       } else {
         await enterBookLiveFromFile(parsed);
@@ -10051,6 +10136,16 @@ async function openBook(id){
     rebuildBookLookup();
     updateBookFileSyncStatusUi();
     show('start');
+    if(lastTaxonomyHealNotes.length){
+      addBox(startMessages, 'report',
+        'Register städat: ' + lastTaxonomyHealNotes.slice(0, 3).join(' '));
+      lastTaxonomyHealNotes = [];
+    }
+    if(isBookReadOnly()){
+      addBox(startMessages, 'notice',
+        'Ingen kontakt med bokfilen — endast läsning tills kontakten finns igen. Tryck på meddelandet för att försöka igen.');
+      updateBookFileSyncStatusUi();
+    }
   } catch(e){
     bookId = '';
     book = { order: [], accounts: {} };
@@ -19336,7 +19431,11 @@ async function saveCareListEdit(opts){
   }
 
   try{
-    await writeBookAsync(bookId, draft);
+    const ok = await writeBookAsync(bookId, draft);
+    if(ok === false){
+      addBox(careListMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
+      return;
+    }
   } catch(err){
     addBox(careListMessages, 'notice',
       err && err.message ? err.message : 'Kunde inte spara ändringen. Inget sparades.');
@@ -20297,6 +20396,25 @@ function taxonomyNameProblem(kind, name, exceptName){
       return 'Det finns redan en ' + label + ' med det namnet.';
     }
   }
+  // Samma namn som kategori och underkategori ger spöken i Bocklistan
+  // (tom kategori rad + riktiga poster under annan huvudkategori).
+  if(kind === 'cat'){
+    for(const existing of bookLookup.subCategories || []){
+      if(existing.toLowerCase() === key){
+        return 'Det finns redan en underkategori med det namnet. '
+          + 'Använd den under rätt kategori i Bocklistan, '
+          + 'eller byt namn på underkategorin först.';
+      }
+    }
+  }
+  if(kind === 'sub'){
+    for(const existing of bookLookup.categories || []){
+      if(existing.toLowerCase() === key){
+        return 'Det finns redan en kategori med det namnet. '
+          + 'Välj ett annat namn, eller byt namn på kategorin först.';
+      }
+    }
+  }
   return '';
 }
 
@@ -20528,6 +20646,154 @@ function countPayeeUsage(name){
   return n;
 }
 
+/**
+ * Räkna förekomster per gemener-namn i bokdata (kategori / underkategori / payee).
+ * Returnerar Map lower → { canon, count, variants }.
+ */
+function collectTaxonomyUsageMap(bookData, field){
+  const map = Object.create(null);
+  function bump(raw){
+    const name = String(raw || '').trim();
+    if(!name) return;
+    if(field === 'category' && isTransferCategory(name)) return;
+    if(field === 'payee'){
+      if(isProtectedPayeeName(name)) return;
+      if(OPENING_BALANCE_PAYEES.includes(name.toLowerCase())) return;
+    }
+    const key = name.toLowerCase();
+    if(!map[key]) map[key] = { variants: Object.create(null), count: 0 };
+    map[key].variants[name] = (map[key].variants[name] || 0) + 1;
+    map[key].count += 1;
+  }
+  for(const accName of bookData.order || []){
+    const acc = bookData.accounts[accName];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(field === 'payee'){
+        bump(r.payee);
+        continue;
+      }
+      if(rowHasSplits(r)){
+        for(const s of r.splits){
+          if(field === 'category') bump(s.category || r.category);
+          else bump(s.subCategory);
+        }
+      } else if(field === 'category'){
+        bump(r.category);
+      } else {
+        bump(r.subCategory);
+      }
+    }
+  }
+  for(const key of Object.keys(map)){
+    let best = '';
+    let bestN = -1;
+    for(const v of Object.keys(map[key].variants)){
+      const n = map[key].variants[v];
+      if(n > bestN || (n === bestN && v.localeCompare(best, 'sv') < 0)){
+        best = v;
+        bestN = n;
+      }
+    }
+    map[key].canon = best;
+  }
+  return map;
+}
+
+/**
+ * Städa taxonomi efter manuell dubbelredigering / namnkrock:
+ * - enhetlig stavning (versaler) på poster
+ * - ta bort oanvänd kategori som bara spökar när samma namn finns som underkategori
+ */
+function healBookTaxonomy(bookData){
+  if(!bookData || typeof bookData !== 'object') return { changed: false, notes: [] };
+  ensureBookTaxonomy(bookData);
+  const notes = [];
+  let changed = false;
+
+  const catMap = collectTaxonomyUsageMap(bookData, 'category');
+  const subMap = collectTaxonomyUsageMap(bookData, 'subCategory');
+  const payeeMap = collectTaxonomyUsageMap(bookData, 'payee');
+
+  for(const key of Object.keys(catMap)){
+    const info = catMap[key];
+    for(const variant of Object.keys(info.variants)){
+      if(variant === info.canon) continue;
+      rewriteCategoryInBook(bookData, variant, info.canon);
+      changed = true;
+      notes.push('Enhetlig kategoristavning: "' + variant + '" → "' + info.canon + '".');
+    }
+  }
+  for(const key of Object.keys(subMap)){
+    const info = subMap[key];
+    for(const variant of Object.keys(info.variants)){
+      if(variant === info.canon) continue;
+      rewriteSubCategoryInBook(bookData, variant, info.canon);
+      changed = true;
+      notes.push('Enhetlig underkategoristavning: "' + variant + '" → "' + info.canon + '".');
+    }
+  }
+  for(const key of Object.keys(payeeMap)){
+    const info = payeeMap[key];
+    for(const variant of Object.keys(info.variants)){
+      if(variant === info.canon) continue;
+      rewritePayeeInBook(bookData, variant, info.canon);
+      changed = true;
+      notes.push('Enhetlig payee-stavning: "' + variant + '" → "' + info.canon + '".');
+    }
+  }
+
+  const catUse = collectTaxonomyUsageMap(bookData, 'category');
+  const subUse = collectTaxonomyUsageMap(bookData, 'subCategory');
+
+  const nextCats = [];
+  const seenCat = Object.create(null);
+  for(const c of bookData.categoryList || []){
+    const name = String(c || '').trim();
+    if(!name) continue;
+    const key = name.toLowerCase();
+    const usedAsCat = !!(catUse[key] && catUse[key].count);
+    const usedAsSub = !!(subUse[key] && subUse[key].count);
+    if(!usedAsCat && usedAsSub){
+      changed = true;
+      notes.push('Tog bort oanvänd kategori "' + name
+        + '" (samma namn används som underkategori på poster).');
+      continue;
+    }
+    const canon = usedAsCat ? catUse[key].canon : name;
+    if(seenCat[canon.toLowerCase()]) continue;
+    seenCat[canon.toLowerCase()] = true;
+    nextCats.push(canon);
+  }
+  bookData.categoryList = nextCats;
+
+  const nextSubs = [];
+  const seenSub = Object.create(null);
+  for(const s of bookData.subCategoryList || []){
+    const name = String(s || '').trim();
+    if(!name) continue;
+    const key = name.toLowerCase();
+    const usedAsSub = !!(subUse[key] && subUse[key].count);
+    const usedAsCat = !!(catUse[key] && catUse[key].count);
+    if(!usedAsSub && usedAsCat){
+      changed = true;
+      notes.push('Tog bort oanvänd underkategori "' + name
+        + '" (samma namn används som kategori på poster).');
+      continue;
+    }
+    const canon = usedAsSub ? subUse[key].canon : name;
+    if(seenSub[canon.toLowerCase()]) continue;
+    seenSub[canon.toLowerCase()] = true;
+    nextSubs.push(canon);
+  }
+  bookData.subCategoryList = nextSubs;
+
+  if(syncTrendIncludeMap(bookData)) changed = true;
+  if(syncBudgetIncludeMap(bookData)) changed = true;
+
+  return { changed: changed, notes: notes };
+}
+
 /* --- Kategori -------------------------------------------------------- */
 
 const catEditSelect = el('catEditSelect');
@@ -20601,9 +20867,14 @@ function renderCategoryEdit(){
   syncCatEditMode();
 }
 
-function saveCategoryEdit(){
+async function saveCategoryEdit(){
   clear(catEditMessages);
   hideCatEditDeleteConfirm();
+  if(isBookReadOnly()){
+    notifyBookReadOnlyBlocked();
+    addBox(catEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
+    return;
+  }
   const isNew = catEditIsNew();
   const oldName = catEditSelectedName();
   const newName = capitalizeFirst(catEditName.value.trim());
@@ -20629,9 +20900,21 @@ function saveCategoryEdit(){
     draft.categoryList = renameInTaxonomyList(draft.categoryList, oldName, newName);
   }
 
+  try{
+    const ok = await writeBookPreferGranted(bookId, draft);
+    if(ok === false){
+      addBox(catEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
+      return;
+    }
+  } catch(err){
+    addBox(catEditMessages, 'notice',
+      err && err.message ? err.message : 'Kunde inte spara kategorin.');
+    return;
+  }
+
   book = draft;
   rebuildBookLookup();
-  markBookDirty();
+  markBookClean();
   renderCategoryEdit();
   catEditSelect.value = bookLookup.categories.find(c => c.toLowerCase() === newName.toLowerCase()) || newName;
   syncCatEditMode();
@@ -20655,7 +20938,7 @@ function showCatEditDeleteConfirm(){
   catEditDeleteBox.hidden = false;
 }
 
-function confirmCatEditDelete(){
+async function confirmCatEditDelete(){
   if(catEditIsNew()) return;
   const name = catEditSelectedName();
   if(countCategoryUsage(name) > 0){
@@ -20664,14 +20947,34 @@ function confirmCatEditDelete(){
     setActionDeleteEnabled(catEditDeleteBtn, false, DELETE_BLOCKED_REASON);
     return;
   }
+  if(isBookReadOnly()){
+    hideCatEditDeleteConfirm();
+    notifyBookReadOnlyBlocked();
+    addBox(catEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
+    return;
+  }
 
   const draft = JSON.parse(JSON.stringify(book));
   ensureBookTaxonomy(draft);
   draft.categoryList = removeFromTaxonomyList(draft.categoryList, name);
 
+  try{
+    const ok = await writeBookPreferGranted(bookId, draft);
+    if(ok === false){
+      hideCatEditDeleteConfirm();
+      addBox(catEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
+      return;
+    }
+  } catch(err){
+    hideCatEditDeleteConfirm();
+    addBox(catEditMessages, 'notice',
+      err && err.message ? err.message : 'Kunde inte radera kategorin.');
+    return;
+  }
+
   book = draft;
   rebuildBookLookup();
-  markBookDirty();
+  markBookClean();
   hideCatEditDeleteConfirm();
   renderCategoryEdit();
   addBox(catEditMessages, 'ok', 'Kategorin raderades.');
@@ -20766,9 +21069,14 @@ function renderSubCategoryEdit(){
   syncSubEditMode();
 }
 
-function saveSubCategoryEdit(){
+async function saveSubCategoryEdit(){
   clear(subEditMessages);
   hideSubEditDeleteConfirm();
+  if(isBookReadOnly()){
+    notifyBookReadOnlyBlocked();
+    addBox(subEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
+    return;
+  }
   const isNew = subEditIsNew();
   const oldName = subEditSelectedName();
   const newName = capitalizeFirst(subEditName.value.trim());
@@ -20794,9 +21102,21 @@ function saveSubCategoryEdit(){
     draft.subCategoryList = renameInTaxonomyList(draft.subCategoryList, oldName, newName);
   }
 
+  try{
+    const ok = await writeBookPreferGranted(bookId, draft);
+    if(ok === false){
+      addBox(subEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
+      return;
+    }
+  } catch(err){
+    addBox(subEditMessages, 'notice',
+      err && err.message ? err.message : 'Kunde inte spara underkategorin.');
+    return;
+  }
+
   book = draft;
   rebuildBookLookup();
-  markBookDirty();
+  markBookClean();
   renderSubCategoryEdit();
   subEditSelect.value = bookLookup.subCategories.find(c => c.toLowerCase() === newName.toLowerCase()) || newName;
   syncSubEditMode();
@@ -20820,7 +21140,7 @@ function showSubEditDeleteConfirm(){
   subEditDeleteBox.hidden = false;
 }
 
-function confirmSubEditDelete(){
+async function confirmSubEditDelete(){
   if(subEditIsNew()) return;
   const name = subEditSelectedName();
   if(countSubCategoryUsage(name) > 0){
@@ -20829,14 +21149,34 @@ function confirmSubEditDelete(){
     setActionDeleteEnabled(subEditDeleteBtn, false, DELETE_BLOCKED_REASON);
     return;
   }
+  if(isBookReadOnly()){
+    hideSubEditDeleteConfirm();
+    notifyBookReadOnlyBlocked();
+    addBox(subEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
+    return;
+  }
 
   const draft = JSON.parse(JSON.stringify(book));
   ensureBookTaxonomy(draft);
   draft.subCategoryList = removeFromTaxonomyList(draft.subCategoryList, name);
 
+  try{
+    const ok = await writeBookPreferGranted(bookId, draft);
+    if(ok === false){
+      hideSubEditDeleteConfirm();
+      addBox(subEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
+      return;
+    }
+  } catch(err){
+    hideSubEditDeleteConfirm();
+    addBox(subEditMessages, 'notice',
+      err && err.message ? err.message : 'Kunde inte radera underkategorin.');
+    return;
+  }
+
   book = draft;
   rebuildBookLookup();
-  markBookDirty();
+  markBookClean();
   hideSubEditDeleteConfirm();
   renderSubCategoryEdit();
   addBox(subEditMessages, 'ok', 'Underkategorin raderades.');
