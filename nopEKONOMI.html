@@ -5261,7 +5261,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-27 v04';
+const APP_VERSION = '2026-09-27 v05';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5632,16 +5632,22 @@ async function readBookAsync(id, interactive){
 
 async function writeBookAsync(id, bookData, interactive){
   if(isFileBook(id)){
+    if(id === bookId && isBookReadOnly() && !interactive){
+      notifyBookReadOnlyBlocked();
+      return false;
+    }
     const handle = await getBookFileHandle(id, !!interactive, 'readwrite');
     await writeBookFile(handle, bookData, bookName(id));
     clearBookFileSyncPending(id);
     if(id === bookId){
       bookKnownSavedAt = Date.now();
       bookSessionDirty = false;
+      setBookDriveContact(true);
       updateBookFileSyncStatusUi();
     }
   }
   writeBook(id, bookData);
+  return true;
 }
 
 function looksLikeBookPermissionError(err){
@@ -5670,6 +5676,65 @@ function hasBookFileSyncPending(id){
 let bookSessionDirty = false;
 let bookKnownSavedAt = 0;
 let bookFileCheckBusy = false;
+/** true = JSON i bokmappen nås denna session (läs/skriv). Filböcker utan kontakt = skrivskydd. */
+let bookDriveContact = false;
+
+function isBookReadOnly(){
+  return !!(bookId && isFileBook(bookId) && !bookDriveContact);
+}
+
+function setBookDriveContact(ok){
+  bookDriveContact = !!ok;
+  updateBookFileSyncStatusUi();
+}
+
+function notifyBookReadOnlyBlocked(){
+  updateBookFileSyncStatusUi();
+  const onStart = typeof views !== 'undefined' && views.start && !views.start.hidden;
+  const msgs = onStart ? el('startMessages') : null;
+  if(!msgs) return;
+  const existing = el('startReadOnlyFlash');
+  if(existing) existing.remove();
+  const box = document.createElement('div');
+  box.id = 'startReadOnlyFlash';
+  box.className = 'notice';
+  box.textContent = 'Ingen kontakt med bokfilen — endast läsning tills kontakten finns igen.';
+  msgs.insertBefore(box, msgs.firstChild);
+  setTimeout(() => { try{ box.remove(); } catch(e){ /* ignore */ } }, 4000);
+}
+
+/**
+ * Försök nå bokens JSON (Drive/mapp).
+ * interactive=true får be om behörighet (kräver användargest).
+ * @returns {{ ok: true, parsed: object } | { ok: false, message?: string }}
+ */
+async function tryEstablishBookDriveContact(interactive){
+  if(!bookId || !isFileBook(bookId)){
+    return { ok: true, parsed: null };
+  }
+  try{
+    const handle = await getBookFileHandle(bookId, !!interactive, 'read');
+    const parsed = await readBookFileRaw(handle);
+    return { ok: true, parsed: parsed };
+  } catch(e){
+    return {
+      ok: false,
+      message: (e && e.message) ? String(e.message) : 'Kunde inte läsa bokfilen.'
+    };
+  }
+}
+
+async function enterBookLiveFromFile(parsed){
+  await applyBookFromFilePayload(parsed);
+  setBookDriveContact(true);
+}
+
+function enterBookReadOnlyFromMirror(id){
+  book = readBook(id);
+  migrateMixedSplitRows(book);
+  setBookDriveContact(false);
+  markBookClean();
+}
 
 function updateBookFileSyncStatusUi(){
   // Gamla meny-raden dold — meddelandet visas som .notice i startMessages.
@@ -5683,10 +5748,11 @@ function updateBookFileSyncStatusUi(){
   if(!msgs) return;
 
   const existing = el('startFileSyncNotice');
-  const pending = !!(bookId && isFileBook(bookId) && hasBookFileSyncPending(bookId));
   const onStart = typeof views !== 'undefined' && views.start && !views.start.hidden;
+  const readOnly = isBookReadOnly();
+  const pending = !!(bookId && isFileBook(bookId) && hasBookFileSyncPending(bookId) && bookDriveContact);
 
-  if(!pending || !onStart){
+  if(!onStart || (!readOnly && !pending)){
     if(existing) existing.remove();
     return;
   }
@@ -5698,20 +5764,50 @@ function updateBookFileSyncStatusUi(){
     box.className = 'notice notice-action';
     box.setAttribute('role', 'button');
     box.tabIndex = 0;
-    box.title = 'Tryck för att spara till bokmapp/Drive';
     box.addEventListener('click', e => {
       e.stopPropagation();
-      runStartFileSyncFlush();
+      if(isBookReadOnly()) runStartDriveContactRetry();
+      else runStartFileSyncFlush();
     });
     box.addEventListener('keydown', e => {
       if(e.key === 'Enter' || e.key === ' '){
         e.preventDefault();
-        runStartFileSyncFlush();
+        if(isBookReadOnly()) runStartDriveContactRetry();
+        else runStartFileSyncFlush();
       }
     });
     msgs.appendChild(box);
   }
-  box.textContent = 'Ej sparad till bokmapp/Drive — tryck här';
+  if(readOnly){
+    box.title = 'Tryck för att försöka nå bokfilen igen';
+    box.textContent = 'Ingen kontakt med bokfil — endast läsning. Tryck för att försöka igen.';
+  } else {
+    box.title = 'Tryck för att spara till bokmapp/Drive';
+    box.textContent = 'Ej sparad till bokmapp/Drive — tryck här';
+  }
+}
+
+async function runStartDriveContactRetry(){
+  const msgs = el('startMessages');
+  const box = el('startFileSyncNotice');
+  if(box) box.style.opacity = '0.6';
+  const res = await tryEstablishBookDriveContact(true);
+  if(box) box.style.opacity = '';
+  if(!msgs) return;
+  if(res.ok && res.parsed){
+    await enterBookLiveFromFile(res.parsed);
+    rebuildBookLookup();
+    if(typeof renderStart === 'function') renderStart();
+    clear(msgs);
+    addBox(msgs, 'report', 'Kontakt med bokfilen återställd. Boken laddades från mappen.');
+    updateBookFileSyncStatusUi();
+    return;
+  }
+  clear(msgs);
+  addBox(msgs, 'notice', (res && res.message)
+    ? res.message
+    : 'Kunde fortfarande inte nå bokfilen.');
+  updateBookFileSyncStatusUi();
 }
 
 async function runStartFileSyncFlush(){
@@ -5722,6 +5818,7 @@ async function runStartFileSyncFlush(){
   if(box) box.style.opacity = '';
   if(!msgs) return;
   if(res.ok){
+    setBookDriveContact(true);
     clear(msgs);
     addBox(msgs, 'report', 'Sparad till bokmapp/Drive.');
     updateBookFileSyncStatusUi();
@@ -5746,27 +5843,47 @@ async function applyBookFromFilePayload(parsed){
   bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
   bookSessionDirty = false;
   clearBookFileSyncPending(bookId);
+  bookDriveContact = true;
   rebuildBookLookup();
   updateBookFileSyncStatusUi();
 }
 
-// Vid återkomst till fliken: ladda om om Drive/filen är nyare; fråga vid konflikt.
+// Vid återkomst till fliken: återställ kontakt / ladda om om Drive-filen är nyare.
 async function checkBookFileForRemoteChanges(){
   if(bookFileCheckBusy) return;
   if(!bookId || !isFileBook(bookId)) return;
   if(typeof currentViewName === 'function' && currentViewName() === 'login') return;
 
-  const handle = await idbGet(bookId);
-  if(!handle || !(await handlePermissionIsGranted(handle, 'read'))) return;
-
   bookFileCheckBusy = true;
   try{
+    // Utan kontakt: försök tyst nå filen igen.
+    if(!bookDriveContact){
+      const res = await tryEstablishBookDriveContact(false);
+      if(!res.ok || !res.parsed) return;
+      await enterBookLiveFromFile(res.parsed);
+      if(typeof currentViewName === 'function' && currentViewName() === 'start'){
+        renderStart();
+        clear(startMessages);
+        addBox(startMessages, 'report', 'Kontakt med bokfilen återställd (laddad från mappen).');
+      } else if(typeof currentViewName === 'function'){
+        const view = currentViewName();
+        if(view && view !== 'login'){
+          try{ await show(view, { fromHash: true }); } catch(e){ /* ignore */ }
+        }
+      }
+      return;
+    }
+
+    const handle = await idbGet(bookId);
+    if(!handle || !(await handlePermissionIsGranted(handle, 'read'))){
+      setBookDriveContact(false);
+      return;
+    }
+
     const parsed = await readBookFileRaw(handle);
     const fileAt = payloadSavedAt(parsed.raw, parsed.lastModified);
     if(!fileAt) return;
-    // Filen är inte nyare än vad vi senast känner till.
     if(bookKnownSavedAt && fileAt <= bookKnownSavedAt + 500) return;
-    // Första gången vi får en stämpel utan känd lokal — bara kom ihåg.
     if(!bookKnownSavedAt){
       bookKnownSavedAt = fileAt;
       return;
@@ -5782,7 +5899,6 @@ async function checkBookFileForRemoteChanges(){
         + 'Avbryt = behåll den här enheten (skrivs till mappen vid nästa lyckade sparning)'
       );
       if(!loadRemote){
-        // Användaren behåller lokalt — nästa lyckade filskrivning vinner.
         bookKnownSavedAt = fileAt;
         return;
       }
@@ -5800,7 +5916,7 @@ async function checkBookFileForRemoteChanges(){
       }
     }
   } catch(e){
-    /* nätverksdisk / behörighet — tyst */
+    setBookDriveContact(false);
   } finally{
     bookFileCheckBusy = false;
   }
@@ -5826,33 +5942,37 @@ async function handlePermissionIsGranted(handle, mode){
   }
 }
 
-// Vardagssparning: ALDRIG permission-dialog och ALDRIG createWritable utan granted.
-// (createWritable på Android visar "Vill du spara ändringarna?" innan det ens misslyckas.)
+// Vardagssparning: kräver Drive-kontakt för filböcker. Annars skrivskydd (ingen lokal-före-Drive).
 async function writeBookPreferGranted(id, bookData){
-  writeBook(id, bookData);
-  bookSessionDirty = true;
-  updateBookFileSyncStatusUi();
+  if(id === bookId && isBookReadOnly()){
+    notifyBookReadOnlyBlocked();
+    return false;
+  }
   if(!isFileBook(id)){
+    writeBook(id, bookData);
     bookSessionDirty = false;
-    return;
+    return true;
   }
 
   const handle = await idbGet(id);
   if(!handle || !(await handlePermissionIsGranted(handle, 'readwrite'))){
-    markBookFileSyncPending(id);
-    updateBookFileSyncStatusUi();
-    return;
+    setBookDriveContact(false);
+    notifyBookReadOnlyBlocked();
+    return false;
   }
   try{
     await writeBookFile(handle, bookData, bookName(id));
+    writeBook(id, bookData);
     clearBookFileSyncPending(id);
     bookKnownSavedAt = Date.now();
     bookSessionDirty = false;
-    updateBookFileSyncStatusUi();
+    setBookDriveContact(true);
+    return true;
   } catch(err){
     if(!looksLikeBookPermissionError(err)) throw err;
-    markBookFileSyncPending(id);
-    updateBookFileSyncStatusUi();
+    setBookDriveContact(false);
+    notifyBookReadOnlyBlocked();
+    return false;
   }
 }
 
@@ -5860,6 +5980,13 @@ async function writeBookPreferGranted(id, bookData){
 async function flushBookFileToFolderInteractive(){
   if(!bookId || !isFileBook(bookId)){
     return { ok: false, message: 'Ingen bokfil att synka.' };
+  }
+  if(isBookReadOnly()){
+    const res = await tryEstablishBookDriveContact(true);
+    if(!res.ok || !res.parsed){
+      return { ok: false, message: (res && res.message) || 'Ingen kontakt med bokfilen.' };
+    }
+    await enterBookLiveFromFile(res.parsed);
   }
   if(!book || !Array.isArray(book.order)){
     return { ok: false, message: 'Ingen bokdata att synka.' };
@@ -5871,10 +5998,11 @@ async function flushBookFileToFolderInteractive(){
     clearBookFileSyncPending(bookId);
     bookKnownSavedAt = Date.now();
     bookSessionDirty = false;
+    setBookDriveContact(true);
     updateBookFileSyncStatusUi();
     return { ok: true };
   } catch(err){
-    markBookFileSyncPending(bookId);
+    setBookDriveContact(false);
     updateBookFileSyncStatusUi();
     return {
       ok: false,
@@ -9742,6 +9870,10 @@ function rebuildBookLookup(){
 }
 
 function markBookDirty(){
+  if(isBookReadOnly()){
+    notifyBookReadOnlyBlocked();
+    return;
+  }
   bookSessionDirty = true;
   updateBookFileSyncStatusUi();
 }
@@ -9853,49 +9985,68 @@ async function openBook(id){
   bookId = id;
   markBookClean();
   bookKnownSavedAt = 0;
+  bookDriveContact = false;
   book = { order: [], accounts: {} };
   bookLookup = emptyBookLookup();
   try{
-    if(isFileBook(id) && hasBookLocalMirror(id)){
-      // Vardagsöppning: webbläsarspegel — ingen "redigera filer"-dialog.
-      book = readBook(id);
+    if(!isFileBook(id)){
+      book = await readBookAsync(id, true);
       migrateMixedSplitRows(book);
-      if(!hasBookFileSyncPending(id)){
-        try{
-          const handle = await idbGet(id);
-          if(handle && await handlePermissionIsGranted(handle, 'read')){
-            const parsed = await readBookFileRaw(handle);
-            book = sanitizeBook(parsed.raw && parsed.raw.book ? parsed.raw.book : parsed.raw);
-            migrateMixedSplitRows(book);
-            writeBook(id, book);
-            bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
-          } else {
-            const fromFile = await readBookAsync(id, false);
-            book = fromFile;
-            migrateMixedSplitRows(book);
-            writeBook(id, book);
-          }
-        } catch(e){ /* behåll spegeln */ }
+      bookDriveContact = true; // lokal-only bok: ingen Drive att sakna
+      markBookClean();
+      rebuildBookLookup();
+      updateBookFileSyncStatusUi();
+      show('start');
+      return;
+    }
+
+    // Filbok: JSON i mappen är obligatorisk kontakt. Försök läsa filen först.
+    let parsed = null;
+    let fileOk = false;
+    try{
+      const handle = await getBookFileHandle(id, true, 'read');
+      parsed = await readBookFileRaw(handle);
+      fileOk = true;
+    } catch(e){
+      fileOk = false;
+    }
+
+    if(fileOk && parsed){
+      const hadPending = hasBookFileSyncPending(id);
+      const hasMirror = hasBookLocalMirror(id);
+      // Legacy pending: en gång fråga om lokal spegel ska kastas till förmån för filen.
+      if(hadPending && hasMirror){
+        const loadRemote = window.confirm(
+          'Den här enheten hade osynkade lokala ändringar, men bokfilen i mappen går att läsa.\n\n'
+          + 'OK = ladda från mappen (rekommenderas — gemensam sanning)\n'
+          + 'Avbryt = behåll den här enhetens data och skriv den till mappen vid nästa sparning'
+        );
+        if(loadRemote){
+          await enterBookLiveFromFile(parsed);
+        } else {
+          book = readBook(id);
+          migrateMixedSplitRows(book);
+          clearBookFileSyncPending(id);
+          bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
+          setBookDriveContact(true);
+          markBookClean();
+        }
+      } else {
+        await enterBookLiveFromFile(parsed);
       }
       const file = await idbGet(id);
       await cacheBookDirFromFile(id, file);
-    } else {
-      book = await readBookAsync(id, true);
-      migrateMixedSplitRows(book);
-      if(isFileBook(id)){
-        writeBook(id, book);
-        clearBookFileSyncPending(id);
-        try{
-          const handle = await idbGet(id);
-          if(handle){
-            const parsed = await readBookFileRaw(handle);
-            bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
-          }
-        } catch(e){ bookKnownSavedAt = Date.now(); }
+    } else if(hasBookLocalMirror(id)){
+      // Ingen kontakt — öppna skrivskyddat med senaste spegel.
+      enterBookReadOnlyFromMirror(id);
+      try{
         const file = await idbGet(id);
         await cacheBookDirFromFile(id, file);
-      }
+      } catch(e){ /* ignore */ }
+    } else {
+      throw new Error('Kunde inte läsa bokfilen och ingen lokal kopia finns.');
     }
+
     markBookClean();
     rebuildBookLookup();
     updateBookFileSyncStatusUi();
@@ -9904,6 +10055,7 @@ async function openBook(id){
     bookId = '';
     book = { order: [], accounts: {} };
     bookLookup = emptyBookLookup();
+    bookDriveContact = false;
     markBookClean();
     loginNotice(e && e.message
       ? e.message + ' Boken lämnades orörd.'
@@ -10404,6 +10556,10 @@ function renderStart(){
   for(const msg of importErrors) addBox(startMessages, 'notice', msg);
   importReport = [];
   importErrors = [];
+  if(isBookReadOnly()){
+    addBox(startMessages, 'notice',
+      'Ingen kontakt med bokfilen — endast läsning tills kontakten finns igen. Tryck på meddelandet för att försöka igen.');
+  }
   updateBookFileSyncStatusUi();
 
   clear(accountsList);
