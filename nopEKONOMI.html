@@ -1067,6 +1067,7 @@ body.trend-view-active{
   width:100%;
   max-width:none;
   height:auto;
+  touch-action:none;
 }
 .trend-line-chart-legend{
   display:flex;
@@ -2866,6 +2867,11 @@ body.app-select-open{
   cursor:help;
   pointer-events:all;
 }
+.chart-line-hit{
+  cursor:pointer;
+  /* Hindra att sidans scroll kapar horisontellt svep över diagrammet. */
+  touch-action:none;
+}
 .chart-tooltip{
   position:fixed;
   display:none;
@@ -2900,9 +2906,6 @@ body.app-select-open{
   margin-top:2px;
   font-weight:500;
   font-size:13px;
-}
-.chart-line-hit{
-  cursor:pointer;
 }
 .payee-chart-note{
   margin:10px 0 0;
@@ -5258,7 +5261,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-27 v02';
+const APP_VERSION = '2026-09-27 v03';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -17042,12 +17045,16 @@ function bindChartBarTooltips(){
   let sticky = false;
   let tracking = false;
   let trackPointerId = null;
+  let trackSvg = null;
+  let trackHits = [];
 
   function hideTip(){
     activeHit = null;
     sticky = false;
     tracking = false;
     trackPointerId = null;
+    trackSvg = null;
+    trackHits = [];
     tip.classList.remove('is-on');
     tip.innerHTML = '';
   }
@@ -17058,17 +17065,39 @@ function bindChartBarTooltips(){
     return node.closest('[data-chart-label]');
   }
 
+  /** Under svep: välj månad via X (tål att fingret glider lite upp/ner). */
+  function hitFromScrubX(clientX){
+    if(!trackSvg || !trackHits.length) return null;
+    const rect = trackSvg.getBoundingClientRect();
+    if(!(rect.width > 0)) return null;
+    const vb = trackSvg.viewBox && trackSvg.viewBox.baseVal;
+    const vbW = (vb && vb.width) ? vb.width : (trackSvg.width && trackSvg.width.baseVal && trackSvg.width.baseVal.value) || 560;
+    const scaleX = rect.width / vbW;
+    let best = null;
+    let bestDist = Infinity;
+    for(const h of trackHits){
+      const hx = Number(h.getAttribute('x'));
+      const hw = Number(h.getAttribute('width'));
+      if(!Number.isFinite(hx) || !Number.isFinite(hw)) continue;
+      const left = rect.left + hx * scaleX;
+      const right = left + hw * scaleX;
+      if(clientX >= left && clientX <= right) return h;
+      const mid = (left + right) / 2;
+      const d = Math.abs(clientX - mid);
+      if(d < bestDist){
+        bestDist = d;
+        best = h;
+      }
+    }
+    return best;
+  }
+
   function placeTip(clientX, clientY, preferAbove){
     const gap = 18;
     let x = clientX - tipW / 2;
     let y = preferAbove ? (clientY - tipH - gap) : (clientY + gap);
-    if(preferAbove && y < 8){
-      // Inte plats ovanför → lägg under fingret i stället.
-      y = clientY + gap;
-    }
-    if(!preferAbove && y + tipH > window.innerHeight - 8){
-      y = clientY - tipH - gap;
-    }
+    if(preferAbove && y < 8) y = clientY + gap;
+    if(!preferAbove && y + tipH > window.innerHeight - 8) y = clientY - tipH - gap;
     if(x + tipW > window.innerWidth - 8) x = window.innerWidth - tipW - 8;
     if(x < 8) x = 8;
     if(y < 8) y = 8;
@@ -17089,37 +17118,49 @@ function bindChartBarTooltips(){
           ? lines.map(line => '<div class="ct-value">' + escapeHtml(line) + '</div>').join('')
           : '<div class="ct-value">' + escapeHtml(value) + '</div>');
       tip.classList.add('is-on');
-      const rect = tip.getBoundingClientRect();
-      tipW = rect.width;
-      tipH = rect.height;
+      const r = tip.getBoundingClientRect();
+      tipW = r.width;
+      tipH = r.height;
     }
     placeTip(clientX, clientY, !!preferAbove);
   }
 
+  function beginTrack(e, hit){
+    tracking = true;
+    trackPointerId = e.pointerId;
+    sticky = (e.pointerType === 'touch' || e.pointerType === 'pen');
+    trackSvg = hit.ownerSVGElement || hit.closest('svg') || null;
+    trackHits = trackSvg
+      ? Array.from(trackSvg.querySelectorAll('[data-chart-label]'))
+      : [hit];
+    try{
+      const cap = trackSvg || hit;
+      if(cap && cap.setPointerCapture) cap.setPointerCapture(e.pointerId);
+    } catch(err){ /* ignore */ }
+    showTip(hit, e.clientX, e.clientY, sticky);
+  }
+
+  // non-passive: måste kunna preventDefault så scrollen inte kapar sveket.
   document.addEventListener('pointerdown', e => {
     const hit = hitAtPoint(e.clientX, e.clientY);
-    const touchy = e.pointerType === 'touch' || e.pointerType === 'pen';
     if(hit){
-      tracking = true;
-      trackPointerId = e.pointerId;
-      sticky = touchy;
-      showTip(hit, e.clientX, e.clientY, touchy);
+      try{ e.preventDefault(); } catch(err){ /* ignore */ }
+      beginTrack(e, hit);
       return;
     }
     if(sticky) hideTip();
-  }, { passive: true });
+  }, { passive: false });
 
   document.addEventListener('pointermove', e => {
     const touchy = e.pointerType === 'touch' || e.pointerType === 'pen';
-    // Under svep: hitta månad under fingret (inte e.target — den fastnar på första remsan).
     if(tracking && (trackPointerId == null || e.pointerId === trackPointerId)){
-      const hit = hitAtPoint(e.clientX, e.clientY);
+      try{ e.preventDefault(); } catch(err){ /* ignore */ }
+      const hit = hitFromScrubX(e.clientX) || hitAtPoint(e.clientX, e.clientY);
       if(hit){
-        showTip(hit, e.clientX, e.clientY, touchy);
+        showTip(hit, e.clientX, e.clientY, touchy || sticky);
         return;
       }
-      // Utanför diagrammet medan fingret är nere: behåll senaste bubbla ovanför.
-      if(activeHit && touchy) placeTip(e.clientX, e.clientY, true);
+      if(activeHit && (touchy || sticky)) placeTip(e.clientX, e.clientY, true);
       return;
     }
     if(touchy) return;
@@ -17129,19 +17170,25 @@ function bindChartBarTooltips(){
       return;
     }
     showTip(hit, e.clientX, e.clientY, false);
-  }, { passive: true });
+  }, { passive: false });
 
   function endTrack(e){
     if(trackPointerId != null && e.pointerId !== trackPointerId) return;
     tracking = false;
     trackPointerId = null;
-    // Touch: bubblan stannar kvar tills man trycker utanför. Mus: dölj om man lämnar.
+    trackSvg = null;
+    trackHits = [];
+    // Touch: bubblan stannar; mus: dölj.
     if(!sticky) hideTip();
   }
 
   document.addEventListener('pointerup', endTrack, { passive: true });
   document.addEventListener('pointercancel', endTrack, { passive: true });
-  document.addEventListener('scroll', hideTip, true);
+  document.addEventListener('scroll', () => {
+    // Scroll under aktivt svep = brus från layout; behåll bubblan.
+    if(tracking) return;
+    hideTip();
+  }, true);
 }
 
 bindReportRowChartUi();
