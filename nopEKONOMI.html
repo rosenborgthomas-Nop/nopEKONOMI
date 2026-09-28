@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-27 v08';
+const APP_VERSION = '2026-09-27 v09';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10527,7 +10527,7 @@ async function runConnectFolderFromLogin(){
       await renderLogin();
       loginNotice(folderLabel
         ? 'Bokmapp kopplad: «' + folderLabel + '». Böcker i mappen syns i listan.'
-        : 'Bokmapp kopplad. Böcker i mappen syns i listan.');
+        : 'Bokmapp kopplad. Böcker i mappen syns i listan.', 'report');
     }
   } finally{
     openBookBtn.disabled = false;
@@ -10535,9 +10535,9 @@ async function runConnectFolderFromLogin(){
   }
 }
 
-function loginNotice(msg){
+function loginNotice(msg, kind){
   clear(loginMessages);
-  if(msg) addBox(loginMessages, 'notice', msg);
+  if(msg) addBox(loginMessages, kind === 'report' ? 'report' : 'notice', msg);
 }
 
 function nameTakenBy(reg, name, exceptId){
