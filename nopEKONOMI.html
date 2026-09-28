@@ -5094,6 +5094,16 @@ td.num.dash .cell-content{
     <main class="panel" id="settingsPanelBok">
       <h2>Underhåll</h2>
 
+      <section class="section" id="settingsFolderSection">
+        <h3>Bokmapp</h3>
+        <p class="sub">Mappen appen läser och skriver bokfilen i (t.ex. Google Drive). Webbläsaren visar bara mappnamnet, inte hela sökvägen.</p>
+        <p class="hint" id="settingsFolderInfo">Hämtar…</p>
+        <div class="quiet-row">
+          <button class="btn-quiet" id="settingsReconnectFolderBtn" type="button">Återanslut mapp…</button>
+        </div>
+        <p class="hint" id="settingsFolderStatus"></p>
+      </section>
+
       <section class="section">
         <h3>Böcker i den här programmappen</h3>
         <p>Böcker som finns som JSON-filer i samma mapp som nopEKONOMI.html. Den öppna boken är markerad.</p>
@@ -5261,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-27 v07';
+const APP_VERSION = '2026-09-27 v08';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5724,8 +5734,13 @@ async function tryEstablishBookDriveContact(interactive){
     return { ok: true, parsed: null };
   }
   try{
-    const handle = await getBookFileHandle(bookId, !!interactive, 'read');
+    // Interaktivt: be om läs+skriv i samma gest så senare sparningar inte frågar igen.
+    const mode = interactive ? 'readwrite' : 'read';
+    const handle = await getBookFileHandle(bookId, !!interactive, mode);
     const parsed = await readBookFileRaw(handle);
+    if(interactive){
+      try{ await getBookDirHandle(bookId, true, 'readwrite'); } catch(e){ /* ignore */ }
+    }
     return { ok: true, parsed: parsed };
   } catch(e){
     return {
@@ -5737,7 +5752,29 @@ async function tryEstablishBookDriveContact(interactive){
 
 async function enterBookLiveFromFile(parsed){
   await applyBookFromFilePayload(parsed);
-  setBookDriveContact(true);
+  await syncBookDriveContactFromHandles();
+}
+
+/** Uppdatera bookDriveContact utifrån faktisk läs/skriv-behörighet på handtag. */
+async function syncBookDriveContactFromHandles(){
+  if(!bookId || !isFileBook(bookId)){
+    bookDriveContact = true;
+    return true;
+  }
+  try{
+    const file = await idbGet(bookId);
+    if(file && (await handlePermissionIsGranted(file, 'readwrite'))){
+      setBookDriveContact(true);
+      return true;
+    }
+    const dir = await getBookDirHandle(bookId, false, 'readwrite');
+    if(dir){
+      setBookDriveContact(true);
+      return true;
+    }
+  } catch(e){ /* ignore */ }
+  setBookDriveContact(false);
+  return false;
 }
 
 function enterBookReadOnlyFromMirror(id){
@@ -5989,7 +6026,8 @@ async function handlePermissionIsGranted(handle, mode){
 }
 
 // Vardagssparning: kräver Drive-kontakt för filböcker.
-// interactive=true (användargest, t.ex. OK på ny post) får be om läs/skriv igen — viktigt på Android.
+// Först tyst om behörighet redan finns; interactive=true får be om läs/skriv
+// (användargest, t.ex. OK) — men ska normalt räcka en gång vid öppning.
 async function writeBookPreferGranted(id, bookData, interactive){
   if(id === bookId && isBookReadOnly() && !interactive){
     notifyBookReadOnlyBlocked();
@@ -6001,23 +6039,7 @@ async function writeBookPreferGranted(id, bookData, interactive){
     return true;
   }
 
-  let handle = await idbGet(id);
-  const granted = handle && (await handlePermissionIsGranted(handle, 'readwrite'));
-  if(!granted){
-    if(!interactive){
-      setBookDriveContact(false);
-      notifyBookReadOnlyBlocked();
-      return false;
-    }
-    try{
-      handle = await getBookFileHandle(id, true, 'readwrite');
-    } catch(err){
-      setBookDriveContact(false);
-      notifyBookReadOnlyBlocked();
-      return false;
-    }
-  }
-  try{
+  async function commitWithHandle(handle){
     await writeBookFile(handle, bookData, bookName(id));
     writeBook(id, bookData);
     clearBookFileSyncPending(id);
@@ -6026,6 +6048,44 @@ async function writeBookPreferGranted(id, bookData, interactive){
     setBookDriveContact(true);
     updateBookFileSyncStatusUi();
     return true;
+  }
+
+  // 1) Befintligt filhandtag med skrivrätt — tyst.
+  let handle = await idbGet(id);
+  if(handle && (await handlePermissionIsGranted(handle, 'readwrite'))){
+    try{
+      return await commitWithHandle(handle);
+    } catch(err){
+      if(!looksLikeBookPermissionError(err)) throw err;
+    }
+  }
+
+  // 2) Mapp med skrivrätt — hämta filen därifrån, fortfarande tyst.
+  const dirSilent = await getBookDirHandle(id, false, 'readwrite');
+  if(dirSilent){
+    try{
+      const fileName = (handle && handle.name) || bookMainFileName(bookName(id));
+      handle = await dirSilent.getFileHandle(fileName);
+      await idbPut(id, handle);
+      return await commitWithHandle(handle);
+    } catch(err){
+      if(!looksLikeBookPermissionError(err) && !(err && err.name === 'NotFoundError')){
+        /* fortsätt till interaktiv */
+      }
+    }
+  }
+
+  if(!interactive){
+    setBookDriveContact(false);
+    notifyBookReadOnlyBlocked();
+    return false;
+  }
+
+  // 3) Användargest: be om behörighet (helst bara första gången per session).
+  try{
+    handle = await getBookFileHandle(id, true, 'readwrite');
+    try{ await getBookDirHandle(id, true, 'readwrite'); } catch(e){ /* ignore */ }
+    return await commitWithHandle(handle);
   } catch(err){
     if(!looksLikeBookPermissionError(err)) throw err;
     setBookDriveContact(false);
@@ -10120,15 +10180,24 @@ async function openBook(id){
       return;
     }
 
-    // Filbok: JSON i mappen är obligatorisk kontakt. Försök läsa filen först.
+    // Filbok: JSON i mappen är obligatorisk kontakt.
+    // Be om läs+skriv redan vid öppning — då ska senare sparningar vara tysta.
     let parsed = null;
     let fileOk = false;
     try{
-      const handle = await getBookFileHandle(id, true, 'read');
+      const handle = await getBookFileHandle(id, true, 'readwrite');
       parsed = await readBookFileRaw(handle);
       fileOk = true;
+      try{ await getBookDirHandle(id, true, 'readwrite'); } catch(e){ /* ignore */ }
     } catch(e){
-      fileOk = false;
+      // Fallback: bara läs (skrivskydd tills användaren återansluter).
+      try{
+        const handle = await getBookFileHandle(id, true, 'read');
+        parsed = await readBookFileRaw(handle);
+        fileOk = true;
+      } catch(e2){
+        fileOk = false;
+      }
     }
 
     if(fileOk && parsed){
@@ -10150,11 +10219,11 @@ async function openBook(id){
           lastTaxonomyHealNotes = (heal && heal.notes) ? heal.notes.slice() : [];
           clearBookFileSyncPending(id);
           bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
-          setBookDriveContact(true);
           markBookClean();
           if(heal.changed){
-            try{ await writeBookPreferGranted(id, book); } catch(e){ /* ignore */ }
+            try{ await writeBookPreferGranted(id, book, true); } catch(e){ /* ignore */ }
           }
+          await syncBookDriveContactFromHandles();
         }
       } else {
         await enterBookLiveFromFile(parsed);
@@ -10174,6 +10243,7 @@ async function openBook(id){
 
     markBookClean();
     rebuildBookLookup();
+    await syncBookDriveContactFromHandles();
     updateBookFileSyncStatusUi();
     show('start');
     if(lastTaxonomyHealNotes.length){
@@ -23352,7 +23422,147 @@ function renderSettings(){
   bookActions.hidden = false;
   syncSettingsSectionPanels();
   if(settingsSectionMode() === 'startmeny') renderSettingsStartIncludeList();
-  else renderBookList().catch(() => {});
+  else {
+    renderBookList().catch(() => {});
+    renderSettingsFolderInfo().catch(() => {});
+  }
+}
+
+async function describeActiveBookFolder(){
+  if(!bookId){
+    return {
+      folderLine: 'Ingen bok öppen.',
+      contactLine: '',
+      canReconnect: false
+    };
+  }
+  if(!isFileBook(bookId)){
+    return {
+      folderLine: 'Den här boken lagras bara i webbläsaren (ingen bokmapp).',
+      contactLine: 'Kontakt: lokal',
+      canReconnect: false
+    };
+  }
+  const fileName = bookMainFileName(bookName(bookId));
+  let folderName = '';
+  let dir = null;
+  try{ dir = await idbGet(bookId + BOOK_DIR_SUFFIX); } catch(e){ /* ignore */ }
+  if(!dir){
+    try{ dir = await idbGet(WORKSPACE_DIR_KEY); } catch(e){ /* ignore */ }
+  }
+  if(dir && dir.name) folderName = String(dir.name);
+  if(!folderName){
+    try{
+      const file = await idbGet(bookId);
+      if(file && typeof file.getParent === 'function'){
+        const parent = await file.getParent();
+        if(parent && parent.name) folderName = String(parent.name);
+      }
+    } catch(e){ /* ignore */ }
+  }
+  if(!folderName) folderName = '(okänt mappnamn)';
+
+  const kind = getWorkspaceKind();
+  const kindLabel = kind === 'program'
+    ? 'programmapp'
+    : (kind === 'books' ? 'bokmapp' : 'mapp');
+
+  let writeOk = false;
+  let readOk = false;
+  try{
+    const file = await idbGet(bookId);
+    if(file){
+      writeOk = await handlePermissionIsGranted(file, 'readwrite');
+      readOk = writeOk || (await handlePermissionIsGranted(file, 'read'));
+    }
+    if(!writeOk){
+      const d = await getBookDirHandle(bookId, false, 'readwrite');
+      if(d) writeOk = true;
+    }
+    if(!readOk){
+      const d = await getBookDirHandle(bookId, false, 'read');
+      if(d) readOk = true;
+    }
+  } catch(e){ /* ignore */ }
+
+  let contact;
+  if(writeOk) contact = 'läs och skriv';
+  else if(readOk || bookDriveContact) contact = 'endast läsning (skrivskydd)';
+  else contact = 'ingen kontakt';
+
+  return {
+    folderLine: 'Mapp: ' + folderName + ' (' + kindLabel + ')\nBokfil: ' + fileName,
+    contactLine: 'Kontakt: ' + contact,
+    canReconnect: true
+  };
+}
+
+async function renderSettingsFolderInfo(){
+  const infoEl = el('settingsFolderInfo');
+  const statusEl = el('settingsFolderStatus');
+  const btn = el('settingsReconnectFolderBtn');
+  if(!infoEl) return;
+  const desc = await describeActiveBookFolder();
+  infoEl.textContent = desc.folderLine;
+  infoEl.style.whiteSpace = 'pre-line';
+  if(statusEl) statusEl.textContent = desc.contactLine || '';
+  if(btn) btn.hidden = !desc.canReconnect;
+}
+
+async function reconnectBookFolderInteractive(){
+  const statusEl = el('settingsFolderStatus');
+  if(!bookId || !isFileBook(bookId)){
+    if(statusEl) statusEl.textContent = 'Ingen filbok att återansluta.';
+    return;
+  }
+  if(statusEl) statusEl.textContent = 'Väntar på mappval…';
+  try{
+    const picked = await window.showDirectoryPicker({
+      id: 'hemekonomi-bookfolder-' + STORAGE_SCOPE,
+      mode: 'readwrite',
+      startIn: 'documents'
+    });
+    await rememberWorkspaceDir(picked, await detectWorkspaceKind(picked));
+    await idbPut(bookId + BOOK_DIR_SUFFIX, picked);
+    const fileName = bookMainFileName(bookName(bookId));
+    let fileHandle;
+    try{
+      fileHandle = await picked.getFileHandle(fileName);
+    } catch(e){
+      if(statusEl){
+        statusEl.textContent = 'Mappen valdes, men filen "' + fileName
+          + '" hittades inte där. Välj mappen som innehåller bokfilen.';
+      }
+      await renderSettingsFolderInfo();
+      return;
+    }
+    await idbPut(bookId, fileHandle);
+    const parsed = await readBookFileRaw(fileHandle);
+    if(bookSessionDirty){
+      const ok = await writeBookPreferGranted(bookId, bookWorkingCopy(), true);
+      if(!ok){
+        if(statusEl) statusEl.textContent = 'Mapp kopplad, men osparade ändringar kunde inte skrivas.';
+        await syncBookDriveContactFromHandles();
+        await renderSettingsFolderInfo();
+        return;
+      }
+    } else {
+      await enterBookLiveFromFile(parsed);
+    }
+    rebuildBookLookup();
+    await renderSettingsFolderInfo();
+    if(statusEl) statusEl.textContent = 'Mappen är återansluten. Kontakt: läs och skriv.';
+  } catch(err){
+    if(err && (err.name === 'AbortError' || err.name === 'NotAllowedError')){
+      if(statusEl) statusEl.textContent = 'Mappval avbröts.';
+      return;
+    }
+    if(statusEl){
+      statusEl.textContent = (err && err.message)
+        ? err.message
+        : 'Kunde inte återansluta mappen.';
+    }
+  }
 }
 
 function setRenameHint(msg, bad){
@@ -23571,7 +23781,17 @@ if(settingsSectionMenu){
   settingsSectionMenu.addEventListener('change', () => {
     syncSettingsSectionPanels();
     if(settingsSectionMode() === 'startmeny') renderSettingsStartIncludeList();
-    else renderBookList().catch(() => {});
+    else {
+      renderBookList().catch(() => {});
+      renderSettingsFolderInfo().catch(() => {});
+    }
+  });
+}
+
+const settingsReconnectFolderBtn = el('settingsReconnectFolderBtn');
+if(settingsReconnectFolderBtn){
+  settingsReconnectFolderBtn.addEventListener('click', () => {
+    reconnectBookFolderInteractive().catch(() => {});
   });
 }
 
