@@ -5261,7 +5261,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-27 v06';
+const APP_VERSION = '2026-09-27 v07';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5636,14 +5636,23 @@ async function writeBookAsync(id, bookData, interactive){
       notifyBookReadOnlyBlocked();
       return false;
     }
-    const handle = await getBookFileHandle(id, !!interactive, 'readwrite');
-    await writeBookFile(handle, bookData, bookName(id));
-    clearBookFileSyncPending(id);
-    if(id === bookId){
-      bookKnownSavedAt = Date.now();
-      bookSessionDirty = false;
-      setBookDriveContact(true);
-      updateBookFileSyncStatusUi();
+    try{
+      const handle = await getBookFileHandle(id, !!interactive, 'readwrite');
+      await writeBookFile(handle, bookData, bookName(id));
+      clearBookFileSyncPending(id);
+      if(id === bookId){
+        bookKnownSavedAt = Date.now();
+        bookSessionDirty = false;
+        setBookDriveContact(true);
+        updateBookFileSyncStatusUi();
+      }
+    } catch(err){
+      if(id === bookId){
+        setBookDriveContact(false);
+        notifyBookReadOnlyBlocked();
+      }
+      if(interactive) throw err;
+      return false;
     }
   }
   writeBook(id, bookData);
@@ -5783,8 +5792,13 @@ function updateBookFileSyncStatusUi(){
     msgs.appendChild(box);
   }
   if(readOnly){
-    box.title = 'Tryck för att försöka nå bokfilen igen';
-    box.textContent = 'Ingen kontakt med bokfil — endast läsning. Tryck för att försöka igen.';
+    if(bookSessionDirty){
+      box.title = 'Tryck för att spara osparade ändringar till bokfilen';
+      box.textContent = 'Osparade ändringar — ingen skrivkontakt. Tryck för att spara till bokmapp.';
+    } else {
+      box.title = 'Tryck för att försöka nå bokfilen igen';
+      box.textContent = 'Ingen kontakt med bokfil — endast läsning. Tryck för att försöka igen.';
+    }
   } else {
     box.title = 'Tryck för att spara till bokmapp/Drive';
     box.textContent = 'Ej sparad till bokmapp/Drive — tryck här';
@@ -5795,6 +5809,26 @@ async function runStartDriveContactRetry(){
   const msgs = el('startMessages');
   const box = el('startFileSyncNotice');
   if(box) box.style.opacity = '0.6';
+
+  // Osparade ändringar i minnet: skriv UT till filen — ladda aldrig filen över dem.
+  if(bookSessionDirty && book && Array.isArray(book.order)){
+    const flush = await flushBookFileToFolderInteractive();
+    if(box) box.style.opacity = '';
+    if(!msgs) return;
+    if(flush.ok){
+      rebuildBookLookup();
+      if(typeof renderStart === 'function') renderStart();
+      clear(msgs);
+      addBox(msgs, 'report', 'Kontakt återställd. Osparade ändringar skrevs till bokmappen.');
+      updateBookFileSyncStatusUi();
+      return;
+    }
+    clear(msgs);
+    addBox(msgs, 'notice', flush.message || 'Kunde inte spara till bokfilen.');
+    updateBookFileSyncStatusUi();
+    return;
+  }
+
   const res = await tryEstablishBookDriveContact(true);
   if(box) box.style.opacity = '';
   if(!msgs) return;
@@ -5867,8 +5901,9 @@ async function checkBookFileForRemoteChanges(){
 
   bookFileCheckBusy = true;
   try{
-    // Utan kontakt: försök tyst nå filen igen.
+    // Utan kontakt: försök tyst nå filen igen — men aldrig om sessionen har osparade ändringar.
     if(!bookDriveContact){
+      if(bookSessionDirty) return;
       const res = await tryEstablishBookDriveContact(false);
       if(!res.ok || !res.parsed) return;
       await enterBookLiveFromFile(res.parsed);
@@ -5953,9 +5988,10 @@ async function handlePermissionIsGranted(handle, mode){
   }
 }
 
-// Vardagssparning: kräver Drive-kontakt för filböcker. Annars skrivskydd (ingen lokal-före-Drive).
-async function writeBookPreferGranted(id, bookData){
-  if(id === bookId && isBookReadOnly()){
+// Vardagssparning: kräver Drive-kontakt för filböcker.
+// interactive=true (användargest, t.ex. OK på ny post) får be om läs/skriv igen — viktigt på Android.
+async function writeBookPreferGranted(id, bookData, interactive){
+  if(id === bookId && isBookReadOnly() && !interactive){
     notifyBookReadOnlyBlocked();
     return false;
   }
@@ -5965,11 +6001,21 @@ async function writeBookPreferGranted(id, bookData){
     return true;
   }
 
-  const handle = await idbGet(id);
-  if(!handle || !(await handlePermissionIsGranted(handle, 'readwrite'))){
-    setBookDriveContact(false);
-    notifyBookReadOnlyBlocked();
-    return false;
+  let handle = await idbGet(id);
+  const granted = handle && (await handlePermissionIsGranted(handle, 'readwrite'));
+  if(!granted){
+    if(!interactive){
+      setBookDriveContact(false);
+      notifyBookReadOnlyBlocked();
+      return false;
+    }
+    try{
+      handle = await getBookFileHandle(id, true, 'readwrite');
+    } catch(err){
+      setBookDriveContact(false);
+      notifyBookReadOnlyBlocked();
+      return false;
+    }
   }
   try{
     await writeBookFile(handle, bookData, bookName(id));
@@ -5978,6 +6024,7 @@ async function writeBookPreferGranted(id, bookData){
     bookKnownSavedAt = Date.now();
     bookSessionDirty = false;
     setBookDriveContact(true);
+    updateBookFileSyncStatusUi();
     return true;
   } catch(err){
     if(!looksLikeBookPermissionError(err)) throw err;
@@ -5987,17 +6034,10 @@ async function writeBookPreferGranted(id, bookData){
   }
 }
 
-// Användargest: skriv spegeln till bokfilen (behövs ofta på Android).
+// Användargest: skriv aktuell bok i minnet till bokfilen (aldrig ladda fil över osparad data).
 async function flushBookFileToFolderInteractive(){
   if(!bookId || !isFileBook(bookId)){
     return { ok: false, message: 'Ingen bokfil att synka.' };
-  }
-  if(isBookReadOnly()){
-    const res = await tryEstablishBookDriveContact(true);
-    if(!res.ok || !res.parsed){
-      return { ok: false, message: (res && res.message) || 'Ingen kontakt med bokfilen.' };
-    }
-    await enterBookLiveFromFile(res.parsed);
   }
   if(!book || !Array.isArray(book.order)){
     return { ok: false, message: 'Ingen bokdata att synka.' };
@@ -10141,11 +10181,6 @@ async function openBook(id){
         'Register städat: ' + lastTaxonomyHealNotes.slice(0, 3).join(' '));
       lastTaxonomyHealNotes = [];
     }
-    if(isBookReadOnly()){
-      addBox(startMessages, 'notice',
-        'Ingen kontakt med bokfilen — endast läsning tills kontakten finns igen. Tryck på meddelandet för att försöka igen.');
-      updateBookFileSyncStatusUi();
-    }
   } catch(e){
     bookId = '';
     book = { order: [], accounts: {} };
@@ -10651,10 +10686,7 @@ function renderStart(){
   for(const msg of importErrors) addBox(startMessages, 'notice', msg);
   importReport = [];
   importErrors = [];
-  if(isBookReadOnly()){
-    addBox(startMessages, 'notice',
-      'Ingen kontakt med bokfilen — endast läsning tills kontakten finns igen. Tryck på meddelandet för att försöka igen.');
-  }
+  // Skrivskydd / ej sparad: en klickbar banner via updateBookFileSyncStatusUi (inte dubbel text).
   updateBookFileSyncStatusUi();
 
   clear(accountsList);
@@ -19374,7 +19406,7 @@ async function saveCareListEdit(opts){
           draft.accounts[oldName] = finalized;
         }
       }
-      await writeBookAsync(bookId, draft);
+      await writeBookAsync(bookId, draft, true);
     } catch(err){
       addBox(careListMessages, 'notice',
         err && err.message ? err.message : 'Kunde inte spara kontot. Inget sparades.');
@@ -19431,7 +19463,7 @@ async function saveCareListEdit(opts){
   }
 
   try{
-    const ok = await writeBookAsync(bookId, draft);
+    const ok = await writeBookAsync(bookId, draft, true);
     if(ok === false){
       addBox(careListMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
       return;
@@ -20901,7 +20933,7 @@ async function saveCategoryEdit(){
   }
 
   try{
-    const ok = await writeBookPreferGranted(bookId, draft);
+    const ok = await writeBookPreferGranted(bookId, draft, true);
     if(ok === false){
       addBox(catEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
       return;
@@ -20959,7 +20991,7 @@ async function confirmCatEditDelete(){
   draft.categoryList = removeFromTaxonomyList(draft.categoryList, name);
 
   try{
-    const ok = await writeBookPreferGranted(bookId, draft);
+    const ok = await writeBookPreferGranted(bookId, draft, true);
     if(ok === false){
       hideCatEditDeleteConfirm();
       addBox(catEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
@@ -21103,7 +21135,7 @@ async function saveSubCategoryEdit(){
   }
 
   try{
-    const ok = await writeBookPreferGranted(bookId, draft);
+    const ok = await writeBookPreferGranted(bookId, draft, true);
     if(ok === false){
       addBox(subEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
       return;
@@ -21161,7 +21193,7 @@ async function confirmSubEditDelete(){
   draft.subCategoryList = removeFromTaxonomyList(draft.subCategoryList, name);
 
   try{
-    const ok = await writeBookPreferGranted(bookId, draft);
+    const ok = await writeBookPreferGranted(bookId, draft, true);
     if(ok === false){
       hideSubEditDeleteConfirm();
       addBox(subEditMessages, 'notice', 'Ingen kontakt med bokfilen — kan inte spara.');
@@ -21535,7 +21567,8 @@ async function saveAccountEdit(){
       }
     }
 
-    await writeBookAsync(bookId, draft);
+    const ok = await writeBookAsync(bookId, draft, true);
+    if(ok === false) throw new Error('Ingen kontakt med bokfilen — kan inte spara.');
   } catch(err){
     addBox(acctEditMessages, 'notice',
       err && err.message ? err.message : 'Kunde inte spara kontot. Inget sparades.');
@@ -22651,7 +22684,12 @@ async function saveNewTransaction(){
     }
 
     finalizeTouchedAccounts(draft, touched);
-    await writeBookPreferGranted(bookId, draft);
+    const ok = await writeBookPreferGranted(bookId, draft, true);
+    if(ok === false){
+      addBox(newTxMessages, 'notice',
+        'Kunde inte spara till bokfilen. Tillåt läs/skriv när webbläsaren frågar — inget sparades.');
+      return;
+    }
   } catch(err){
     addBox(newTxMessages, 'notice',
       err && err.message ? err.message : 'Kunde inte spara transaktionen. Inget sparades.');
@@ -22660,7 +22698,7 @@ async function saveNewTransaction(){
 
   book = draft;
   rebuildBookLookup();
-  markBookDirty();
+  markBookClean();
 
   applyLedgerHighlightAfterSave(payload);
   // Alltid tillbaka till kontoutdraget efter sparad post (mobil + dator).
@@ -22725,7 +22763,14 @@ async function confirmNewTxDelete(){
     }
 
     finalizeTouchedAccounts(draft, touched);
-    await writeBookPreferGranted(bookId, draft);
+    const ok = await writeBookPreferGranted(bookId, draft, true);
+    if(ok === false){
+      hideNewTxDeleteConfirm();
+      clear(newTxMessages);
+      addBox(newTxMessages, 'notice',
+        'Kunde inte spara till bokfilen. Tillåt läs/skriv när webbläsaren frågar — inget togs bort.');
+      return;
+    }
   } catch(err){
     hideNewTxDeleteConfirm();
     clear(newTxMessages);
@@ -22736,7 +22781,7 @@ async function confirmNewTxDelete(){
 
   book = draft;
   rebuildBookLookup();
-  markBookDirty();
+  markBookClean();
   newTxSourceAccount = '';
   newTxSourceIndex = -1;
   newTxSourceKey = '';
@@ -22848,13 +22893,14 @@ async function persistNewTaxonomyNameNow(item){
     draft.subCategoryList = addToTaxonomyList(draft.subCategoryList, item.name);
   }
   try{
-    await writeBookAsync(bookId, draft);
+    const ok = await writeBookAsync(bookId, draft, true);
+    if(ok === false) return;
   } catch(err){
-    // Behåll i minnet även om filskrivning strular.
+    return;
   }
   book = draft;
   rebuildBookLookup();
-  markBookDirty();
+  markBookClean();
   populateNewTxLookups();
 }
 
@@ -24252,7 +24298,17 @@ async function handleFiles(files){
   }
 
   try{
-    await writeBookPreferGranted(bookId, draft);
+    const ok = await writeBookPreferGranted(bookId, draft, true);
+    if(ok === false){
+      working.hidden = true;
+      importing = false;
+      fileInput.value = '';
+      const msg = 'Kunde inte spara importen till bokfilen. Inget har ändrats.';
+      importSessionErrors.push(msg);
+      addBox(importMessages, 'notice', msg);
+      setImportPickerVisible(true);
+      return;
+    }
   } catch(err){
     working.hidden = true;
     importing = false;
@@ -24266,7 +24322,7 @@ async function handleFiles(files){
 
   book = draft;
   rebuildBookLookup();
-  markBookDirty();
+  markBookClean();
 
   for(const msg of warnings){
     importSessionErrors.push(msg);
