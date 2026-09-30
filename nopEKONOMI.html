@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-27 v09';
+const APP_VERSION = '2026-09-27 v10';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9020,11 +9020,19 @@ function paintStartTeaserLowerBar(wrap, lowerBar, budget, remaining, ymax){
     if(ghostRound < 0) ghostEl.classList.add('neg');
   }
 
-  const tipExtra = '\n' + formatStartTeaserGhostTip(ghostRound, rem, ghostInfo);
+  const tipExtra = formatStartTeaserGhostTip(ghostRound, rem, ghostInfo);
+  if(ghostEl) ghostEl.title = tipExtra;
+
+  const ghostLabel = document.querySelector('#startPeriodLabels .start-period-label-ghost');
+  if(ghostLabel) ghostLabel.title = tipExtra;
+
   const base = wrap.getAttribute('title') || '';
   if(base.indexOf('Skugg-saldo') < 0 && base.indexOf('Spök-saldo') < 0){
-    wrap.title = base + tipExtra;
+    wrap.title = (base ? base + '\n' : '') + tipExtra;
   }
+  // Osynliga period-selecten täcker vänsterhalvan — samma tip där, annars syns bara "Budgetperiod".
+  const menu = el('startPeriodMenu');
+  if(menu) menu.title = wrap.title || tipExtra;
 
   const ghostActual = budget > 0 ? Math.max(0, budget - ghostInfo.ghost) : 0;
   if(!(budget > 0)){
