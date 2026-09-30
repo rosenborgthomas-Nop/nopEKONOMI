@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-27 v10';
+const APP_VERSION = '2026-09-30 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9059,7 +9059,12 @@ function clearStartTeaserLowerBar(wrap, lowerBar){
     ghostEl.hidden = true;
     ghostEl.textContent = '';
     ghostEl.classList.remove('pos', 'neg');
+    ghostEl.removeAttribute('title');
   }
+  const ghostLabel = document.querySelector('#startPeriodLabels .start-period-label-ghost');
+  if(ghostLabel) ghostLabel.removeAttribute('title');
+  const menu = el('startPeriodMenu');
+  if(menu) menu.title = 'Budgetperiod';
   const rail = el('startPeriodBudgetRail');
   if(rail) rail.style.left = '';
 }
@@ -9140,10 +9145,15 @@ function paintStartPeriodBar(){
   wrap.title = budgetAmtBarTip(false, actual, budget)
     + '\nÅterstår ' + formatBudgetAmtEdit(remaining);
   valueEl.textContent = formatBudgetAmtEdit(remaining);
+  valueEl.title = wrap.title;
   if(remaining < 0) valueEl.classList.add('neg');
   bar = ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBar', 'budget-amt-bar-upper');
   if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
   if(split) paintStartTeaserLowerBar(wrap, amtBarLower, budget, remaining, ymax);
+  else {
+    const menu = el('startPeriodMenu');
+    if(menu) menu.title = 'Budgetperiod';
+  }
   syncStartPeriodBudgetRail(el('startPeriodLead'), budget, ymax);
 }
 function computeStartBudgetUtTotals(mode){
