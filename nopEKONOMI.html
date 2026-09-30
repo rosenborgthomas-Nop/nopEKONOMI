@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-30 v03';
+const APP_VERSION = '2026-10-01 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8082,19 +8082,19 @@ function formatStartTeaserGhostTip(ghostRound, rem, ghostInfo){
     if(ghostInfo.usedMean){
       return 'Skugg-saldo ' + g
         + ' (återstår ' + r
-        + ' + medel rest-månad ' + meanTxt
-        + ', ' + nMean + ' mån — värre än förhandspostat ' + fut
+        + ' + medel rest-Ut ' + meanTxt
+        + ', ' + nMean + ' mån — värre än förhandspostat Ut ' + fut
         + ', ' + nFut + ' st)';
     }
     return 'Skugg-saldo ' + g
       + ' (återstår ' + r
-      + ' + förhandspostat ' + fut
-      + ', ' + nFut + ' st — värre än medel ' + meanTxt + ')';
+      + ' + förhandspostat Ut ' + fut
+      + ', ' + nFut + ' st — värre än medel rest-Ut ' + meanTxt + ')';
   }
   return 'Skugg-saldo ' + g
     + ' (återstår ' + r
     + (ghostInfo.n
-      ? (' + medel rest-månad ' + meanTxt + ', ' + ghostInfo.n + ' mån)')
+      ? (' + medel rest-Ut ' + meanTxt + ', ' + ghostInfo.n + ' mån)')
       : ' — sista dagen, ingen rest-månad kvar)');
 }
 
@@ -8850,9 +8850,9 @@ function budgetAmtBarTip(isIncome, actual, budget){
 /**
  * Start-teaser: bara utgifter — siffra = återstår (budget − förbrukat),
  * övre stapel = förbrukat/budget (röd från vänster vid överskridande).
- * Undre stapel (bara Pågående månad): spök-saldo = återstår + medel av
- * historiska rest-av-månad (6 föregående månader, från morgondagens dagtal
- * till månadsslut), jämfört med samma budget. Bocklistan styr vilka poster.
+ * Undre stapel (bara Pågående månad): skugg = återstår + förväntad Ut
+ * resten av månaden (6 föregående månader, morgondagens dagtal→månadsslut).
+ * Bocklistan styr vilka poster; inkomster räknas inte in i skuggan.
  */
 
 /** Dagtal för morgondagen (1–31).
@@ -8893,7 +8893,7 @@ function startTeaserGhostTailRanges(todayIso){
 }
 
 /** Netto (in − ut) i datumintervall, endast bocklistade (icke-överföring) poster.
- *  opts.allowFuture: tillåt datum efter idag (bara Spökbudget). */
+ *  opts.allowFuture: tillåt datum efter idag. */
 function sumBocklistaNetInDateRange(fromIso, toIso, opts){
   if(!book || !book.order || !fromIso || !toIso) return { net: 0, count: 0 };
   const allowFuture = !!(opts && opts.allowFuture);
@@ -8929,17 +8929,60 @@ function sumBocklistaNetInDateRange(fromIso, toIso, opts){
 }
 
 /**
- * Skugg-saldo = återstår + prognos för rest av månaden.
- * Prognos = historiskt medel (6 mån, morgondagens dagtal→månadsslut, bocklista).
- * Finns förhandspostat: ta det sämre av förhandspostat och medlet (skuggan varnar
- * även när kända poster inte täcker historiskt mönster — t.ex. stora slutposter).
+ * Bara utgifter (samma kategori-tecken som Budget UT) i datumintervall, bocklista.
+ * Belopp summeras som i bokföringen (utgift negativ) → prognos drar ner återstår.
+ * opts.allowFuture: tillåt datum efter idag (förhandspostat).
+ */
+function sumBocklistaUtInDateRange(fromIso, toIso, opts){
+  if(!book || !book.order || !fromIso || !toIso) return { net: 0, count: 0 };
+  const allowFuture = !!(opts && opts.allowFuture);
+  syncTrendIncludeMap(book);
+  const signMaps = buildBudgetSignMaps();
+  let net = 0;
+  let count = 0;
+  for(const accName of book.order){
+    const acc = book.accounts[accName];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(isOpeningBalanceRow(r)) continue;
+      if(isReportExcludedRow(r)) continue;
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(d < fromIso || d > toIso) continue;
+      if(!allowFuture && !txDateIsCountable(d)) continue;
+      if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
+      let hit = false;
+      for(const piece of reportPiecesFromRow(r)){
+        const cat = (piece.category || '').trim();
+        const sub = (piece.subCategory || '').trim();
+        if(!cat || isTransferCategory(cat)) continue;
+        if(!isTrendPieceIncluded(cat, sub)) continue;
+        const leafItem = sub
+          ? { rowKind: 'sub', name: sub, parent: cat, emptySub: false }
+          : { rowKind: 'sub', name: '', parent: cat, emptySub: true };
+        if(budgetSignForItem(leafItem, signMaps) === 'in') continue;
+        const amount = piece.amount;
+        if(!Number.isFinite(amount) || !amount) continue;
+        net += amount;
+        hit = true;
+      }
+      if(hit) count += 1;
+    }
+  }
+  return { net: net, count: count };
+}
+
+/**
+ * Skugg-saldo = återstår + förväntad Ut för rest av månaden.
+ * Prognos = historiskt medel Ut (6 mån, morgondagens dagtal→månadsslut, bocklista).
+ * Finns förhandspostat Ut: ta det sämre (mer negativt) av förbokat och medlet.
  */
 function computeStartTeaserGhostSaldo(remaining, todayIso){
   const iso = todayIso || todayIsoDate();
   const ranges = startTeaserGhostTailRanges(iso);
   let sum = 0;
   for(const r of ranges){
-    sum += sumBocklistaNetInDateRange(r.from, r.to).net;
+    sum += sumBocklistaUtInDateRange(r.from, r.to).net;
   }
   const n = ranges.length;
   const mean = n ? sum / n : 0;
@@ -8954,13 +8997,13 @@ function computeStartTeaserGhostSaldo(remaining, todayIso){
   let futureNet = 0;
   let futureCount = 0;
   if(tomorrow && tomorrow <= monthEnd){
-    const fut = sumBocklistaNetInDateRange(tomorrow, monthEnd, { allowFuture: true });
+    const fut = sumBocklistaUtInDateRange(tomorrow, monthEnd, { allowFuture: true });
     futureNet = fut.net;
     futureCount = fut.count;
   }
 
   const usePosted = futureCount > 0;
-  // Mer negativt netto = sämre för återstår. Utan förhandspostat: bara medel.
+  // Mer negativ Ut-summa = sämre för återstår.
   const tail = usePosted ? Math.min(futureNet, mean) : mean;
   const usedMean = !usePosted || mean <= futureNet;
   return {
