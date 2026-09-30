@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-30 v01';
+const APP_VERSION = '2026-09-30 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8093,8 +8093,9 @@ function formatStartTeaserGhostTip(ghostRound, rem, ghostInfo){
   }
   return 'Skugg-saldo ' + g
     + ' (återstår ' + r
-    + ' + medel rest-månad ' + meanTxt
-    + ', ' + ghostInfo.n + ' mån)';
+    + (ghostInfo.n
+      ? (' + medel rest-månad ' + meanTxt + ', ' + ghostInfo.n + ' mån)')
+      : ' — sista dagen, ingen rest-månad kvar)');
 }
 
 /** Skuggbudget-fält för pågående månad (samma logik som start-teaser). */
@@ -8854,26 +8855,29 @@ function budgetAmtBarTip(isIncome, actual, budget){
  * till månadsslut), jämfört med samma budget. Bocklistan styr vilka poster.
  */
 
-/** Dagtal för morgondagen (1–31). Sista dagen i månaden → 1 (hela månader). */
+/** Dagtal för morgondagen (1–31).
+ *  Sista dagen i månaden → null (ingen rest-månad kvar att prognostisera). */
 function startTeaserTailStartDay(todayIso){
   const iso = todayIso || todayIsoDate();
   const y = Number(iso.slice(0, 4));
   const m = Number(iso.slice(5, 7));
   const d = Number(iso.slice(8, 10));
   const dim = daysInCalendarMonth(y, m);
-  if(!(d >= 1) || d >= dim) return 1;
+  if(!(d >= 1) || d >= dim) return null;
   return d + 1;
 }
 
 /**
  * Sex föregående kalendermånader: intervall [dagtal → månadsslut].
  * Hoppar över månader där start-dagen inte finns (t.ex. 31 i februari).
+ * Sista dagen i månaden: tom lista (skugg = återstår, ingen rest-prognos).
  */
 function startTeaserGhostTailRanges(todayIso){
   const iso = todayIso || todayIsoDate();
   const curMk = monthKeyFromIso(iso);
   const dayStart = startTeaserTailStartDay(iso);
   const ranges = [];
+  if(dayStart == null) return ranges;
   for(let i = 6; i >= 1; i--){
     const mk = addMonthKey(curMk, -i);
     const y = Number(mk.slice(0, 4));
