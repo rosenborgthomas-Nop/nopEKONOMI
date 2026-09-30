@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-09-30 v02';
+const APP_VERSION = '2026-09-30 v03';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -13193,7 +13193,8 @@ function renderCategoryReportTable(fromIso, toIso){
         months: months,
         monthly: netMonthly,
         absolute: false,
-        tone: 'income'
+        tone: 'income',
+        neutralOpenMonth: true
       })
     }
   );
@@ -13326,6 +13327,9 @@ const CHART_ZIGZAG_STROKE = 'rgba(26,48,80,0.28)';
 const CHART_POSITIVE = '#3A8F5C';
 const CHART_POSITIVE_SOFT = 'rgba(58,143,92,0.14)';
 const CHART_POSITIVE_SOFT_STRONG = 'rgba(58,143,92,0.18)';
+/* Pågående månad i Inkomst minus utgift: varken plus eller minus förrän månaden är slut. */
+const CHART_OPEN_MONTH = '#6E8298';
+const CHART_OPEN_MONTH_SOFT = 'rgba(110,130,152,0.22)';
 
 function netOverTimeMoodColor(curr, prev){
   const fillUp = CHART_POSITIVE;
@@ -17065,7 +17069,8 @@ function renderPayeeReportTable(fromIso, toIso){
         months: months,
         monthly: netMonthly,
         absolute: false,
-        tone: 'income'
+        tone: 'income',
+        neutralOpenMonth: true
       })
     }
   );
@@ -17139,6 +17144,7 @@ function buildMonthSeriesVerticalChartBlock(pointsSlice, allPoints, startIdx, op
   const fill = tone === 'income' ? CHART_POSITIVE : '#A33B3B';
   const fillNeg = '#A33B3B';
   const fillSoft = tone === 'income' ? CHART_POSITIVE_SOFT : 'rgba(163,59,59,0.12)';
+  const neutralOpenMonth = !!opts.neutralOpenMonth;
 
   let bars = '';
   bars += '<line x1="' + padL + '" y1="' + baselineY + '" x2="' + (width - padR) + '" y2="' + baselineY
@@ -17152,12 +17158,14 @@ function buildMonthSeriesVerticalChartBlock(pointsSlice, allPoints, startIdx, op
     const bw = barSlot - gap;
     const h = Math.min(chartBarPixelSize(i, scale, barMaxH, 3), barMaxH);
     const y = baselineY - h;
-    const color = rawDisp < 0 ? fillNeg : fill;
+    const openMonth = neutralOpenMonth && String(p.month || '') === budgetCurrentMonthKey();
+    const color = openMonth ? CHART_OPEN_MONTH : (rawDisp < 0 ? fillNeg : fill);
+    const trackFill = openMonth ? CHART_OPEN_MONTH_SOFT : fillSoft;
     const tipLabel = monthKeyYyMm(p.month);
     const tipValue = absV ? formatReportInt(Math.round(rawDisp)) : '--';
     bars += '<g data-chart-label="' + escapeAttr(tipLabel) + '" data-chart-value="' + escapeAttr(tipValue) + '"'
       + ' data-chart-period="' + escapeAttr(String(p.month || '')) + '" data-chart-raw="' + escapeAttr(String(Math.round(rawDisp || 0))) + '">';
-    bars += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + barMaxH + '" rx="3" fill="' + fillSoft + '"/>';
+    bars += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + barMaxH + '" rx="3" fill="' + trackFill + '"/>';
     if(h){
       if(animate){
         const begin = (animBeginOffset + 0.03 * i).toFixed(2);
@@ -17173,7 +17181,7 @@ function buildMonthSeriesVerticalChartBlock(pointsSlice, allPoints, startIdx, op
       }
     }
     const amt = tipValue;
-    const amtFill = rawDisp < 0 ? fillNeg : '#1A3050';
+    const amtFill = openMonth || rawDisp >= 0 ? '#1A3050' : fillNeg;
     if(rotateAmounts && h){
       const ax = x + bw / 2;
       const ay = y - 4;
@@ -17238,7 +17246,8 @@ function buildMonthSeriesChunkedHtml(series, opts){
       animBeginOffset: forPrint ? 0 : s * yearAnimSpan,
       tone: tone,
       title: title,
-      scale: series.scale
+      scale: series.scale,
+      neutralOpenMonth: !!series.neutralOpenMonth
     });
     html += '</div>';
   }
@@ -17273,7 +17282,8 @@ function buildMonthSeriesChart(series){
       animate: true,
       tone: tone,
       title: title,
-      scale: series.scale
+      scale: series.scale,
+      neutralOpenMonth: !!series.neutralOpenMonth
     })
     + '</div>';
 }
