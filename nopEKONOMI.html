@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-01 v04';
+const APP_VERSION = '2026-10-01 v05';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8342,7 +8342,7 @@ function buildBudgetOutBarsSvgChunk(list){
   const n = list.length;
   const mobileFit = isReportMobileLayout();
   const rotateLabels = n > (mobileFit ? 5 : 8);
-  const valueHead = 46;
+  const valueHead = 52;
   const plotH = mobileFit ? 170 : 190;
   const barMaxH = plotH - valueHead;
   const labelH = rotateLabels ? 52 : 28;
@@ -8362,7 +8362,7 @@ function buildBudgetOutBarsSvgChunk(list){
   const baselineY = padT + plotH;
   const trackTop = padT + valueHead;
   const yAt = v => baselineY - (Math.max(0, v) / ymax) * barMaxH;
-  // Diff-siffra lodrätt ovanför stapeln (90°) — inte för pågående månad.
+  // Diff-siffra snett ovanför stapeln (45°) — inte för pågående månad.
   const valueLabelAnchorY = trackTop - 2;
 
   let svg = '';
@@ -8449,9 +8449,9 @@ function buildBudgetOutBarsSvgChunk(list){
           + '" rx="2" fill="' + moodFill + '" opacity="0.85"/>';
       }
       if(budget > 0 && !r.isCurrentMonth){
-        svg += '<text transform="translate(' + cx + ' ' + valueLabelAnchorY + ') rotate(-90)"'
+        svg += '<text transform="translate(' + cx + ' ' + valueLabelAnchorY + ') rotate(-45)"'
           + ' text-anchor="start" dominant-baseline="middle"'
-          + ' font-family="JetBrains Mono, monospace" font-size="11" font-weight="600"'
+          + ' font-family="JetBrains Mono, monospace" font-size="15" font-weight="600"'
           + ' fill="' + moodFill + '">'
           + escapeHtml(formatReportInt(rem)) + '</text>';
       }
