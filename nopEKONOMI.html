@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-01 v01';
+const APP_VERSION = '2026-10-01 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8342,7 +8342,7 @@ function buildBudgetOutBarsSvgChunk(list){
   const n = list.length;
   const mobileFit = isReportMobileLayout();
   const rotateLabels = n > (mobileFit ? 5 : 8);
-  const valueHead = 18;
+  const valueHead = 20;
   const plotH = mobileFit ? 170 : 190;
   const barMaxH = plotH - valueHead;
   const labelH = rotateLabels ? 52 : 28;
@@ -8362,6 +8362,7 @@ function buildBudgetOutBarsSvgChunk(list){
   const baselineY = padT + plotH;
   const trackTop = padT + valueHead;
   const yAt = v => baselineY - (Math.max(0, v) / ymax) * barMaxH;
+  const valueLabelY = padT + 12;
 
   let svg = '';
   for(let g = 0; g <= 3; g++){
@@ -8398,21 +8399,26 @@ function buildBudgetOutBarsSvgChunk(list){
     const x = barOrigin + i * barSlot + gap / 2;
     const bw = barSlot - gap;
     const cx = x + bw / 2;
+    const budget = typeof r.budget === 'number' && Number.isFinite(r.budget) ? r.budget : 0;
+    const actual = typeof r.actual === 'number' && Number.isFinite(r.actual) ? r.actual : 0;
+    const rem = Math.round(budget) - Math.round(actual);
+    const overBudget = budget > 0 && actual > budget;
+    const moodFill = budget > 0 ? (overBudget ? red : green) : barColor;
 
     if(r.isCurrentMonth && typeof r.ghost === 'number'){
       // Samma skala som övriga månader: höjd = värde / ymax (kan gå förbi budgetlinjen).
       const halfGap = 1.5;
       const halfW = Math.max(3, (bw - halfGap) / 2);
-      const rem = typeof r.remaining === 'number'
-        ? r.remaining
-        : (Math.round(r.budget || 0) - Math.round(r.actual || 0));
       const ghostAct = typeof r.ghostActual === 'number' ? r.ghostActual : 0;
-      const leftRed = rem < 0 || (r.budget > 0 && r.actual > r.budget);
-      const rightRed = r.ghost < 0 || (r.budget > 0 && ghostAct > r.budget);
-      const leftH = Math.max(0, baselineY - yAt(r.actual));
+      const leftRed = rem < 0 || overBudget;
+      const rightRed = r.ghost < 0 || (budget > 0 && ghostAct > budget);
+      const leftH = Math.max(0, baselineY - yAt(actual));
       const rightH = Math.max(0, baselineY - yAt(ghostAct));
-      const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
-        + ', budget ' + formatReportInt(Math.round(r.budget))
+      const leftCx = x + halfW / 2;
+      const rightCx = x + halfW + halfGap + halfW / 2;
+      const tip = r.label + ': utfall ' + formatReportInt(Math.round(actual))
+        + ', budget ' + formatReportInt(Math.round(budget))
+        + ', diff ' + formatReportInt(rem)
         + (r.ghostTip ? '\n' + r.ghostTip : '');
       svg += '<g>';
       svg += '<title>' + escapeHtml(tip) + '</title>';
@@ -8428,23 +8434,35 @@ function buildBudgetOutBarsSvgChunk(list){
         svg += '<rect x="' + (x + halfW + halfGap) + '" y="' + (baselineY - rightH) + '" width="' + halfW
           + '" height="' + rightH + '" rx="2" fill="' + (rightRed ? red : green) + '" opacity="0.7"/>';
       }
+      if(budget > 0){
+        svg += '<text x="' + leftCx + '" y="' + valueLabelY + '" text-anchor="middle"'
+          + ' font-family="JetBrains Mono, monospace" font-size="9" font-weight="600"'
+          + ' fill="' + (leftRed ? red : green) + '">'
+          + escapeHtml(formatReportInt(rem)) + '</text>';
+        svg += '<text x="' + rightCx + '" y="' + valueLabelY + '" text-anchor="middle"'
+          + ' font-family="JetBrains Mono, monospace" font-size="9" font-weight="600"'
+          + ' fill="' + (rightRed ? red : green) + '">'
+          + escapeHtml(formatReportInt(Math.round(r.ghost))) + '</text>';
+      }
     } else {
-      const h = Math.max(0, baselineY - yAt(r.actual));
-      const y = yAt(r.actual);
-      const tip = r.label + ': utfall ' + formatReportInt(Math.round(r.actual))
-        + ', budget ' + formatReportInt(Math.round(r.budget));
-      const moodFill = r.isCurrentMonth && r.budget > 0
-        ? ((r.actual > r.budget) ? red : green)
-        : barColor;
+      const h = Math.max(0, baselineY - yAt(actual));
+      const y = yAt(actual);
+      const tip = r.label + ': utfall ' + formatReportInt(Math.round(actual))
+        + ', budget ' + formatReportInt(Math.round(budget))
+        + (budget > 0 ? (', diff ' + formatReportInt(rem)) : '');
       svg += '<g>';
       svg += '<title>' + escapeHtml(tip) + '</title>';
       svg += '<rect x="' + x + '" y="' + trackTop + '" width="' + bw + '" height="' + barMaxH
         + '" rx="2" fill="' + barSoft + '"/>';
       if(h > 0){
         svg += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h
-          + '" rx="2" fill="' + moodFill + '"'
-          + (r.isCurrentMonth && r.budget > 0 ? ' opacity="0.85"' : '')
-          + '/>';
+          + '" rx="2" fill="' + moodFill + '" opacity="0.85"/>';
+      }
+      if(budget > 0){
+        svg += '<text x="' + cx + '" y="' + valueLabelY + '" text-anchor="middle"'
+          + ' font-family="JetBrains Mono, monospace" font-size="9" font-weight="600"'
+          + ' fill="' + moodFill + '">'
+          + escapeHtml(formatReportInt(rem)) + '</text>';
       }
     }
     if(rotateLabels){
