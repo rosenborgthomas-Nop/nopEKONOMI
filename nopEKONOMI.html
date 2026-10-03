@@ -5270,7 +5270,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-03 v04';
+const APP_VERSION = '2026-10-03 v05';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -8031,9 +8031,8 @@ function collectBudgetOutMonthlySeries(){
     }
   }
 
-  let months = monthKeysInRange(range.from, range.to);
-  if(months.length > 36) months = months.slice(-36);
-
+  const months = monthKeysInRange(range.from, range.to);
+  const curKey = budgetCurrentMonthKey();
   const rows = [];
   for(const mk of months){
     const y = Number(mk.slice(0, 4));
@@ -8042,27 +8041,22 @@ function collectBudgetOutMonthlySeries(){
     let to = endOfCalendarMonthIso(y, m);
     if(from < range.from) from = range.from;
     if(to > range.to) to = range.to;
-    if(from > to){
-      rows.push(attachBudgetBarsGhost({
-        label: monthKeyYyMm(mk),
-        month: mk,
-        budget: hasBudget ? monthlyBudgetUt : 0,
-        actual: 0,
-        isCurrentMonth: mk === budgetCurrentMonthKey()
-      }));
-      continue;
-    }
-    const activityMap = buildBudgetMonthActivityMap(from, to, { onlyIncluded: true });
     let actual = 0;
-    for(const name of expenseCats){
-      actual += budgetActualForItem({ rowKind: 'cat', name: name }, activityMap, false);
+    if(from <= to){
+      const activityMap = buildBudgetMonthActivityMap(from, to, { onlyIncluded: true });
+      for(const name of expenseCats){
+        actual += budgetActualForItem({ rowKind: 'cat', name: name }, activityMap, false);
+      }
     }
+    const isCurrent = mk === curKey;
+    // Ingen 36-månaderskap: visa månader med utfall (+ alltid pågående).
+    if(!(actual > 0) && !isCurrent) continue;
     rows.push(attachBudgetBarsGhost({
       label: monthKeyYyMm(mk),
       month: mk,
       budget: hasBudget ? monthlyBudgetUt : 0,
       actual: actual,
-      isCurrentMonth: mk === budgetCurrentMonthKey()
+      isCurrentMonth: isCurrent
     }));
   }
   return rows;
