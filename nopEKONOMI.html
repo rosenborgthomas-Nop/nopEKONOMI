@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-01 v05';
+const APP_VERSION = '2026-10-03 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9119,10 +9119,16 @@ function clearStartTeaserLowerBar(wrap, lowerBar){
   }
   const ghostLabel = document.querySelector('#startPeriodLabels .start-period-label-ghost');
   if(ghostLabel) ghostLabel.removeAttribute('title');
-  const menu = el('startPeriodMenu');
-  if(menu) menu.title = 'Budgetperiod';
   const rail = el('startPeriodBudgetRail');
   if(rail) rail.style.left = '';
+}
+
+/** Select täcker vänsterhalvan — samma tip som stapeln, annars syns bara "Budgetperiod". */
+function syncStartPeriodMenuTip(wrap){
+  const menu = el('startPeriodMenu');
+  if(!menu) return;
+  const tip = wrap && wrap.getAttribute('title');
+  menu.title = tip || 'Budgetperiod';
 }
 
 function syncStartPeriodBudgetRail(lead, budget, ymax){
@@ -9178,15 +9184,18 @@ function paintStartPeriodBar(){
       wrap.title = 'Förbrukat ' + formatBudgetAmtEdit(actual)
         + ' utan budget i vald period';
       valueEl.textContent = formatBudgetAmtEdit(actual);
+      valueEl.title = wrap.title;
     } else {
       wrap.removeAttribute('data-budget-unbudgeted');
       wrap.removeAttribute('data-budget-side');
       wrap.removeAttribute('title');
       valueEl.textContent = '';
+      valueEl.removeAttribute('title');
     }
     if(bar) bar.style.width = '0';
     if(split) paintStartTeaserLowerBar(wrap, amtBarLower, null, 0, 0);
     syncStartPeriodBudgetRail(el('startPeriodLead'), 0, 0);
+    syncStartPeriodMenuTip(wrap);
     return;
   }
   wrap.removeAttribute('data-budget-unbudgeted');
@@ -9206,10 +9215,7 @@ function paintStartPeriodBar(){
   bar = ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBar', 'budget-amt-bar-upper');
   if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
   if(split) paintStartTeaserLowerBar(wrap, amtBarLower, budget, remaining, ymax);
-  else {
-    const menu = el('startPeriodMenu');
-    if(menu) menu.title = 'Budgetperiod';
-  }
+  else syncStartPeriodMenuTip(wrap);
   syncStartPeriodBudgetRail(el('startPeriodLead'), budget, ymax);
 }
 function computeStartBudgetUtTotals(mode){
