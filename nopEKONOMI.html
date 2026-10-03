@@ -5271,7 +5271,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-03 v01';
+const APP_VERSION = '2026-10-03 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -9200,10 +9200,6 @@ function paintStartPeriodBar(){
   }
   wrap.removeAttribute('data-budget-unbudgeted');
   const remaining = Math.round(budget) - Math.round(actual);
-  const ghostProbe = computeStartTeaserGhostSaldo(remaining, todayIsoDate());
-  const ghostActual = ghostProbe ? Math.max(0, budget - ghostProbe.ghost) : 0;
-  const ymax = budgetSplitTrackMax(budget, actual, ghostActual);
-  const pct = budgetSplitTrackPct(actual, ymax);
   const red = remaining < 0 || actual > budget;
   wrap.setAttribute('data-budget-over', red ? '1' : '0');
   wrap.setAttribute('data-budget-side', 'out');
@@ -9213,10 +9209,22 @@ function paintStartPeriodBar(){
   valueEl.title = wrap.title;
   if(remaining < 0) valueEl.classList.add('neg');
   bar = ensureStartPeriodAmtBar(wrap, 'startPeriodAmtBar', 'budget-amt-bar-upper');
-  if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
-  if(split) paintStartTeaserLowerBar(wrap, amtBarLower, budget, remaining, ymax);
-  else syncStartPeriodMenuTip(wrap);
-  syncStartPeriodBudgetRail(el('startPeriodLead'), budget, ymax);
+  if(split){
+    // Pågående: samma skala som Skugg (ymax = max budget/utfall/skugg).
+    const ghostProbe = computeStartTeaserGhostSaldo(remaining, todayIsoDate());
+    const ghostActual = ghostProbe ? Math.max(0, budget - ghostProbe.ghost) : 0;
+    const ymax = budgetSplitTrackMax(budget, actual, ghostActual);
+    const pct = budgetSplitTrackPct(actual, ymax);
+    if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
+    paintStartTeaserLowerBar(wrap, amtBarLower, budget, remaining, ymax);
+    syncStartPeriodBudgetRail(el('startPeriodLead'), budget, ymax);
+  } else {
+    // Övriga perioder: fyllnad = hur stor andel av budgeten som ätits upp (tak 100 %).
+    const pct = Math.min(100, budgetBarSharePct(actual, budget));
+    if(bar) bar.style.width = (Math.round(pct * 10) / 10) + '%';
+    syncStartPeriodMenuTip(wrap);
+    syncStartPeriodBudgetRail(el('startPeriodLead'), 0, 0);
+  }
 }
 function computeStartBudgetUtTotals(mode){
   const empty = { outBudget: null, outActual: 0 };
