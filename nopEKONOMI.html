@@ -4046,6 +4046,9 @@ td.num.dash .cell-content{
   white-space:normal;
 }
 .row-bad-date{ background:rgba(163,59,59,0.06); }
+/* Förbokade (datum efter idag): kursiv i kontoutdrag. */
+tbody tr.row-future td{ font-style:italic; }
+#txTooltip.tt-future{ font-style:italic; }
 
 .ledger-foot{
   display:flex; justify-content:space-between; align-items:center;
@@ -5270,7 +5273,7 @@ td.num.dash .cell-content{
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-10 v01';
+const APP_VERSION = '2026-10-10 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5466,14 +5469,6 @@ function txDateIsFuture(iso){
   const d = String(iso || '').trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
   return d > todayIsoDate();
-}
-
-/** Förbokade (datum efter idag): text i versaler i kontoutdrag. */
-function ledgerTextForDisplay(text, dateIso){
-  const s = text == null ? '' : String(text);
-  if(!txDateIsFuture(dateIso)) return s;
-  try{ return s.toLocaleUpperCase('sv-SE'); }
-  catch(e){ return s.toUpperCase(); }
 }
 
 function accountSaldo(rows){
@@ -25646,7 +25641,7 @@ function ledgerRowHtml(r, balance, idx){
   if(r === ledgerHighlight) cls.push('row-selected');
   if(txDateIsFuture(r.date)) cls.push('row-future');
 
-  let payeeCell = escapeHtml(ledgerTextForDisplay(r.payee, r.date));
+  let payeeCell = escapeHtml(r.payee);
   if(r.hasSplits) payeeCell += ' <span class="badge split">' + r.splitCount + ' delar</span>';
   if(r.mismatch) payeeCell += ' <span class="badge mismatch">⚠ ej avstämd</span>';
 
@@ -25745,10 +25740,7 @@ function startColumnResize(e, th, colKey){
 }
 
 function tooltipHtml(r){
-  const fut = txDateIsFuture(r.date);
-  const up = t => fut ? ledgerTextForDisplay(t, r.date) : (t == null ? '' : String(t));
-  let html = '<div class="tt-head">'
-    + escapeHtml(up(r.payee || '(utan mottagare)')) + '</div>';
+  let html = '<div class="tt-head">' + escapeHtml(r.payee || '(utan mottagare)') + '</div>';
   html += '<div class="tt-date">' + escapeHtml(r.date) + '</div>';
 
   const line = (text, amount) =>
@@ -25758,24 +25750,18 @@ function tooltipHtml(r){
 
   if(r.hasSplits){
     for(const s of (r.splits || [])){
-      html += line(
-        '[' + up(s.category || '—') + '] : [' + up(s.subCategory || '—') + ']',
-        s.total || 0
-      );
+      html += line('[' + (s.category || '—') + '] : [' + (s.subCategory || '—') + ']', s.total || 0);
     }
     html += '<div class="tt-total"><span>Totalt</span><span>' + formatAmount(r.total) + '</span></div>';
     if(r.mismatch){
       html += '<div class="tt-mismatch">⚠ Splitdelarna summerar inte till totalbeloppet</div>';
     }
   } else {
-    html += line(
-      '[' + up(r.category || '—') + '] : [' + up(r.subCategory || '—') + ']',
-      r.total
-    );
+    html += line('[' + (r.category || '—') + '] : [' + (r.subCategory || '—') + ']', r.total);
   }
 
   // Memot får inte göra bubblan bredare — CSS klipper det i slutet.
-  if(r.memo) html += '<div class="tt-memo">' + escapeHtml(up(r.memo)) + '</div>';
+  if(r.memo) html += '<div class="tt-memo">' + escapeHtml(r.memo) + '</div>';
 
   return html;
 }
@@ -25789,6 +25775,7 @@ let tooltipFrame = 0;
 
 function showTooltip(e, r){
   txTooltip.innerHTML = tooltipHtml(r);
+  txTooltip.classList.toggle('tt-future', !!(r && txDateIsFuture(r.date)));
   txTooltip.style.display = 'block';
   const rect = txTooltip.getBoundingClientRect();
   tooltipSize = { width: rect.width, height: rect.height };
@@ -25797,6 +25784,7 @@ function showTooltip(e, r){
 
 function hideTooltip(){
   txTooltip.style.display = 'none';
+  txTooltip.classList.remove('tt-future');
   ledgerHoverRow = null;
   tooltipPointer = null;
   if(tooltipFrame){ cancelAnimationFrame(tooltipFrame); tooltipFrame = 0; }
