@@ -5273,7 +5273,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-10 v03';
+const APP_VERSION = '2026-10-10 v04';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5700,7 +5700,7 @@ function hasBookFileSyncPending(id){
 let bookSessionDirty = false;
 let bookKnownSavedAt = 0;
 let bookFileCheckBusy = false;
-/** true = JSON i bokmappen nås denna session (minst läs). Skrivrätt begärs vid första sparning. */
+/** true = JSON i bokmappen nås denna session (läs/skriv). Filböcker utan kontakt = skrivskydd. */
 let bookDriveContact = false;
 /** Senaste städmeddelanden från healBookTaxonomy (visas vid öppning). */
 let lastTaxonomyHealNotes = [];
@@ -5739,12 +5739,15 @@ async function tryEstablishBookDriveContact(interactive){
     return { ok: true, parsed: null };
   }
   try{
-    // Bara läs här — skrivrätt begärs först vid faktisk sparning (writeBookPreferGranted).
-    const handle = await getBookFileHandle(bookId, !!interactive, 'read');
-    const parsed = await readBookFileRaw(handle);
+    // En dialog: läs+skriv. Fråga aldrig bara läs — då kommer en andra fråga vid sparning.
     if(interactive){
-      try{ await getBookDirHandle(bookId, false, 'read'); } catch(e){ /* ignore */ }
+      const handle = await getBookFileHandle(bookId, true, 'readwrite');
+      const parsed = await readBookFileRaw(handle);
+      try{ await getBookDirHandle(bookId, true, 'readwrite'); } catch(e){ /* ignore */ }
+      return { ok: true, parsed: parsed };
     }
+    const handle = await getBookFileHandle(bookId, false, 'read');
+    const parsed = await readBookFileRaw(handle);
     return { ok: true, parsed: parsed };
   } catch(e){
     return {
@@ -5759,7 +5762,7 @@ async function enterBookLiveFromFile(parsed){
   await syncBookDriveContactFromHandles();
 }
 
-/** Uppdatera bookDriveContact utifrån faktisk läsbehörighet på handtag. */
+/** Uppdatera bookDriveContact utifrån skrivrätt (eller läs om skriv saknas men fil nås). */
 async function syncBookDriveContactFromHandles(){
   if(!bookId || !isFileBook(bookId)){
     bookDriveContact = true;
@@ -5767,17 +5770,17 @@ async function syncBookDriveContactFromHandles(){
   }
   try{
     const file = await idbGet(bookId);
-    if(file && (await handlePermissionIsGranted(file, 'read'))){
-      setBookDriveContact(true);
-      return true;
-    }
-    // readwrite innebär också läs — behåll bakåtkompatibilitet.
     if(file && (await handlePermissionIsGranted(file, 'readwrite'))){
       setBookDriveContact(true);
       return true;
     }
-    const dir = await getBookDirHandle(bookId, false, 'read');
+    const dir = await getBookDirHandle(bookId, false, 'readwrite');
     if(dir){
+      setBookDriveContact(true);
+      return true;
+    }
+    // Har vi åtminstone läs? Räkna som kontakt så UI inte låser — skriv frågas vid sparning.
+    if(file && (await handlePermissionIsGranted(file, 'read'))){
       setBookDriveContact(true);
       return true;
     }
@@ -6149,13 +6152,20 @@ function bookWorkingCopy(){
 // requestPermission kräver en användargest. Automatiska kontroller får därför
 // bara fråga efter nuvarande läge — annars kastas fel eller dyker det upp
 // dialoger av sig själva när sidan laddas.
+// Interaktivt: alltid readwrite (en dialog) — aldrig bara "läs" sedan "skriv".
 async function ensureHandlePermission(handle, interactive, mode){
   if(!handle) return false;
-  const opts = { mode: mode || 'readwrite' };
+  const want = mode || 'readwrite';
+  const ask = (interactive !== false && want === 'read') ? 'readwrite' : want;
   try{
-    if(await handle.queryPermission(opts) === 'granted') return true;
+    if(await handle.queryPermission({ mode: ask }) === 'granted') return true;
+    // Redan läs men vi behöver skriv: fråga bara om skriv (readwrite).
+    if(ask === 'readwrite' && await handle.queryPermission({ mode: 'read' }) === 'granted'){
+      if(interactive === false) return want === 'read';
+      return await handle.requestPermission({ mode: 'readwrite' }) === 'granted';
+    }
     if(interactive === false) return false;
-    return await handle.requestPermission(opts) === 'granted';
+    return await handle.requestPermission({ mode: ask }) === 'granted';
   } catch(e){
     return false;
   }
@@ -10289,14 +10299,22 @@ async function openBook(id){
       return;
     }
 
-    // Filbok: be bara om läs vid öppning. Skrivrätt begärs vid första sparning.
+    // Filbok: en behörighetsdialog (läs+skriv). Aldrig bara-läs först — det ger två frågor.
+    // 1) Tyst om redan beviljat  2) Annars en readwrite-fråga  3) Sista utväg: tyst/läs
     let parsed = null;
     let fileOk = false;
     try{
-      const handle = await getBookFileHandle(id, true, 'read');
+      let handle = null;
+      try{ handle = await getBookFileHandle(id, false, 'readwrite'); } catch(e){ handle = null; }
+      if(!handle){
+        try{ handle = await getBookFileHandle(id, false, 'read'); } catch(e){ handle = null; }
+      }
+      if(!handle){
+        handle = await getBookFileHandle(id, true, 'readwrite');
+        try{ await getBookDirHandle(id, true, 'readwrite'); } catch(e){ /* ignore */ }
+      }
       parsed = await readBookFileRaw(handle);
       fileOk = true;
-      try{ await getBookDirHandle(id, false, 'read'); } catch(e){ /* ignore */ }
     } catch(e){
       fileOk = false;
     }
