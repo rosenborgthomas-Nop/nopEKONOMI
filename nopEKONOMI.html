@@ -5281,7 +5281,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-10 v05';
+const APP_VERSION = '2026-10-11 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -15095,6 +15095,9 @@ function renderTrendDetailList(kind){
 
 /** Snapshot av menyval när Trend-sidan öppnades (OK sparar, Avbryt återställer). */
 let trendPrefsSession = null;
+/** Live prefs under Trend-sessionen: { type, byType: { [type]: { history, horizon, catMode } } }. */
+let trendPrefsLive = null;
+let trendPrefsLastType = '';
 
 function readTrendPrefsStore(){
   try{
@@ -15111,11 +15114,38 @@ function loadTrendPrefs(){
   return saved;
 }
 
-function captureTrendPrefsFromMenus(){
+function defaultTrendTypeSlot(){
+  return { history: '12', horizon: 12, catMode: 'bocklista' };
+}
+
+function normalizeTrendTypeSlot(slot){
+  const s = slot && typeof slot === 'object' ? slot : {};
+  const horizon = Number(s.horizon);
+  return {
+    history: TREND_HISTORY.has(String(s.history)) ? String(s.history) : '12',
+    horizon: TREND_HORIZONS.has(horizon) ? horizon : 12,
+    catMode: TREND_CAT_MODES.has(s.catMode) ? s.catMode : 'bocklista'
+  };
+}
+
+/** Migrera gamla platta prefs → byType[type]. */
+function normalizeTrendPrefs(prefs){
+  const p = prefs && typeof prefs === 'object' ? prefs : {};
+  const type = TREND_TYPES.has(p.type) ? p.type : 'prognosInUt';
+  const byType = Object.create(null);
+  if(p.byType && typeof p.byType === 'object'){
+    for(const k of Object.keys(p.byType)){
+      if(TREND_TYPES.has(k)) byType[k] = normalizeTrendTypeSlot(p.byType[k]);
+    }
+  }
+  const legacy = normalizeTrendTypeSlot(p);
+  if(!byType[type]) byType[type] = legacy;
+  return { type: type, byType: byType };
+}
+
+function readTrendTypeSlotFromMenus(){
   const horizon = Number(trendHorizonMenu && trendHorizonMenu.value);
   return {
-    type: trendTypeMenu && TREND_TYPES.has(trendTypeMenu.value)
-      ? trendTypeMenu.value : 'prognosInUt',
     history: trendHistoryMenu && TREND_HISTORY.has(trendHistoryMenu.value)
       ? trendHistoryMenu.value : '12',
     horizon: TREND_HORIZONS.has(horizon) ? horizon : 12,
@@ -15124,28 +15154,64 @@ function captureTrendPrefsFromMenus(){
   };
 }
 
-function applyTrendPrefsToMenus(prefs){
-  const p = prefs && typeof prefs === 'object' ? prefs : {};
-  if(trendTypeMenu){
-    const type = TREND_TYPES.has(p.type) ? p.type : 'prognosInUt';
-    if(trendTypeMenu.querySelector('option[value="' + type + '"]')) trendTypeMenu.value = type;
-    else trendTypeMenu.selectedIndex = 0;
-  }
+function applyTrendTypeSlotToMenus(slot){
+  const s = normalizeTrendTypeSlot(slot);
   if(trendHistoryMenu){
-    const hist = TREND_HISTORY.has(String(p.history)) ? String(p.history) : '12';
-    if(trendHistoryMenu.querySelector('option[value="' + hist + '"]')) trendHistoryMenu.value = hist;
-    else trendHistoryMenu.value = '12';
+    if(trendHistoryMenu.querySelector('option[value="' + s.history + '"]')){
+      trendHistoryMenu.value = s.history;
+    } else trendHistoryMenu.value = '12';
   }
   if(trendHorizonMenu){
-    const h = TREND_HORIZONS.has(Number(p.horizon)) ? String(p.horizon) : '12';
+    const h = String(s.horizon);
     if(trendHorizonMenu.querySelector('option[value="' + h + '"]')) trendHorizonMenu.value = h;
     else trendHorizonMenu.value = '12';
   }
   if(trendCatMenu){
-    const cat = TREND_CAT_MODES.has(p.catMode) ? p.catMode : 'bocklista';
-    if(trendCatMenu.querySelector('option[value="' + cat + '"]')) trendCatMenu.value = cat;
-    else trendCatMenu.value = 'bocklista';
+    if(trendCatMenu.querySelector('option[value="' + s.catMode + '"]')){
+      trendCatMenu.value = s.catMode;
+    } else trendCatMenu.value = 'bocklista';
   }
+}
+
+function ensureTrendPrefsLive(){
+  if(!trendPrefsLive){
+    trendPrefsLive = normalizeTrendPrefs(loadTrendPrefs() || {});
+  }
+  return trendPrefsLive;
+}
+
+function syncTrendLiveSlotFromMenus(){
+  const live = ensureTrendPrefsLive();
+  const type = trendTypeMenu && TREND_TYPES.has(trendTypeMenu.value)
+    ? trendTypeMenu.value : live.type;
+  live.type = type;
+  live.byType[type] = readTrendTypeSlotFromMenus();
+  trendPrefsLastType = type;
+}
+
+function captureTrendPrefsFromMenus(){
+  syncTrendLiveSlotFromMenus();
+  return {
+    type: trendPrefsLive.type,
+    byType: Object.assign(Object.create(null), trendPrefsLive.byType)
+  };
+}
+
+function applyTrendPrefsToMenus(prefs){
+  const p = normalizeTrendPrefs(prefs);
+  if(trendTypeMenu){
+    if(trendTypeMenu.querySelector('option[value="' + p.type + '"]')) trendTypeMenu.value = p.type;
+    else trendTypeMenu.selectedIndex = 0;
+  }
+  const type = trendTypeMenu && TREND_TYPES.has(trendTypeMenu.value)
+    ? trendTypeMenu.value : p.type;
+  applyTrendTypeSlotToMenus(p.byType[type] || defaultTrendTypeSlot());
+  trendPrefsLive = {
+    type: type,
+    byType: Object.assign(Object.create(null), p.byType)
+  };
+  trendPrefsLive.byType[type] = readTrendTypeSlotFromMenus();
+  trendPrefsLastType = type;
 }
 
 function saveTrendPrefs(){
@@ -15168,11 +15234,15 @@ function beginTrendPrefsSession(){
 function discardTrendPrefsSession(){
   if(trendPrefsSession) applyTrendPrefsToMenus(trendPrefsSession);
   trendPrefsSession = null;
+  trendPrefsLive = null;
+  trendPrefsLastType = '';
 }
 
 function commitTrendPrefsSession(){
   saveTrendPrefs();
   trendPrefsSession = null;
+  trendPrefsLive = null;
+  trendPrefsLastType = '';
 }
 
 function leaveTrendPage(commit){
@@ -16464,16 +16534,38 @@ if(trendBody){
   });
 }
 if(trendTypeMenu){
-  trendTypeMenu.addEventListener('change', refreshTrendPagePreview);
+  trendTypeMenu.addEventListener('change', () => {
+    const live = ensureTrendPrefsLive();
+    const newType = TREND_TYPES.has(trendTypeMenu.value)
+      ? trendTypeMenu.value : 'prognosInUt';
+    // Spara Historik/Horisont/Bocklista för typen man lämnar.
+    if(trendPrefsLastType && TREND_TYPES.has(trendPrefsLastType)){
+      live.byType[trendPrefsLastType] = readTrendTypeSlotFromMenus();
+    }
+    live.type = newType;
+    applyTrendTypeSlotToMenus(live.byType[newType] || defaultTrendTypeSlot());
+    live.byType[newType] = readTrendTypeSlotFromMenus();
+    trendPrefsLastType = newType;
+    refreshTrendPagePreview();
+  });
 }
 if(trendHistoryMenu){
-  trendHistoryMenu.addEventListener('change', refreshTrendPagePreview);
+  trendHistoryMenu.addEventListener('change', () => {
+    syncTrendLiveSlotFromMenus();
+    refreshTrendPagePreview();
+  });
 }
 if(trendHorizonMenu){
-  trendHorizonMenu.addEventListener('change', refreshTrendPagePreview);
+  trendHorizonMenu.addEventListener('change', () => {
+    syncTrendLiveSlotFromMenus();
+    refreshTrendPagePreview();
+  });
 }
 if(trendCatMenu){
-  trendCatMenu.addEventListener('change', refreshTrendPagePreview);
+  trendCatMenu.addEventListener('change', () => {
+    syncTrendLiveSlotFromMenus();
+    refreshTrendPagePreview();
+  });
 }
 
 function collectPayeeReport(fromIso, toIso){
