@@ -4396,12 +4396,6 @@ tbody tr.row-future td{ font-style:italic; }
       </p>
     </main>
 
-    <div class="care-list-actions trend-page-actions">
-      <div class="care-list-actions-right">
-        <button class="btn-ok" id="trendOkBtn" type="button">OK</button>
-      </div>
-    </div>
-
     <footer>
       <p class="app-version"></p>
     </footer>
@@ -5281,7 +5275,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-11 v01';
+const APP_VERSION = '2026-10-11 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -10241,8 +10235,8 @@ async function show(name, opts){
   const leavingTrend = views.trend && !views.trend.hidden
     && name !== 'trend' && name !== 'ledger';
   if(leavingTrend && trendPrefsSession){
-    // Lämnade Trend utan OK (t.ex. annan navigation) — återställ menyval.
-    discardTrendPrefsSession();
+    // Inställningar sparas löpande; avsluta sessionen utan att återställa.
+    endTrendPrefsSession(true);
   }
 
   // Bygg om boklistan innan inloggningen visas.
@@ -14411,7 +14405,7 @@ const trendMessages = el('trendMessages');
 const trendBody = el('trendBody');
 const trendPlaceholder = el('trendPlaceholder');
 const trendBackBtn = el('trendBackBtn');
-const trendOkBtn = el('trendOkBtn');
+const trendOkBtn = null;
 const trendCancelBtn = null;
 
 function isTrendDetailType(val){
@@ -15221,6 +15215,12 @@ function saveTrendPrefs(){
   localStorage.setItem(TREND_PREFS_KEY, JSON.stringify(all));
 }
 
+/** Spara nuvarande menyval direkt (ingen OK-knapp). */
+function persistTrendPrefsNow(){
+  if(!bookId) return;
+  saveTrendPrefs();
+}
+
 function restoreTrendPrefs(){
   applyTrendPrefsToMenus(loadTrendPrefs() || {});
 }
@@ -15228,26 +15228,25 @@ function restoreTrendPrefs(){
 function beginTrendPrefsSession(){
   if(trendPrefsSession) return;
   restoreTrendPrefs();
-  trendPrefsSession = captureTrendPrefsFromMenus();
+  trendPrefsSession = true;
+}
+
+function endTrendPrefsSession(persist){
+  if(persist) persistTrendPrefsNow();
+  trendPrefsSession = null;
+  trendPrefsLive = null;
+  trendPrefsLastType = '';
 }
 
 function discardTrendPrefsSession(){
-  if(trendPrefsSession) applyTrendPrefsToMenus(trendPrefsSession);
-  trendPrefsSession = null;
-  trendPrefsLive = null;
-  trendPrefsLastType = '';
+  endTrendPrefsSession(false);
 }
 
 function commitTrendPrefsSession(){
-  saveTrendPrefs();
-  trendPrefsSession = null;
-  trendPrefsLive = null;
-  trendPrefsLastType = '';
+  endTrendPrefsSession(true);
 }
 
-function leaveTrendPage(commit){
-  if(commit) commitTrendPrefsSession();
-  else discardTrendPrefsSession();
+function leaveTrendPage(){
   trendDetailDrill = null;
   show('start');
 }
@@ -15261,18 +15260,7 @@ function trendNavigateBack(){
     syncTrendNavChrome();
     return;
   }
-  leaveTrendPage(false);
-}
-
-function trendNavigateOk(){
-  if(trendDetailDrill && isTrendDetailType(trendDetailDrill.kind)){
-    const kind = trendDetailDrill.kind;
-    trendDetailDrill = null;
-    renderTrendDetailList(kind);
-    syncTrendNavChrome();
-    return;
-  }
-  leaveTrendPage(true);
+  leaveTrendPage();
 }
 
 function syncTrendNavChrome(){
@@ -16506,7 +16494,6 @@ function refreshTrendPagePreview(){
 }
 
 if(trendBackBtn) trendBackBtn.addEventListener('click', trendNavigateBack);
-if(trendOkBtn) trendOkBtn.addEventListener('click', trendNavigateOk);
 if(trendBody){
   trendBody.addEventListener('dblclick', e => {
     const drillRow = e.target && e.target.closest
@@ -16546,24 +16533,28 @@ if(trendTypeMenu){
     applyTrendTypeSlotToMenus(live.byType[newType] || defaultTrendTypeSlot());
     live.byType[newType] = readTrendTypeSlotFromMenus();
     trendPrefsLastType = newType;
+    persistTrendPrefsNow();
     refreshTrendPagePreview();
   });
 }
 if(trendHistoryMenu){
   trendHistoryMenu.addEventListener('change', () => {
     syncTrendLiveSlotFromMenus();
+    persistTrendPrefsNow();
     refreshTrendPagePreview();
   });
 }
 if(trendHorizonMenu){
   trendHorizonMenu.addEventListener('change', () => {
     syncTrendLiveSlotFromMenus();
+    persistTrendPrefsNow();
     refreshTrendPagePreview();
   });
 }
 if(trendCatMenu){
   trendCatMenu.addEventListener('change', () => {
     syncTrendLiveSlotFromMenus();
+    persistTrendPrefsNow();
     refreshTrendPagePreview();
   });
 }
