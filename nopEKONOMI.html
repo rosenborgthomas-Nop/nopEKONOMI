@@ -5275,7 +5275,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-15 v01';
+const APP_VERSION = '2026-10-15 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11201,6 +11201,29 @@ function syncReportDateInputsEnabled(){
   });
 }
 
+/** Rullande dagperioder (30, ev. 60/90): visa exakta datum, redovisa inte pågående månad. */
+const ROLLING_DAY_TIME_PRESETS = new Set(['last30']);
+
+function isRollingDayTimePreset(mode){
+  const m = mode || (reportTimeMenu && reportTimeMenu.value) || '';
+  return ROLLING_DAY_TIME_PRESETS.has(m);
+}
+
+/**
+ * Datainsamling för rullande dagperiod: klipp Till till sista dagen före pågående månad.
+ * Rubriken behåller hela from–to (inkl. dagar i pågående månad).
+ */
+function reportCollectToIso(toIso){
+  if(!isRollingDayTimePreset()) return toIso;
+  const today = todayIsoDate();
+  const y = Number(today.slice(0, 4));
+  const m = Number(today.slice(5, 7));
+  const openStart = startOfMonthIso(y, m);
+  const clipped = addDaysIso(openStart, -1);
+  if(!clipped || !/^\d{4}-\d{2}-\d{2}$/.test(String(toIso || ''))) return toIso;
+  return clipped < toIso ? clipped : toIso;
+}
+
 function reportTimeTitleSuffixHtml(){
   const mode = reportTimeMenu.value;
   if(!mode) return '';
@@ -11223,6 +11246,12 @@ function reportTimeTitleSuffixHtml(){
 }
 
 function reportPeriodRangeLabel(fromIso, toIso, months){
+  // 30/60/90: visa faktiska start- och slutdatum, inte bara YYYY-MM.
+  if(isRollingDayTimePreset() && fromIso && toIso){
+    const a = budgetPeriodDateLabel(fromIso);
+    const b = budgetPeriodDateLabel(toIso);
+    if(a && b) return a + ' \u2013 ' + b;
+  }
   const start = months && months.length ? months[0] : fromIso.slice(0, 7);
   const end = months && months.length ? months[months.length - 1] : toIso.slice(0, 7);
   return start + ' \u2013 ' + end;
@@ -13189,9 +13218,11 @@ function renderCategoryBlock(cat, months, catTotals, catMonthly, subsForCat, abs
 
 function renderCategoryReportTable(fromIso, toIso){
   setActiveReportRange(fromIso, toIso);
-  const data = collectCategoryReport(fromIso, toIso);
+  const dataTo = reportCollectToIso(toIso);
+  const data = collectCategoryReport(fromIso, dataTo);
   const { months, posCats, negCats, catTotals, catMonthly, subsForCat } = data;
   const colCount = months.length + 2;
+  const neutralOpen = !isRollingDayTimePreset();
 
   clearReportCanvas();
   if(reportPlaceholder) reportPlaceholder.hidden = true;
@@ -13280,7 +13311,7 @@ function renderCategoryReportTable(fromIso, toIso){
         monthly: netMonthly,
         absolute: false,
         tone: 'income',
-        neutralOpenMonth: true
+        neutralOpenMonth: neutralOpen
       })
     }
   );
@@ -13732,7 +13763,9 @@ function buildNetOverTimeChart(points, opening){
 }
 
 function renderNetOverTimeReport(fromIso, toIso){
-  const data = collectNetOverTime(fromIso, toIso);
+  setActiveReportRange(fromIso, toIso);
+  const dataTo = reportCollectToIso(toIso);
+  const data = collectNetOverTime(fromIso, dataTo);
   const { months, points, opening } = data;
 
   clearReportCanvas();
@@ -17033,7 +17066,8 @@ function topListClipboardTextFromDom(){
 function renderTopListReport(kind, fromIso, toIso){
   kind = normalizeTopListKind(kind);
   setActiveReportRange(fromIso, toIso);
-  const data = collectTopListReport(fromIso, toIso, kind);
+  const dataTo = reportCollectToIso(toIso);
+  const data = collectTopListReport(fromIso, dataTo, kind);
   const items = data.items || [];
   const months = data.months || [];
   const monthlyByName = data.monthlyByName || Object.create(null);
@@ -17124,7 +17158,8 @@ function renderTopListReport(kind, fromIso, toIso){
 
 function renderPayeeReportTable(fromIso, toIso){
   setActiveReportRange(fromIso, toIso);
-  const data = collectPayeeReport(fromIso, toIso);
+  const dataTo = reportCollectToIso(toIso);
+  const data = collectPayeeReport(fromIso, dataTo);
   const { months, payeeTotals, payeeMonthly } = data;
   const sortIn = payeeReportSort.in || { active: false, sortDir: 'asc' };
   const sortOut = payeeReportSort.out || { active: false, sortDir: 'asc' };
@@ -17135,6 +17170,7 @@ function renderPayeeReportTable(fromIso, toIso){
     ? sortPayeeReportNames(data.negPayees, payeeTotals, sortOut.sortDir)
     : data.negPayees.slice();
   const colCount = months.length + 2;
+  const neutralOpen = !isRollingDayTimePreset();
 
   clearReportCanvas();
   if(reportPlaceholder) reportPlaceholder.hidden = true;
@@ -17245,7 +17281,7 @@ function renderPayeeReportTable(fromIso, toIso){
         monthly: netMonthly,
         absolute: false,
         tone: 'income',
-        neutralOpenMonth: true
+        neutralOpenMonth: neutralOpen
       })
     }
   );
