@@ -5275,7 +5275,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-11 v02';
+const APP_VERSION = '2026-10-15 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11306,27 +11306,14 @@ function clipReportRange(from, to){
  * Rullande N månader bakåt: dagen efter (idag − N kalendermånader) → idag.
  * Exempel: 2026-09-10 och N=3 → 2026-06-11 … 2026-09-10.
  */
-function startOfRollingMonthsBack(todayIso, monthsBack){
-  const y = Number(todayIso.slice(0, 4));
-  const m = Number(todayIso.slice(5, 7));
-  const d = Number(todayIso.slice(8, 10));
-  const p = shiftCalendarMonth(y, m, -monthsBack);
-  const last = Number(endOfCalendarMonthIso(p.y, p.m).slice(8, 10));
-  const day = Math.min(d, last);
-  return addDaysIso(isoFromYmd(p.y, p.m, day), 1);
-}
-
 /**
- * Senaste N månader: om dagens dag ≤ 15 → rullande N månader till idag;
- * annars från den 1:a i månaden (N−1) steg bakåt till idag (inkl. innevarande).
+ * Senaste N månader: alltid hela kalendermånader —
+ * från den 1:a i månaden (N−1) steg bakåt till idag (pågående månad t.o.m. idag).
+ * Rullande dagklipp gäller bara last30 (ev. 60/90 senare), inte månadsvalen.
  */
 function rangeForLastMonthsPreset(todayIso, months){
   const y = Number(todayIso.slice(0, 4));
   const m = Number(todayIso.slice(5, 7));
-  const day = Number(todayIso.slice(8, 10));
-  if(day <= 15){
-    return { from: startOfRollingMonthsBack(todayIso, months), to: todayIso };
-  }
   const p = shiftCalendarMonth(y, m, -(months - 1));
   return { from: startOfMonthIso(p.y, p.m), to: todayIso };
 }
