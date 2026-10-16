@@ -4323,6 +4323,7 @@ tbody tr.row-future td{ font-style:italic; }
         <option value="last6m">Senaste 6 månader</option>
         <option value="last12m">Senaste 12 månader</option>
         <option value="allt">Allt</option>
+        <option value="manadsperioder">Månadsperioder (12)</option>
         <option value="" disabled class="menu-sep menu-sep-title" id="reportTimeYearSep">--Årsredovisning--</option>
         <option value="arsred" id="reportTimeArsred">Årsred. — -> —</option>
         <option value="arsperioder" id="reportTimeArsperioder">Årsperioder — -> —</option>
@@ -5275,7 +5276,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-15 v02';
+const APP_VERSION = '2026-10-16 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11143,14 +11144,17 @@ function defaultReportToIso(){
 const REPORT_TIME_MODES = new Set([
   'currentMonth', 'currentYear', 'prevMonth', 'prevYear',
   'last30', 'last3m', 'last6m', 'last12m', 'last24m', 'allt',
+  'manadsperioder',
   'arsred', 'arsperioder'
 ]);
 
-// month | year | yearPeriod — styr kolumner/staplar i rapporterna.
+// month | monthPeriod | year | yearPeriod — styr kolumner/staplar i rapporterna.
 let reportBucketMode = 'month';
 // Årsperioder: samma MM-DD-fönster varje år (från bokens första→sista datum).
 let reportYearPeriodStartMd = ''; // 'MM-DD'
 let reportYearPeriodEndMd = '';
+// Månadsperioder (12): dag 1 … dagens dagtal i varje av de 12 senaste månaderna.
+let reportMonthPeriodDay = 0;
 
 function syncYearPeriodWindow(){
   if(reportBucketMode !== 'yearPeriod'){
@@ -11173,7 +11177,13 @@ function syncReportBucketMode(){
   const v = reportTimeMenu.value;
   if(v === 'arsred') reportBucketMode = 'year';
   else if(v === 'arsperioder') reportBucketMode = 'yearPeriod';
+  else if(v === 'manadsperioder') reportBucketMode = 'monthPeriod';
   else reportBucketMode = 'month';
+  if(reportBucketMode === 'monthPeriod'){
+    reportMonthPeriodDay = Number(todayIsoDate().slice(8, 10)) || 1;
+  } else {
+    reportMonthPeriodDay = 0;
+  }
   syncYearPeriodWindow();
   syncReportDateInputsEnabled();
 }
@@ -11181,9 +11191,11 @@ function syncReportBucketMode(){
 function syncReportDateInputsEnabled(){
   const timeMode = reportTimeMenu.value;
   const isYearlyPeriod = timeMode === 'arsperioder';
-  const isYearlyMode = timeMode === 'arsred' || isYearlyPeriod;
+  const isMonthPeriod = timeMode === 'manadsperioder';
+  const isYearlyMode = timeMode === 'arsred' || isYearlyPeriod || isMonthPeriod;
+  const lockTopLists = isYearlyPeriod || isMonthPeriod;
   
-  // Datumväljare (avstängda för både årsredovisning och årsperioder)
+  // Datumväljare avstängda när perioden själv bestämmer fönstret.
   reportFrom.disabled = isYearlyMode;
   reportTo.disabled = isYearlyMode;
   
@@ -11192,11 +11204,11 @@ function syncReportDateInputsEnabled(){
   if(fromLab) fromLab.classList.toggle('is-muted', isYearlyMode);
   if(toLab) toLab.classList.toggle('is-muted', isYearlyMode);
 
-  // Topplistor i rullgardinen (endast avstängda för årsperioder)
+  // Topplistor avstängda för årsperioder och månadsperioder (Kategori/Payee/Netto kvar).
   const topListOptions = reportMenu.querySelectorAll('option[value^="top"], option[value="topplistor"]');
   topListOptions.forEach(opt => {
-    opt.disabled = isYearlyPeriod;
-    if(isYearlyPeriod) opt.style.color = 'rgba(107, 99, 80, 0.35)';
+    opt.disabled = lockTopLists;
+    if(lockTopLists) opt.style.color = 'rgba(107, 99, 80, 0.35)';
     else opt.style.color = '';
   });
 }
@@ -11241,6 +11253,10 @@ function reportTimeTitleSuffixHtml(){
       };
       html += ' <span class="report-time-until">' + escapeHtml(fmtMd(a) + '\u2013' + fmtMd(b)) + '</span>';
     }
+  }
+  if(mode === 'manadsperioder'){
+    const day = reportMonthPeriodDay || Number(todayIsoDate().slice(8, 10)) || 1;
+    html += ' <span class="report-time-until">' + escapeHtml('1\u2013' + day) + '</span>';
   }
   return html;
 }
@@ -11418,6 +11434,13 @@ function datesForTimePreset(mode){
       const latest = latestBookDateIso(true) || today;
       return { from: earliest, to: latest };
     }
+    case 'manadsperioder': {
+      // 12 kalendermånader inkl. pågående, från den 1:a. Dag 1–idag filtreras per månad.
+      const r = rangeForLastMonthsPreset(today, 12);
+      from = r.from;
+      to = r.to;
+      break;
+    }
     default:
       return null;
   }
@@ -11434,6 +11457,13 @@ function applyTimePreset(mode){
   // Netto över tid funkar inte med årsaggregat — tvinga Kategori.
   if(mode === 'arsred' || mode === 'arsperioder'){
     reportMenu.value = 'kategoriRapport';
+  }
+  // Månadsperioder: Kategori, Payee och Netto. Topplista byts till Kategori.
+  if(mode === 'manadsperioder'){
+    const k = reportMenu ? reportMenu.value : '';
+    if(k === 'topPayee' || k === 'topKategori' || k === 'topUnderkategori' || k === 'topplistor'){
+      reportMenu.value = 'kategoriRapport';
+    }
   }
   return true;
 }
@@ -11461,6 +11491,11 @@ function reportPeriodKeyFromIso(iso){
 }
 
 function rowMatchesYearPeriodFilter(isoDate){
+  if(reportBucketMode === 'monthPeriod'){
+    const day = Number(String(isoDate || '').slice(8, 10));
+    const cap = reportMonthPeriodDay || Number(todayIsoDate().slice(8, 10)) || 1;
+    return day >= 1 && day <= cap;
+  }
   if(reportBucketMode !== 'yearPeriod') return true;
   if(!reportYearPeriodStartMd || !reportYearPeriodEndMd) syncYearPeriodWindow();
   const md = String(isoDate || '').slice(5, 10);
@@ -13222,7 +13257,7 @@ function renderCategoryReportTable(fromIso, toIso){
   const data = collectCategoryReport(fromIso, dataTo);
   const { months, posCats, negCats, catTotals, catMonthly, subsForCat } = data;
   const colCount = months.length + 2;
-  const neutralOpen = !isRollingDayTimePreset();
+  const neutralOpen = !isRollingDayTimePreset() && reportBucketMode !== 'monthPeriod';
 
   clearReportCanvas();
   if(reportPlaceholder) reportPlaceholder.hidden = true;
@@ -17170,7 +17205,7 @@ function renderPayeeReportTable(fromIso, toIso){
     ? sortPayeeReportNames(data.negPayees, payeeTotals, sortOut.sortDir)
     : data.negPayees.slice();
   const colCount = months.length + 2;
-  const neutralOpen = !isRollingDayTimePreset();
+  const neutralOpen = !isRollingDayTimePreset() && reportBucketMode !== 'monthPeriod';
 
   clearReportCanvas();
   if(reportPlaceholder) reportPlaceholder.hidden = true;
@@ -17908,11 +17943,11 @@ function runReport(){
   const timeMode = reportTimeMenu.value;
   const kind = reportMenu.value;
 
-  // Om man väljer "Årsperioder" ska topplistor inte vara tillgängliga.
-  const isYearlyPeriod = timeMode === 'arsperioder';
+  // Årsperioder och månadsperioder: bara Kategori, Payee och Netto över tid.
+  const lockTopLists = timeMode === 'arsperioder' || timeMode === 'manadsperioder';
   const isTopList = kind === 'topPayee' || kind === 'topKategori' || kind === 'topUnderkategori' || kind === 'topplistor';
 
-  if(isYearlyPeriod && isTopList){
+  if(lockTopLists && isTopList){
     reportMenu.value = 'kategoriRapport';
     runReport();
     return;
