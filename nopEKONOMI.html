@@ -4323,6 +4323,7 @@ tbody tr.row-future td{ font-style:italic; }
         <option value="last6m">Senaste 6 månader</option>
         <option value="last12m">Senaste 12 månader</option>
         <option value="allt">Allt</option>
+        <option value="manadsperioder6">Månadsperioder (6)</option>
         <option value="manadsperioder">Månadsperioder (12)</option>
         <option value="" disabled class="menu-sep menu-sep-title" id="reportTimeYearSep">--Årsredovisning--</option>
         <option value="arsred" id="reportTimeArsred">Årsred. — -> —</option>
@@ -5276,7 +5277,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-16 v01';
+const APP_VERSION = '2026-10-16 v02';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -11144,7 +11145,7 @@ function defaultReportToIso(){
 const REPORT_TIME_MODES = new Set([
   'currentMonth', 'currentYear', 'prevMonth', 'prevYear',
   'last30', 'last3m', 'last6m', 'last12m', 'last24m', 'allt',
-  'manadsperioder',
+  'manadsperioder6', 'manadsperioder',
   'arsred', 'arsperioder'
 ]);
 
@@ -11153,8 +11154,15 @@ let reportBucketMode = 'month';
 // Årsperioder: samma MM-DD-fönster varje år (från bokens första→sista datum).
 let reportYearPeriodStartMd = ''; // 'MM-DD'
 let reportYearPeriodEndMd = '';
-// Månadsperioder (12): dag 1 … dagens dagtal i varje av de 12 senaste månaderna.
+// Månadsperioder: dag 1 … dagens dagtal i varje av de senaste N månaderna.
 let reportMonthPeriodDay = 0;
+
+function monthPeriodMonths(mode){
+  const m = mode || (reportTimeMenu && reportTimeMenu.value) || '';
+  if(m === 'manadsperioder6') return 6;
+  if(m === 'manadsperioder') return 12;
+  return 0;
+}
 
 function syncYearPeriodWindow(){
   if(reportBucketMode !== 'yearPeriod'){
@@ -11177,7 +11185,7 @@ function syncReportBucketMode(){
   const v = reportTimeMenu.value;
   if(v === 'arsred') reportBucketMode = 'year';
   else if(v === 'arsperioder') reportBucketMode = 'yearPeriod';
-  else if(v === 'manadsperioder') reportBucketMode = 'monthPeriod';
+  else if(monthPeriodMonths(v)) reportBucketMode = 'monthPeriod';
   else reportBucketMode = 'month';
   if(reportBucketMode === 'monthPeriod'){
     reportMonthPeriodDay = Number(todayIsoDate().slice(8, 10)) || 1;
@@ -11191,7 +11199,7 @@ function syncReportBucketMode(){
 function syncReportDateInputsEnabled(){
   const timeMode = reportTimeMenu.value;
   const isYearlyPeriod = timeMode === 'arsperioder';
-  const isMonthPeriod = timeMode === 'manadsperioder';
+  const isMonthPeriod = monthPeriodMonths(timeMode) > 0;
   const isYearlyMode = timeMode === 'arsred' || isYearlyPeriod || isMonthPeriod;
   const lockTopLists = isYearlyPeriod || isMonthPeriod;
   
@@ -11254,7 +11262,7 @@ function reportTimeTitleSuffixHtml(){
       html += ' <span class="report-time-until">' + escapeHtml(fmtMd(a) + '\u2013' + fmtMd(b)) + '</span>';
     }
   }
-  if(mode === 'manadsperioder'){
+  if(monthPeriodMonths(mode)){
     const day = reportMonthPeriodDay || Number(todayIsoDate().slice(8, 10)) || 1;
     html += ' <span class="report-time-until">' + escapeHtml('1\u2013' + day) + '</span>';
   }
@@ -11434,9 +11442,11 @@ function datesForTimePreset(mode){
       const latest = latestBookDateIso(true) || today;
       return { from: earliest, to: latest };
     }
+    case 'manadsperioder6':
     case 'manadsperioder': {
-      // 12 kalendermånader inkl. pågående, från den 1:a. Dag 1–idag filtreras per månad.
-      const r = rangeForLastMonthsPreset(today, 12);
+      // N kalendermånader inkl. pågående, från den 1:a. Dag 1–idag filtreras per månad.
+      const n = monthPeriodMonths(mode);
+      const r = rangeForLastMonthsPreset(today, n || 12);
       from = r.from;
       to = r.to;
       break;
@@ -11459,7 +11469,7 @@ function applyTimePreset(mode){
     reportMenu.value = 'kategoriRapport';
   }
   // Månadsperioder: Kategori, Payee och Netto. Topplista byts till Kategori.
-  if(mode === 'manadsperioder'){
+  if(monthPeriodMonths(mode)){
     const k = reportMenu ? reportMenu.value : '';
     if(k === 'topPayee' || k === 'topKategori' || k === 'topUnderkategori' || k === 'topplistor'){
       reportMenu.value = 'kategoriRapport';
@@ -17944,7 +17954,7 @@ function runReport(){
   const kind = reportMenu.value;
 
   // Årsperioder och månadsperioder: bara Kategori, Payee och Netto över tid.
-  const lockTopLists = timeMode === 'arsperioder' || timeMode === 'manadsperioder';
+  const lockTopLists = timeMode === 'arsperioder' || monthPeriodMonths(timeMode) > 0;
   const isTopList = kind === 'topPayee' || kind === 'topKategori' || kind === 'topUnderkategori' || kind === 'topplistor';
 
   if(lockTopLists && isTopList){
