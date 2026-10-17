@@ -5277,7 +5277,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-16 v02';
+const APP_VERSION = '2026-10-17 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5743,11 +5743,10 @@ async function tryEstablishBookDriveContact(interactive){
     return { ok: true, parsed: null };
   }
   try{
-    // En dialog: läs+skriv. Fråga aldrig bara läs — då kommer en andra fråga vid sparning.
+    // En dialog, och den gäller mappen (läs+skriv). Filen härleds därifrån.
     if(interactive){
       const handle = await getBookFileHandle(bookId, true, 'readwrite');
       const parsed = await readBookFileRaw(handle);
-      try{ await getBookDirHandle(bookId, true, 'readwrite'); } catch(e){ /* ignore */ }
       return { ok: true, parsed: parsed };
     }
     const handle = await getBookFileHandle(bookId, false, 'read');
@@ -5862,6 +5861,8 @@ async function runStartDriveContactRetry(){
   const msgs = el('startMessages');
   const box = el('startFileSyncNotice');
   if(box) box.style.opacity = '0.6';
+  // Användaren ber uttryckligen om nytt försök — tillåt en ny dialog.
+  resetBookFolderAccessGate();
 
   // Osparade ändringar i minnet: skriv UT till filen — ladda aldrig filen över dem.
   if(bookSessionDirty && book && Array.isArray(book.order)){
@@ -5905,6 +5906,7 @@ async function runStartFileSyncFlush(){
   const msgs = el('startMessages');
   const box = el('startFileSyncNotice');
   if(box) box.style.opacity = '0.6';
+  resetBookFolderAccessGate();
   const res = await flushBookFileToFolderInteractive();
   if(box) box.style.opacity = '';
   if(!msgs) return;
@@ -6101,10 +6103,9 @@ async function writeBookPreferGranted(id, bookData, interactive){
     return false;
   }
 
-  // 3) Användargest: be om skrivbehörighet (första sparningen).
+  // 3) Användargest: en mappdialog (räcker för hela sessionen).
   try{
     handle = await getBookFileHandle(id, true, 'readwrite');
-    try{ await getBookDirHandle(id, true, 'readwrite'); } catch(e){ /* ignore */ }
     return await commitWithHandle(handle);
   } catch(err){
     if(!looksLikeBookPermissionError(err)) throw err;
@@ -6179,27 +6180,69 @@ async function ensureDirPermission(handle, interactive){
   return ensureHandlePermission(handle, interactive, 'readwrite');
 }
 
+/**
+ * Behörighet begärs på MAPPEN, högst en dialog per session.
+ * Mappen räcker för både läs och skriv — filen härleds via dir.getFileHandle,
+ * så inget separat filhandtag behöver frågas (det gav tidigare dubbla dialoger).
+ */
+let bookFolderAccessAsked = false;
+
+function resetBookFolderAccessGate(){
+  bookFolderAccessAsked = false;
+}
+
+async function ensureBookFolderAccessOnce(id){
+  const silent = await getBookDirHandle(id, false, 'readwrite');
+  if(silent) return silent;
+
+  // Samma fysiska mapp kan ligga som två handtag (arbetsmapp + bokmapp) och
+  // Chrome beviljar per handtag. Återanvänd arbetsmappen om boken finns där.
+  try{
+    const ws = await idbGet(WORKSPACE_DIR_KEY);
+    if(ws && await handlePermissionIsGranted(ws, 'readwrite')){
+      const fileName = bookMainFileName(bookName(id));
+      if(await fileHandleExists(ws, fileName)){
+        await idbPut(id + BOOK_DIR_SUFFIX, ws);
+        return ws;
+      }
+    }
+  } catch(e){ /* ignore */ }
+
+  if(bookFolderAccessAsked) return null;
+  bookFolderAccessAsked = true;
+  return await getBookDirHandle(id, true, 'readwrite');
+}
+
+/** Hämta filen ur en mapp vi redan har behörighet på (ingen extra dialog). */
+async function bookFileFromDirHandle(id, dir, knownName){
+  if(!dir) return null;
+  const fileName = knownName || bookMainFileName(bookName(id));
+  try{
+    const fresh = await dir.getFileHandle(fileName);
+    await idbPut(id, fresh);
+    return fresh;
+  } catch(e){
+    if(e && e.name === 'NotFoundError') throw new Error('Bokfilen saknas i mappen.');
+    return null;
+  }
+}
+
 // Filreferensen i IndexedDB överlever omladdning, men behörigheten gör det
-// inte. Utan requestPermission kastar getFile i Chrome.
+// inte. Mappen är den enda vi frågar om; filen plockas därifrån.
 async function getBookFileHandle(id, interactive, mode){
   mode = mode || 'readwrite';
   let handle = await idbGet(id);
-  if(handle && await ensureHandlePermission(handle, interactive, mode)){
+  // Redan beviljat filhandtag — använd det utan att fråga.
+  if(handle && await ensureHandlePermission(handle, false, mode)){
     return handle;
   }
 
-  const dir = await getBookDirHandle(id, interactive, mode);
+  // Tyst mapp först, sedan (vid behov) EN mappdialog för hela sessionen.
+  let dir = await getBookDirHandle(id, false, mode);
+  if(!dir && interactive !== false) dir = await ensureBookFolderAccessOnce(id);
   if(dir){
-    const fileName = (handle && handle.name) || bookMainFileName(bookName(id));
-    try{
-      const fresh = await dir.getFileHandle(fileName);
-      await idbPut(id, fresh);
-      return fresh;
-    } catch(e){
-      if(e && e.name === 'NotFoundError'){
-        throw new Error('Bokfilen saknas i mappen.');
-      }
-    }
+    const fresh = await bookFileFromDirHandle(id, dir, handle && handle.name);
+    if(fresh) return fresh;
   }
 
   if(!handle) throw new Error('Kan inte hitta bokens fil.');
@@ -6363,8 +6406,9 @@ async function getWorkspaceDirHandle(interactive){
   }
   if(!interactive) return null;
 
-  for(const id of candidates){
-    dir = await getBookDirHandle(id, true);
+  // Högst EN dialog: fråga bara om den första kandidaten, aldrig en per bok.
+  if(candidates.length){
+    dir = await getBookDirHandle(candidates[0], true);
     if(dir){
       const kind = await detectWorkspaceKind(dir);
       await rememberWorkspaceDir(dir, kind);
@@ -6453,8 +6497,10 @@ async function acquireWorkspaceForNewBook(){
     }
   }
 
-  for(const id of workspaceBookCandidates()){
-    const dir = await getBookDirHandle(id, true);
+  // Högst EN dialog innan mappväljaren — inte en per kandidatbok.
+  const firstCandidate = workspaceBookCandidates()[0];
+  if(firstCandidate){
+    const dir = await getBookDirHandle(firstCandidate, true);
     if(dir){
       const kind = await detectWorkspaceKind(dir);
       await rememberWorkspaceDir(dir, kind);
@@ -6607,7 +6653,8 @@ async function bookMainFileExistsInFolder(bookId, name, currentName){
   const trimmed = (name || '').trim();
   const cur = (currentName || '').trim();
   if(!trimmed || trimmed === cur) return false;
-  const dir = await getBookDirHandle(bookId);
+  // Namnkoll före sparning: fråga aldrig här, bara om vi redan har åtkomst.
+  const dir = await getBookDirHandle(bookId, false);
   if(!dir) return false;
   return fileHandleExists(dir, bookMainFileName(trimmed));
 }
@@ -6615,11 +6662,8 @@ async function bookMainFileExistsInFolder(bookId, name, currentName){
 async function renameBookFiles(id, oldName, newName){
   if(oldName === newName) return;
 
-  const dir = await getBookDirHandle(id);
-  if(!dir) throw new Error('Kan inte hitta bokens mapp.');
-  if(!await ensureDirPermission(dir)){
-    throw new Error('Saknar skrivbehörighet till bokens mapp.');
-  }
+  const dir = await ensureBookFolderAccessOnce(id);
+  if(!dir) throw new Error('Saknar skrivbehörighet till bokens mapp.');
 
   const handle = await idbGet(id);
   const oldMain = (handle && handle.name) || bookMainFileName(oldName);
@@ -6730,9 +6774,7 @@ async function reconcileBooksWithWorkspace(interactive){
   if(!dir) return { scanned: false, added: 0, removed: 0 };
 
   try{
-    if(interactive){
-      await ensureDirPermission(dir, true);
-    }
+    // En kontroll, en ev. dialog — aldrig två i rad på samma mapp.
     const perm = await dir.queryPermission({ mode: 'read' });
     if(perm !== 'granted'){
       if(!interactive) return { scanned: false, added: 0, removed: 0 };
@@ -6815,12 +6857,9 @@ async function removeBookFilesFromDisk(id){
   const name = (regNow.names && regNow.names[id]) || '';
   if(!name) throw new Error('Boknamnet saknas — kan inte ta bort filerna.');
 
-  let dir = await getBookDirHandle(id, true);
+  let dir = await ensureBookFolderAccessOnce(id);
   if(!dir) dir = await getWorkspaceDirHandle(true);
   if(!dir) throw new Error('Kunde inte nå programmets mapp.');
-
-  // Låt webbläsaren fråga om tillstånd. Inget tyst avbrott.
-  await ensureDirPermission(dir, true);
 
   const files = [
     bookMainFileName(name),
@@ -10275,6 +10314,7 @@ async function show(name, opts){
 
 async function openBook(id){
   resetImportState();
+  resetBookFolderAccessGate();
   reg = readRegistry();
   reg.active = id;
   writeRegistry(reg);
@@ -10303,8 +10343,8 @@ async function openBook(id){
       return;
     }
 
-    // Filbok: en behörighetsdialog (läs+skriv). Aldrig bara-läs först — det ger två frågor.
-    // 1) Tyst om redan beviljat  2) Annars en readwrite-fråga  3) Sista utväg: tyst/läs
+    // Filbok: högst EN dialog, och den gäller mappen (läs+skriv).
+    // 1) Tyst om redan beviljat  2) Annars en mappdialog som räcker hela sessionen.
     let parsed = null;
     let fileOk = false;
     try{
@@ -10313,10 +10353,7 @@ async function openBook(id){
       if(!handle){
         try{ handle = await getBookFileHandle(id, false, 'read'); } catch(e){ handle = null; }
       }
-      if(!handle){
-        handle = await getBookFileHandle(id, true, 'readwrite');
-        try{ await getBookDirHandle(id, true, 'readwrite'); } catch(e){ /* ignore */ }
-      }
+      if(!handle) handle = await getBookFileHandle(id, true, 'readwrite');
       parsed = await readBookFileRaw(handle);
       fileOk = true;
     } catch(e){
@@ -10682,21 +10719,12 @@ function bookNameProblem(name){
   return '';
 }
 
-newBookBtn.addEventListener('click', async () => {
+newBookBtn.addEventListener('click', () => {
   creating = !creating;
   loginNotice('');
   if(!creating) newNameInput.value = '';
   syncLoginMode();
-  // Användargest: väck ev. redan sparad behörighet till programmappar (Tillåt — inte mappväljare).
-  // Bara när det behövs för att skapa fil — undvik dialog vid varje start.
-  if(creating){
-    try{
-      const dir = await idbGet(WORKSPACE_DIR_KEY);
-      if(dir && !(await handlePermissionIsGranted(dir, 'readwrite'))){
-        await ensureDirPermission(dir, true);
-      }
-    } catch(e){ /* ignore */ }
-  }
+  // Ingen behörighetsdialog här — den kommer vid Skapa, när filen faktiskt behövs.
 });
 
 function cancelCreatingBook(msg){
@@ -20445,16 +20473,17 @@ async function renderBackupPage(){
   }
   if(backupRunBtn) backupRunBtn.disabled = false;
 
+  // Bara vybyte — fråga aldrig om behörighet här. Dialogen hör till knapparna.
   let dir;
   try{
-    dir = await getBookDirHandle(bookId, true);
+    dir = await getBookDirHandle(bookId, false);
   } catch(e){
     dir = null;
   }
   if(!dir){
     renderBackupList([]);
     addBox(backupMessages, 'notice',
-      'Kunde inte nå programmets mapp. Tillåt åtkomst och öppna sidan igen.');
+      'Listan kräver åtkomst till bokmappen. Tryck Säkerhetskopiera för att tillåta.');
     return;
   }
 
@@ -20503,11 +20532,11 @@ async function confirmBackupRestore(){
 
   let dir;
   try{
-    dir = await getBookDirHandle(bookId, true);
+    dir = await ensureBookFolderAccessOnce(bookId);
   } catch(e){
     dir = null;
   }
-  if(!dir || !(await ensureDirPermission(dir, true))){
+  if(!dir){
     addBox(backupMessages, 'notice',
       'Saknar skrivbehörighet till programmets mapp. Inget återställdes.');
     return;
@@ -20562,11 +20591,11 @@ async function runBookBackupRotation(){
 
   let dir;
   try{
-    dir = await getBookDirHandle(bookId, true);
+    dir = await ensureBookFolderAccessOnce(bookId);
   } catch(e){
     dir = null;
   }
-  if(!dir || !(await ensureDirPermission(dir, true))){
+  if(!dir){
     addBox(backupMessages, 'notice',
       'Saknar skrivbehörighet till programmets mapp. Boken kopierades inte.');
     return;
