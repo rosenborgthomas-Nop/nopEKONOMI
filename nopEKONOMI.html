@@ -5277,7 +5277,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-17 v01';
+const APP_VERSION = '2026-10-19 v01';
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5815,9 +5815,11 @@ function updateBookFileSyncStatusUi(){
   const existing = el('startFileSyncNotice');
   const onStart = typeof views !== 'undefined' && views.start && !views.start.hidden;
   const readOnly = isBookReadOnly();
-  const pending = !!(bookId && isFileBook(bookId) && hasBookFileSyncPending(bookId) && bookDriveContact);
+  const pendingFlag = !!(bookId && isFileBook(bookId) && hasBookFileSyncPending(bookId));
+  const localAhead = !!(pendingFlag || bookSessionDirty);
+  const pending = !!(pendingFlag && bookDriveContact);
 
-  if(!onStart || (!readOnly && !pending)){
+  if(!onStart || (!readOnly && !pending && !localAhead)){
     if(existing) existing.remove();
     return;
   }
@@ -5844,16 +5846,16 @@ function updateBookFileSyncStatusUi(){
     msgs.appendChild(box);
   }
   if(readOnly){
-    if(bookSessionDirty){
-      box.title = 'Tryck för att spara osparade ändringar till bokfilen';
-      box.textContent = 'Osparade ändringar — ingen skrivkontakt. Tryck för att spara till bokmapp.';
+    if(localAhead){
+      box.title = 'Den här enheten ligger före Drive. Tryck för att spara till bokmappen.';
+      box.textContent = 'Den här enheten ligger före bokmappen/Drive — ingen skrivkontakt. Tryck för att spara.';
     } else {
       box.title = 'Tryck för att försöka nå bokfilen igen';
       box.textContent = 'Ingen kontakt med bokfil — endast läsning. Tryck för att försöka igen.';
     }
   } else {
-    box.title = 'Tryck för att spara till bokmapp/Drive';
-    box.textContent = 'Ej sparad till bokmapp/Drive — tryck här';
+    box.title = 'Lokala ändringar har inte skrivits till Drive än. Tryck för att spara.';
+    box.textContent = 'Den här enheten ligger före bokmappen/Drive — tryck här för att spara.';
   }
 }
 
@@ -5949,6 +5951,7 @@ async function applyBookFromFilePayload(parsed){
 }
 
 // Vid återkomst till fliken: återställ kontakt / ladda om om Drive-filen är nyare.
+// Ren session (ej dirty, ej pending): alltid ta nyare fil utan dialog.
 async function checkBookFileForRemoteChanges(){
   if(bookFileCheckBusy) return;
   if(!bookId || !isFileBook(bookId)) return;
@@ -5956,9 +5959,11 @@ async function checkBookFileForRemoteChanges(){
 
   bookFileCheckBusy = true;
   try{
-    // Utan kontakt: försök tyst nå filen igen — men aldrig om sessionen har osparade ändringar.
+    const sessionAhead = !!(bookSessionDirty || hasBookFileSyncPending(bookId));
+
+    // Utan kontakt: försök tyst nå filen igen — men aldrig om sessionen ligger före Drive.
     if(!bookDriveContact){
-      if(bookSessionDirty) return;
+      if(sessionAhead) return;
       const res = await tryEstablishBookDriveContact(false);
       if(!res.ok || !res.parsed) return;
       await enterBookLiveFromFile(res.parsed);
@@ -5975,32 +5980,53 @@ async function checkBookFileForRemoteChanges(){
       return;
     }
 
-    const handle = await idbGet(bookId);
+    // Fil via mapp om IDB-handtaget saknar läs — undvik falsk "ingen kontakt".
+    let handle = await idbGet(bookId);
     if(!handle || !(await handlePermissionIsGranted(handle, 'read'))){
-      setBookDriveContact(false);
-      return;
+      try{ handle = await getBookFileHandle(bookId, false, 'read'); } catch(e){ handle = null; }
+      if(!handle){
+        setBookDriveContact(false);
+        return;
+      }
     }
 
     const parsed = await readBookFileRaw(handle);
     const fileAt = payloadSavedAt(parsed.raw, parsed.lastModified);
     if(!fileAt) return;
-    if(bookKnownSavedAt && fileAt <= bookKnownSavedAt + 500) return;
+
+    // Första referenspunkten i sessionen: om ren, ladda filen som sanning;
+    // om enheten ligger före, bara notera tidstämpeln.
     if(!bookKnownSavedAt){
-      bookKnownSavedAt = fileAt;
+      if(!sessionAhead){
+        await applyBookFromFilePayload(parsed);
+        if(typeof currentViewName === 'function' && currentViewName() === 'start'){
+          renderStart();
+          clear(startMessages);
+          addBox(startMessages, 'report', 'Boken synkad från bokmappen.');
+        } else if(typeof currentViewName === 'function'){
+          const view = currentViewName();
+          if(view && view !== 'login'){
+            try{ await show(view, { fromHash: true }); } catch(e){ /* ignore */ }
+          }
+        }
+      } else {
+        bookKnownSavedAt = fileAt;
+      }
       return;
     }
 
-    const remoteNewer = fileAt > bookKnownSavedAt + 500;
-    if(!remoteNewer) return;
+    if(fileAt <= bookKnownSavedAt + 500) return;
 
-    if(bookSessionDirty || hasBookFileSyncPending(bookId)){
+    // Session ligger före Drive: fråga. Ren session: alltid ta filen.
+    if(sessionAhead){
       const loadRemote = window.confirm(
         'Bokfilen i mappen (t.ex. Google Drive) har ändrats på en annan enhet.\n\n'
         + 'OK = ladda från mappen (kasta ändringar på den här enheten)\n'
-        + 'Avbryt = behåll den här enheten (skrivs till mappen vid nästa lyckade sparning)'
+        + 'Avbryt = behåll den här enheten (ligger före Drive tills du sparar)'
       );
       if(!loadRemote){
         bookKnownSavedAt = fileAt;
+        updateBookFileSyncStatusUi();
         return;
       }
     }
@@ -10363,12 +10389,13 @@ async function openBook(id){
     if(fileOk && parsed){
       const hadPending = hasBookFileSyncPending(id);
       const hasMirror = hasBookLocalMirror(id);
-      // Legacy pending: en gång fråga om lokal spegel ska kastas till förmån för filen.
+      // Pending: lokal spegel ligger före Drive — fråga innan filen skriver över.
+      // Ingen pending + fil läsbar: filen är alltid primär (ersätter spegeln).
       if(hadPending && hasMirror){
         const loadRemote = window.confirm(
-          'Den här enheten hade osynkade lokala ändringar, men bokfilen i mappen går att läsa.\n\n'
-          + 'OK = ladda från mappen (rekommenderas — gemensam sanning)\n'
-          + 'Avbryt = behåll den här enhetens data och skriv den till mappen vid nästa sparning'
+          'Den här enheten ligger före bokmappen/Drive (osynkade lokala ändringar).\n\n'
+          + 'OK = ladda från mappen (kasta lokala ändringar — gemensam sanning)\n'
+          + 'Avbryt = behåll den här enheten (spara till mappen vid nästa lyckade sparning)'
         );
         if(loadRemote){
           await enterBookLiveFromFile(parsed);
@@ -10377,15 +10404,17 @@ async function openBook(id){
           migrateMixedSplitRows(book);
           const heal = healBookTaxonomy(book);
           lastTaxonomyHealNotes = (heal && heal.notes) ? heal.notes.slice() : [];
-          clearBookFileSyncPending(id);
+          // Behåll pending — enheten ligger fortfarande före Drive.
+          markBookFileSyncPending(id);
           bookKnownSavedAt = payloadSavedAt(parsed.raw, parsed.lastModified);
-          markBookClean();
+          bookSessionDirty = true;
+          await syncBookDriveContactFromHandles();
           if(heal.changed){
             try{ await writeBookPreferGranted(id, book, true); } catch(e){ /* ignore */ }
           }
-          await syncBookDriveContactFromHandles();
         }
       } else {
+        // Granted läsning + ingen pending: alltid fil över spegel.
         await enterBookLiveFromFile(parsed);
       }
       const file = await idbGet(id);
@@ -10401,7 +10430,12 @@ async function openBook(id){
       throw new Error('Kunde inte läsa bokfilen och ingen lokal kopia finns.');
     }
 
-    markBookClean();
+    // Pending behålls om användaren valde lokal före Drive — annars ren session.
+    if(hasBookFileSyncPending(id)){
+      bookSessionDirty = true;
+    } else {
+      markBookClean();
+    }
     rebuildBookLookup();
     await syncBookDriveContactFromHandles();
     updateBookFileSyncStatusUi();
