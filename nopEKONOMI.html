@@ -5110,18 +5110,6 @@ tbody tr.row-future td{ font-style:italic; }
         <p class="hint" id="settingsFolderStatus"></p>
       </section>
 
-      <!-- #region agent log -->
-      <section class="section" id="settingsDebugSection">
-        <h3>Debug-logg (tillfällig)</h3>
-        <div class="quiet-row">
-          <button class="btn-quiet" id="settingsDebugShowBtn" type="button">Visa kort logg</button>
-          <button class="btn-quiet" id="settingsDebugCopyBtn" type="button">Kopiera logg</button>
-          <button class="btn-quiet" id="settingsDebugClearBtn" type="button">Rensa logg</button>
-        </div>
-        <pre id="settingsDebugOut" style="white-space:pre-wrap;word-break:break-word;font-size:11px;max-height:50vh;overflow:auto"></pre>
-      </section>
-      <!-- #endregion -->
-
       <section class="section">
         <h3>Böcker i den här programmappen</h3>
         <p>Böcker som finns som JSON-filer i samma mapp som nopEKONOMI.html. Den öppna boken är markerad.</p>
@@ -5289,103 +5277,8 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-23 v04-debug';
+const APP_VERSION = '2026-10-23 v05';
 
-// #region agent log
-const DBG_EP = 'http://127.0.0.1:7674/ingest/41c900a8-aaca-4462-a722-1ca4ba5a8088';
-const DBG_KEY = 'nop_debug_ee72b9';
-// Loggen MÅSTE vara billig: localStorage är synkront och fryser UI:t om den
-// läses/skrivs per rad. Håll i minnet, skriv ut sällan, lite data per rad.
-const DBG_MAX = 120;
-const DBG_SEND = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
-const DBG_LOAD = Math.random().toString(36).slice(2, 6);
-let dbgSeq = 0;
-let dbgBuf = [];
-let dbgFlushTimer = 0;
-try{
-  const prev = JSON.parse(localStorage.getItem(DBG_KEY) || '[]');
-  if(Array.isArray(prev)) dbgBuf = prev.slice(-DBG_MAX);
-} catch(e){ dbgBuf = []; }
-
-function dbgFlush(){
-  dbgFlushTimer = 0;
-  try{ localStorage.setItem(DBG_KEY, JSON.stringify(dbgBuf)); } catch(e){ /* ignore */ }
-}
-function dbgLog(hypothesisId, where, message, data){
-  try{
-    dbgBuf.push({
-      sessionId: 'ee72b9', load: DBG_LOAD, hypothesisId: hypothesisId,
-      location: where, message: message, data: data || {},
-      timestamp: Date.now(), seq: ++dbgSeq
-    });
-    if(dbgBuf.length > DBG_MAX) dbgBuf.shift();
-    if(!dbgFlushTimer) dbgFlushTimer = setTimeout(dbgFlush, 2000);
-    if(DBG_SEND){
-      fetch(DBG_EP, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ee72b9' },
-        body: JSON.stringify(dbgBuf[dbgBuf.length - 1])
-      }).catch(() => {});
-    }
-  } catch(e){ /* ignore */ }
-}
-function dbgDump(){
-  try{ return JSON.stringify(dbgBuf); } catch(e){ return '[]'; }
-}
-// Tyst behörighetsmätning: queryPermission visar ALDRIG dialog.
-let dbgLastGrantAt = 0;
-let dbgLastPermSig = '';
-// Träffar på levande handtag är många — logga sammanfattat, inte per anrop.
-const dbgHits = { file: 0, dir: 0 };
-let dbgHitsAt = 0;
-function dbgLiveHit(kind, mode){
-  dbgHits[kind] = (dbgHits[kind] || 0) + 1;
-  const now = Date.now();
-  if(now - dbgHitsAt < 30000) return;
-  dbgHitsAt = now;
-  dbgLog('I', 'nopEKONOMI.html:liveHandle', 'live-hits', {
-    file: dbgHits.file, dir: dbgHits.dir, lastKind: kind, lastMode: mode
-  });
-}
-async function dbgPermLevel(h){
-  if(!h) return 'missing';
-  if(await handlePermissionIsGranted(h, 'readwrite')) return 'rw';
-  if(await handlePermissionIsGranted(h, 'read')) return 'r';
-  return 'prompt';
-}
-async function dbgPermSnapshot(tag, extra){
-  try{
-    if(!bookId) return;
-    // Jämför LEVANDE objekt (stark referens) mot nytt objekt ur IndexedDB.
-    const liveF = liveHandle(bookId, 'file');
-    const liveD = liveHandle(bookId, 'dir');
-    const freshF = await idbGet(bookId);
-    const freshD = await idbGet(bookId + BOOK_DIR_SUFFIX);
-    const lf = await dbgPermLevel(liveF);
-    const ld = await dbgPermLevel(liveD);
-    const ff = await dbgPermLevel(freshF);
-    const fd = await dbgPermLevel(freshD);
-    if(tag === 'sample'){
-      const sig = lf + ld + ff + fd;
-      if(sig === dbgLastPermSig) return;
-      dbgLastPermSig = sig;
-    }
-    dbgLog('H', 'nopEKONOMI.html:dbgPermSnapshot', 'perm-snapshot', Object.assign({
-      tag: tag,
-      liveFile: lf, liveDir: ld, freshFile: ff, freshDir: fd,
-      sameFileObj: !!(liveF && freshF && liveF === freshF),
-      visibility: document.visibilityState,
-      msSinceGrant: dbgLastGrantAt ? (Date.now() - dbgLastGrantAt) : null,
-      userActive: !!(navigator.userActivation && navigator.userActivation.isActive)
-    }, extra || {}));
-  } catch(e){ /* ignore */ }
-}
-function dbgClear(){
-  dbgBuf = [];
-  dbgSeq = 0;
-  try{ localStorage.removeItem(DBG_KEY); } catch(e){ /* ignore */ }
-}
-// #endregion
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -6068,12 +5961,6 @@ async function checkBookFileForRemoteChanges(){
   bookFileCheckBusy = true;
   try{
     const sessionAhead = !!(bookSessionDirty || hasBookFileSyncPending(bookId));
-    // #region agent log
-    dbgLog('G', 'nopEKONOMI.html:checkBookFileForRemoteChanges', 'resume-check', {
-      visibility: document.visibilityState, driveContact: bookDriveContact,
-      sessionAhead: sessionAhead, knownSavedAt: bookKnownSavedAt
-    });
-    // #endregion
 
     // Utan kontakt: försök tyst nå filen igen — men aldrig om sessionen ligger före Drive.
     if(!bookDriveContact){
@@ -6208,15 +6095,7 @@ async function writeBookPreferGranted(id, bookData, interactive){
   }
 
   // 1) Befintligt filhandtag med skrivrätt — tyst.
-  let handle = await idbGet(id);
-  // #region agent log
-  dbgLog('F', 'nopEKONOMI.html:writeBookPreferGranted', 'save-enter', {
-    id: id, interactive: !!interactive, hasIdbFile: !!handle,
-    fileRw: handle ? await handlePermissionIsGranted(handle, 'readwrite') : null,
-    driveContact: bookDriveContact, sessionDirty: bookSessionDirty,
-    pending: hasBookFileSyncPending(id)
-  });
-  // #endregion
+  let handle = liveHandle(id, 'file') || await idbGet(id);
   if(handle && (await handlePermissionIsGranted(handle, 'readwrite'))){
     try{
       return await commitWithHandle(handle);
@@ -6232,6 +6111,7 @@ async function writeBookPreferGranted(id, bookData, interactive){
       const fileName = (handle && handle.name) || bookMainFileName(bookName(id));
       handle = await dirSilent.getFileHandle(fileName);
       await idbPut(id, handle);
+      rememberLiveHandle(id, 'file', handle);
       return await commitWithHandle(handle);
     } catch(err){
       if(!looksLikeBookPermissionError(err) && !(err && err.name === 'NotFoundError')){
@@ -6252,9 +6132,6 @@ async function writeBookPreferGranted(id, bookData, interactive){
   }
 
   // 3) Användargest: be om skriv — force så öppningens engångsfråga inte blockerar.
-  // #region agent log
-  dbgLog('F', 'nopEKONOMI.html:writeBookPreferGranted', 'save-step3-interactive', { id: id });
-  // #endregion
   try{
     const dir = await ensureBookFolderAccessOnce(id, { force: true });
     if(dir){
@@ -6321,55 +6198,18 @@ async function ensureHandlePermission(handle, interactive, mode){
   const ask = (interactive !== false && want === 'read') ? 'readwrite' : want;
   try{
     const qAsk = await handle.queryPermission({ mode: ask });
-    // #region agent log
-    // Bara icke-beviljade lägen loggas — annars flödar loggen över.
-    if(qAsk !== 'granted'){
-      dbgLog('A', 'nopEKONOMI.html:ensureHandlePermission', 'perm-check', {
-        kind: handle.kind, want: want, ask: ask,
-        interactive: interactive === false ? false : true, queryAsk: qAsk
-      });
-    }
-    // #endregion
     if(qAsk === 'granted') return true;
     // Redan läs men vi behöver skriv: fråga bara om skriv (readwrite).
     const qRead = (ask === 'readwrite') ? await handle.queryPermission({ mode: 'read' }) : 'n/a';
     if(ask === 'readwrite' && qRead === 'granted'){
       if(interactive === false) return want === 'read';
-      // #region agent log
-      dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT requestPermission (read->rw)', {
-        kind: handle.kind, name: handle.name, mode: 'readwrite', queryRead: qRead
-      });
-      // #endregion
       const r1 = await handle.requestPermission({ mode: 'readwrite' });
-      // #region agent log
-      if(r1 === 'granted') dbgLastGrantAt = Date.now();
-      dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT result', {
-        kind: handle.kind, name: handle.name, mode: 'readwrite', result: r1
-      });
-      // #endregion
       return r1 === 'granted';
     }
     if(interactive === false) return false;
-    // #region agent log
-    dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT requestPermission', {
-      kind: handle.kind, name: handle.name, mode: ask, queryAsk: qAsk, queryRead: qRead
-    });
-    // #endregion
     const r2 = await handle.requestPermission({ mode: ask });
-    // #region agent log
-    if(r2 === 'granted') dbgLastGrantAt = Date.now();
-    dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT result', {
-      kind: handle.kind, name: handle.name, mode: ask, result: r2
-    });
-    // #endregion
     return r2 === 'granted';
   } catch(e){
-    // #region agent log
-    dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'perm-error', {
-      kind: handle && handle.kind, name: handle && handle.name,
-      err: e && (e.name + ': ' + e.message)
-    });
-    // #endregion
     return false;
   }
 }
@@ -6426,11 +6266,6 @@ function resetBookFolderAccessGate(){
 async function ensureBookFolderAccessOnce(id, opts){
   const force = !!(opts && opts.force);
   const silent = await getBookDirHandle(id, false, 'readwrite');
-  // #region agent log
-  dbgLog('D', 'nopEKONOMI.html:ensureBookFolderAccessOnce', 'gate', {
-    id: id, force: force, silentHit: !!silent, askedAlready: bookFolderAccessAsked
-  });
-  // #endregion
   if(silent) return silent;
 
   // Samma fysiska mapp kan ligga som två handtag (arbetsmapp + bokmapp) och
@@ -6441,6 +6276,7 @@ async function ensureBookFolderAccessOnce(id, opts){
       const fileName = bookMainFileName(bookName(id));
       if(await fileHandleExists(ws, fileName)){
         await idbPut(id + BOOK_DIR_SUFFIX, ws);
+        rememberLiveHandle(id, 'dir', ws);
         return ws;
       }
     }
@@ -6467,25 +6303,17 @@ async function bookFileFromDirHandle(id, dir, knownName){
 }
 
 // Filreferensen i IndexedDB överlever omladdning, men behörigheten gör det
-// inte. Mappen är den enda vi frågar om; filen plockas därifrån.
+// inte. Återanvänd därför det levande objektet före IndexedDB, och fråga
+// annars om mappen — filen plockas därifrån.
 async function getBookFileHandle(id, interactive, mode){
   mode = mode || 'readwrite';
   // Levande objekt först: behörigheten sitter på objektet, inte i IndexedDB.
   const live = liveHandle(id, 'file');
   if(live && await ensureHandlePermission(live, false, mode)){
-    // #region agent log
-    dbgLiveHit('file', mode);
-    // #endregion
     return live;
   }
 
   let handle = await idbGet(id);
-  // #region agent log
-  dbgLog('E', 'nopEKONOMI.html:getBookFileHandle', 'file-miss', {
-    mode: mode, interactive: interactive === false ? false : true,
-    hasIdbFile: !!handle, hadLive: !!live
-  });
-  // #endregion
   // Redan beviljat filhandtag — använd det utan att fråga.
   if(handle && await ensureHandlePermission(handle, false, mode)){
     rememberLiveHandle(id, 'file', handle);
@@ -6692,9 +6520,6 @@ async function getBookDirHandle(bookId, interactive, mode){
   // Levande objekt först — behörigheten sitter på objektet.
   const liveDir = liveHandle(bookId, 'dir');
   if(liveDir && await ensureHandlePermission(liveDir, false, mode)){
-    // #region agent log
-    dbgLiveHit('dir', mode);
-    // #endregion
     return liveDir;
   }
 
@@ -6948,7 +6773,9 @@ async function renameBookFiles(id, oldName, newName){
 
   if(oldMain !== newMain && await fileHandleExists(dir, oldMain)){
     await renameFileInDir(dir, oldMain, newMain);
-    await idbPut(id, await dir.getFileHandle(newMain));
+    const renamed = await dir.getFileHandle(newMain);
+    await idbPut(id, renamed);
+    rememberLiveHandle(id, 'file', renamed);
   }
 }
 
@@ -10593,13 +10420,6 @@ async function openBook(id){
   resetImportState();
   resetBookFolderAccessGate();
   if(liveHandles.bookId && liveHandles.bookId !== id) forgetLiveHandles();
-  // #region agent log
-  let openStage = 'start';
-  const openWatchdog = setTimeout(() => {
-    dbgLog('J', 'nopEKONOMI.html:openBook', 'OPENBOOK-HANG', { id: id, stage: openStage });
-    dbgFlush();
-  }, 8000);
-  // #endregion
   reg = readRegistry();
   reg.active = id;
   writeRegistry(reg);
@@ -10634,17 +10454,11 @@ async function openBook(id){
     let fileOk = false;
     try{
       let handle = null;
-      openStage = 'silent-rw';
       try{ handle = await getBookFileHandle(id, false, 'readwrite'); } catch(e){ handle = null; }
       if(!handle){
-        openStage = 'silent-read';
         try{ handle = await getBookFileHandle(id, false, 'read'); } catch(e){ handle = null; }
       }
-      if(!handle){
-        openStage = 'interactive-rw';
-        handle = await getBookFileHandle(id, true, 'readwrite');
-      }
-      openStage = 'read-file';
+      if(!handle) handle = await getBookFileHandle(id, true, 'readwrite');
       parsed = await readBookFileRaw(handle);
       fileOk = true;
     } catch(e){
@@ -10720,10 +10534,6 @@ async function openBook(id){
       ? e.message + ' Boken lämnades orörd.'
       : 'Kunde inte läsa boken. Kontrollera att bokfilen finns kvar.');
     show('login');
-  } finally{
-    // #region agent log
-    clearTimeout(openWatchdog);
-    // #endregion
   }
 }
 
@@ -11118,6 +10928,8 @@ openBookBtn.addEventListener('click', async () => {
     await writeBookFile(handle, emptyBook, name);
     await idbPut(id, handle);
     await idbPut(id + BOOK_DIR_SUFFIX, dirHandle);
+    rememberLiveHandle(id, 'file', handle);
+    rememberLiveHandle(id, 'dir', dirHandle);
     await rememberWorkspaceDir(dirHandle, await detectWorkspaceKind(dirHandle));
   } catch(err){
     loginNotice('Kunde inte skriva bokfilen i bokmappen. Boken skapades inte.');
@@ -20858,6 +20670,8 @@ async function confirmBackupRestore(){
     const fresh = await dir.getFileHandle(mainName);
     await idbPut(bookId, fresh);
     await idbPut(bookId + BOOK_DIR_SUFFIX, dir);
+    rememberLiveHandle(bookId, 'file', fresh);
+    rememberLiveHandle(bookId, 'dir', dir);
     book = await readBookFromHandle(fresh);
     migrateMixedSplitRows(book);
     rebuildBookLookup();
@@ -24033,71 +23847,6 @@ function syncSettingsSectionPanels(){
   if(settingsPanelStartmeny) settingsPanelStartmeny.hidden = mode !== 'startmeny';
 }
 
-// #region agent log
-(function bindDebugLogUi(){
-  const showBtn = el('settingsDebugShowBtn');
-  const copyBtn = el('settingsDebugCopyBtn');
-  const clearBtn = el('settingsDebugClearBtn');
-  const out = el('settingsDebugOut');
-
-  // Kort logg: bara det som visar dialoger och behörighetsläge.
-  function compactText(){
-    let lines = [];
-    try{ lines = JSON.parse(dbgDump()); } catch(e){ lines = []; }
-    const keep = lines.filter(e =>
-      e.hypothesisId === 'B' || e.hypothesisId === 'H'
-      || e.hypothesisId === 'I' || e.hypothesisId === 'F'
-      || e.hypothesisId === 'E'
-      || e.message === 'cold-start-handle-state');
-    const rows = keep.map(e => {
-      const t = new Date(e.timestamp).toLocaleTimeString('sv-SE');
-      const d = e.data || {};
-      if(e.message === 'cold-start-handle-state'){
-        const b = (d.books && d.books[0]) || {};
-        return t + ' START ' + (d.display || '') + ' file='
-          + (b.file ? (b.file.rw ? 'rw' : (b.file.r ? 'r' : 'none')) : 'missing')
-          + ' dir=' + (b.dir ? (b.dir.rw ? 'rw' : (b.dir.r ? 'r' : 'none')) : 'missing');
-      }
-      if(e.message === 'perm-snapshot'){
-        return t + ' SNAP ' + d.tag + ' live=' + d.liveFile + '/' + d.liveDir
-          + ' fresh=' + d.freshFile + '/' + d.freshDir
-          + ' vis=' + d.visibility + ' sinceGrant=' + d.msSinceGrant;
-      }
-      if(e.hypothesisId === 'B') return t + ' ' + e.message + ' ' + (d.kind || '') + ' ' + (d.mode || '') + ' ' + (d.result || '');
-      if(e.message === 'live-hits') return t + ' LIVE-HITS file=' + d.file + ' dir=' + d.dir;
-      if(e.message === 'file-miss') return t + ' FILE-MISS mode=' + d.mode + ' hadLive=' + d.hadLive;
-      if(e.message === 'save-enter') return t + ' SAVE fileRw=' + d.fileRw + ' pending=' + d.pending;
-      if(e.message === 'save-step3-interactive') return t + ' SAVE-NEEDS-PROMPT';
-      return t + ' ' + e.message;
-    });
-    const prompts = keep.filter(e => e.message === 'PROMPT result').length;
-    return 'DIALOGER: ' + prompts + '\n' + rows.join('\n');
-  }
-
-  if(showBtn && out){
-    showBtn.addEventListener('click', () => {
-      out.textContent = compactText() || '(tom logg)';
-    });
-  }
-  if(copyBtn && out){
-    copyBtn.addEventListener('click', async () => {
-      const txt = compactText();
-      try{
-        await navigator.clipboard.writeText(txt);
-        out.textContent = 'Kopierad till urklipp.\n\n' + txt;
-      } catch(e){
-        out.textContent = txt;
-      }
-    });
-  }
-  if(clearBtn && out){
-    clearBtn.addEventListener('click', () => {
-      dbgClear();
-      out.textContent = '(rensad)';
-    });
-  }
-})();
-// #endregion
 
 function renderSettings(){
   if(settingsBookName) settingsBookName.textContent = bookName(bookId);
@@ -24210,6 +23959,7 @@ async function reconnectBookFolderInteractive(){
     });
     await rememberWorkspaceDir(picked, await detectWorkspaceKind(picked));
     await idbPut(bookId + BOOK_DIR_SUFFIX, picked);
+    rememberLiveHandle(bookId, 'dir', picked);
     const fileName = bookMainFileName(bookName(bookId));
     let fileHandle;
     try{
@@ -24223,6 +23973,7 @@ async function reconnectBookFolderInteractive(){
       return;
     }
     await idbPut(bookId, fileHandle);
+    rememberLiveHandle(bookId, 'file', fileHandle);
     const parsed = await readBookFileRaw(fileHandle);
     if(bookSessionDirty){
       const ok = await writeBookPreferGranted(bookId, bookWorkingCopy(), true);
@@ -26820,30 +26571,6 @@ function bindCustomMenuSelects(){
 async function initApp(){
   applyAppVersionLabels();
   await openIdb();
-  // #region agent log
-  try{
-    const regNow = readRegistry();
-    const ids = (regNow && Array.isArray(regNow.fileIds)) ? regNow.fileIds.slice(0, 4) : [];
-    const snap = [];
-    for(const id of ids){
-      const f = await idbGet(id);
-      const d = await idbGet(id + BOOK_DIR_SUFFIX);
-      snap.push({
-        id: id,
-        file: f ? { name: f.name, rw: await handlePermissionIsGranted(f, 'readwrite'), r: await handlePermissionIsGranted(f, 'read') } : null,
-        dir: d ? { name: d.name, rw: await handlePermissionIsGranted(d, 'readwrite'), r: await handlePermissionIsGranted(d, 'read') } : null
-      });
-    }
-    const ws = await idbGet(WORKSPACE_DIR_KEY);
-    dbgLog('A', 'nopEKONOMI.html:initApp', 'cold-start-handle-state', {
-      version: APP_VERSION,
-      display: (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ? 'standalone-pwa' : 'browser-tab',
-      ua: (navigator.userAgent || '').slice(0, 120),
-      books: snap,
-      workspace: ws ? { name: ws.name, rw: await handlePermissionIsGranted(ws, 'readwrite'), r: await handlePermissionIsGranted(ws, 'read') } : null
-    });
-  } catch(e){ /* ignore */ }
-  // #endregion
   try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
   await clearInvalidWorkspaceDir();
   // Vid start: synka om behörighet redan finns. Annars sker synk vid Inloggning (användargest).
@@ -26864,26 +26591,6 @@ async function initApp(){
     try{ checkBookFileForRemoteChanges(); } catch(e){ /* ignore */ }
   });
 
-  // #region agent log
-  // Spårar NÄR behörigheten tappas: livscykel + tyst mätare var 20:e sekund.
-  dbgLog('H', 'nopEKONOMI.html:initApp', 'lifecycle-start', {
-    wasDiscarded: document.wasDiscarded === true,
-    swController: !!(navigator.serviceWorker && navigator.serviceWorker.controller)
-  });
-  document.addEventListener('visibilitychange', () => {
-    dbgPermSnapshot('visibility-' + document.visibilityState);
-  });
-  window.addEventListener('pagehide', () => dbgFlush());
-  document.addEventListener('visibilitychange', () => {
-    if(document.visibilityState === 'hidden') dbgFlush();
-  });
-  window.addEventListener('pageshow', e => dbgPermSnapshot('pageshow', { persisted: e.persisted }));
-  document.addEventListener('freeze', () => dbgPermSnapshot('freeze'));
-  document.addEventListener('resume', () => dbgPermSnapshot('resume'));
-  setInterval(() => {
-    if(document.visibilityState === 'visible') dbgPermSnapshot('sample');
-  }, 20000);
-  // #endregion
 }
 
 initApp();
