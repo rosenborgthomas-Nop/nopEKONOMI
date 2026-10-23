@@ -5114,7 +5114,8 @@ tbody tr.row-future td{ font-style:italic; }
       <section class="section" id="settingsDebugSection">
         <h3>Debug-logg (tillfällig)</h3>
         <div class="quiet-row">
-          <button class="btn-quiet" id="settingsDebugShowBtn" type="button">Visa logg</button>
+          <button class="btn-quiet" id="settingsDebugShowBtn" type="button">Visa kort logg</button>
+          <button class="btn-quiet" id="settingsDebugCopyBtn" type="button">Kopiera logg</button>
           <button class="btn-quiet" id="settingsDebugClearBtn" type="button">Rensa logg</button>
         </div>
         <pre id="settingsDebugOut" style="white-space:pre-wrap;word-break:break-word;font-size:11px;max-height:50vh;overflow:auto"></pre>
@@ -5288,7 +5289,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-23 v02-debug';
+const APP_VERSION = '2026-10-23 v03-debug';
 
 // #region agent log
 const DBG_EP = 'http://127.0.0.1:7674/ingest/41c900a8-aaca-4462-a722-1ca4ba5a8088';
@@ -5329,17 +5330,24 @@ async function dbgPermLevel(h){
 async function dbgPermSnapshot(tag, extra){
   try{
     if(!bookId) return;
-    const f = await idbGet(bookId);
-    const d = await idbGet(bookId + BOOK_DIR_SUFFIX);
-    const fileLvl = await dbgPermLevel(f);
-    const dirLvl = await dbgPermLevel(d);
+    // Jämför LEVANDE objekt (stark referens) mot nytt objekt ur IndexedDB.
+    const liveF = liveHandle(bookId, 'file');
+    const liveD = liveHandle(bookId, 'dir');
+    const freshF = await idbGet(bookId);
+    const freshD = await idbGet(bookId + BOOK_DIR_SUFFIX);
+    const lf = await dbgPermLevel(liveF);
+    const ld = await dbgPermLevel(liveD);
+    const ff = await dbgPermLevel(freshF);
+    const fd = await dbgPermLevel(freshD);
     if(tag === 'sample'){
-      const sig = fileLvl + '/' + dirLvl;
+      const sig = lf + ld + ff + fd;
       if(sig === dbgLastPermSig) return;
       dbgLastPermSig = sig;
     }
     dbgLog('H', 'nopEKONOMI.html:dbgPermSnapshot', 'perm-snapshot', Object.assign({
-      tag: tag, file: fileLvl, dir: dirLvl,
+      tag: tag,
+      liveFile: lf, liveDir: ld, freshFile: ff, freshDir: fd,
+      sameFileObj: !!(liveF && freshF && liveF === freshF),
       visibility: document.visibilityState,
       msSinceGrant: dbgLastGrantAt ? (Date.now() - dbgLastGrantAt) : null,
       userActive: !!(navigator.userActivation && navigator.userActivation.isActive)
@@ -6342,6 +6350,35 @@ async function ensureDirPermission(handle, interactive){
 }
 
 /**
+ * Behörigheten följer handtagsobjektet. Läses handtaget om från IndexedDB får
+ * man ett nytt objekt, och när det gamla skräpsamlas tappas behörigheten
+ * (tydligt på Android). Håll därför en stark referens hela sessionen och
+ * återanvänd exakt samma objekt i stället för att läsa om ur IndexedDB.
+ */
+const liveHandles = { bookId: '', file: null, dir: null };
+
+function rememberLiveHandle(id, kind, handle){
+  if(!id || !handle) return;
+  if(liveHandles.bookId !== id){
+    liveHandles.bookId = id;
+    liveHandles.file = null;
+    liveHandles.dir = null;
+  }
+  liveHandles[kind] = handle;
+}
+
+function liveHandle(id, kind){
+  if(!id || liveHandles.bookId !== id) return null;
+  return liveHandles[kind] || null;
+}
+
+function forgetLiveHandles(){
+  liveHandles.bookId = '';
+  liveHandles.file = null;
+  liveHandles.dir = null;
+}
+
+/**
  * Behörighet begärs på MAPPEN, högst en dialog per session.
  * Mappen räcker för både läs och skriv — filen härleds via dir.getFileHandle,
  * så inget separat filhandtag behöver frågas (det gav tidigare dubbla dialoger).
@@ -6392,6 +6429,7 @@ async function bookFileFromDirHandle(id, dir, knownName){
   try{
     const fresh = await dir.getFileHandle(fileName);
     await idbPut(id, fresh);
+    rememberLiveHandle(id, 'file', fresh);
     return fresh;
   } catch(e){
     if(e && e.name === 'NotFoundError') throw new Error('Bokfilen saknas i mappen.');
@@ -6403,20 +6441,30 @@ async function bookFileFromDirHandle(id, dir, knownName){
 // inte. Mappen är den enda vi frågar om; filen plockas därifrån.
 async function getBookFileHandle(id, interactive, mode){
   mode = mode || 'readwrite';
+  // Levande objekt först: behörigheten sitter på objektet, inte i IndexedDB.
+  const live = liveHandle(id, 'file');
+  if(live && await ensureHandlePermission(live, false, mode)){
+    // #region agent log
+    dbgLog('I', 'nopEKONOMI.html:getBookFileHandle', 'live-handle-hit', { id: id, mode: mode });
+    // #endregion
+    return live;
+  }
+
   let handle = await idbGet(id);
   // #region agent log
   dbgLog('E', 'nopEKONOMI.html:getBookFileHandle', 'enter', {
     id: id, mode: mode, interactive: interactive === false ? false : true,
-    hasIdbFile: !!handle, fileName: handle && handle.name
+    hasIdbFile: !!handle, fileName: handle && handle.name, hadLive: !!live
   });
   // #endregion
   // Redan beviljat filhandtag — använd det utan att fråga.
   if(handle && await ensureHandlePermission(handle, false, mode)){
+    rememberLiveHandle(id, 'file', handle);
     return handle;
   }
   // Interaktivt: be om behörighet på befintligt filhandtag (vanligt på Android).
   if(handle && interactive !== false && await ensureHandlePermission(handle, true, mode)){
-    try{ await cacheBookDirFromFile(id, handle); } catch(e){ /* ignore */ }
+    rememberLiveHandle(id, 'file', handle);
     return handle;
   }
 
@@ -6436,13 +6484,9 @@ async function getBookFileHandle(id, interactive, mode){
   throw new Error('Saknar behörighet att läsa bokfilen. Tillåt åtkomst när webbläsaren frågar.');
 }
 
+// Bekräftat via logg: Chrome saknar getParent (getParentType "undefined"),
+// så den här vägen ger aldrig någon mapp. Behålls bara som no-op.
 async function cacheBookDirFromFile(bookId, fileHandle){
-  // #region agent log
-  dbgLog('C', 'nopEKONOMI.html:cacheBookDirFromFile', 'getParent-support', {
-    bookId: bookId, hasFileHandle: !!fileHandle,
-    getParentType: fileHandle ? typeof fileHandle.getParent : 'no-handle'
-  });
-  // #endregion
   if(!fileHandle || typeof fileHandle.getParent !== 'function') return null;
   try{
     const dir = await fileHandle.getParent();
@@ -6616,8 +6660,18 @@ async function getWorkspaceDirHandle(interactive){
 
 async function getBookDirHandle(bookId, interactive, mode){
   mode = mode || 'readwrite';
+  // Levande objekt först — behörigheten sitter på objektet.
+  const liveDir = liveHandle(bookId, 'dir');
+  if(liveDir && await ensureHandlePermission(liveDir, false, mode)){
+    // #region agent log
+    dbgLog('I', 'nopEKONOMI.html:getBookDirHandle', 'live-dir-hit', { bookId: bookId, mode: mode });
+    // #endregion
+    return liveDir;
+  }
+
   let dir = await idbGet(bookId + BOOK_DIR_SUFFIX);
   if(dir && await ensureHandlePermission(dir, interactive, mode)){
+    rememberLiveHandle(bookId, 'dir', dir);
     await rememberWorkspaceDir(dir, await detectWorkspaceKind(dir));
     return dir;
   }
@@ -6626,6 +6680,7 @@ async function getBookDirHandle(bookId, interactive, mode){
     const file = await idbGet(bookId);
     dir = await cacheBookDirFromFile(bookId, file);
     if(dir && await ensureHandlePermission(dir, interactive, mode)){
+      rememberLiveHandle(bookId, 'dir', dir);
       await rememberWorkspaceDir(dir, await detectWorkspaceKind(dir));
       return dir;
     }
@@ -10508,6 +10563,7 @@ async function show(name, opts){
 async function openBook(id){
   resetImportState();
   resetBookFolderAccessGate();
+  if(liveHandles.bookId && liveHandles.bookId !== id) forgetLiveHandles();
   reg = readRegistry();
   reg.active = id;
   writeRegistry(reg);
@@ -23934,17 +23990,56 @@ function syncSettingsSectionPanels(){
 // #region agent log
 (function bindDebugLogUi(){
   const showBtn = el('settingsDebugShowBtn');
+  const copyBtn = el('settingsDebugCopyBtn');
   const clearBtn = el('settingsDebugClearBtn');
   const out = el('settingsDebugOut');
+
+  // Kort logg: bara det som visar dialoger och behörighetsläge.
+  function compactText(){
+    let lines = [];
+    try{ lines = JSON.parse(dbgDump()); } catch(e){ lines = []; }
+    const keep = lines.filter(e =>
+      e.hypothesisId === 'B' || e.hypothesisId === 'H'
+      || e.hypothesisId === 'I' || e.hypothesisId === 'F'
+      || e.message === 'cold-start-handle-state');
+    const rows = keep.map(e => {
+      const t = new Date(e.timestamp).toLocaleTimeString('sv-SE');
+      const d = e.data || {};
+      if(e.message === 'cold-start-handle-state'){
+        const b = (d.books && d.books[0]) || {};
+        return t + ' START ' + (d.display || '') + ' file='
+          + (b.file ? (b.file.rw ? 'rw' : (b.file.r ? 'r' : 'none')) : 'missing')
+          + ' dir=' + (b.dir ? (b.dir.rw ? 'rw' : (b.dir.r ? 'r' : 'none')) : 'missing');
+      }
+      if(e.message === 'perm-snapshot'){
+        return t + ' SNAP ' + d.tag + ' live=' + d.liveFile + '/' + d.liveDir
+          + ' fresh=' + d.freshFile + '/' + d.freshDir
+          + ' vis=' + d.visibility + ' sinceGrant=' + d.msSinceGrant;
+      }
+      if(e.hypothesisId === 'B') return t + ' ' + e.message + ' ' + (d.kind || '') + ' ' + (d.mode || '') + ' ' + (d.result || '');
+      if(e.hypothesisId === 'I') return t + ' LIVE-HIT ' + e.message;
+      if(e.message === 'save-enter') return t + ' SAVE fileRw=' + d.fileRw + ' pending=' + d.pending;
+      if(e.message === 'save-step3-interactive') return t + ' SAVE-NEEDS-PROMPT';
+      return t + ' ' + e.message;
+    });
+    const prompts = keep.filter(e => e.message === 'PROMPT result').length;
+    return 'DIALOGER: ' + prompts + '\n' + rows.join('\n');
+  }
+
   if(showBtn && out){
     showBtn.addEventListener('click', () => {
-      let lines = [];
-      try{ lines = JSON.parse(dbgDump()); } catch(e){ lines = []; }
-      out.textContent = lines.map(e => {
-        const t = new Date(e.timestamp).toLocaleTimeString('sv-SE');
-        return '#' + e.seq + ' ' + t + ' [' + e.hypothesisId + '] ' + e.message
-          + ' ' + JSON.stringify(e.data);
-      }).join('\n') || '(tom logg)';
+      out.textContent = compactText() || '(tom logg)';
+    });
+  }
+  if(copyBtn && out){
+    copyBtn.addEventListener('click', async () => {
+      const txt = compactText();
+      try{
+        await navigator.clipboard.writeText(txt);
+        out.textContent = 'Kopierad till urklipp.\n\n' + txt;
+      } catch(e){
+        out.textContent = txt;
+      }
     });
   }
   if(clearBtn && out){
