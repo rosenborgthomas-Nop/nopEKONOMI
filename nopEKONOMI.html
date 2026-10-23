@@ -5110,6 +5110,17 @@ tbody tr.row-future td{ font-style:italic; }
         <p class="hint" id="settingsFolderStatus"></p>
       </section>
 
+      <!-- #region agent log -->
+      <section class="section" id="settingsDebugSection">
+        <h3>Debug-logg (tillfällig)</h3>
+        <div class="quiet-row">
+          <button class="btn-quiet" id="settingsDebugShowBtn" type="button">Visa logg</button>
+          <button class="btn-quiet" id="settingsDebugClearBtn" type="button">Rensa logg</button>
+        </div>
+        <pre id="settingsDebugOut" style="white-space:pre-wrap;word-break:break-word;font-size:11px;max-height:50vh;overflow:auto"></pre>
+      </section>
+      <!-- #endregion -->
+
       <section class="section">
         <h3>Böcker i den här programmappen</h3>
         <p>Böcker som finns som JSON-filer i samma mapp som nopEKONOMI.html. Den öppna boken är markerad.</p>
@@ -5277,7 +5288,40 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-19 v02';
+const APP_VERSION = '2026-10-23 v01-debug';
+
+// #region agent log
+const DBG_EP = 'http://127.0.0.1:7674/ingest/41c900a8-aaca-4462-a722-1ca4ba5a8088';
+const DBG_KEY = 'nop_debug_ee72b9';
+let dbgSeq = 0;
+function dbgLog(hypothesisId, location, message, data){
+  try{
+    const entry = {
+      sessionId: 'ee72b9', runId: 'run1', hypothesisId: hypothesisId,
+      location: location, message: message, data: data || {},
+      timestamp: Date.now(), seq: ++dbgSeq
+    };
+    try{
+      const arr = JSON.parse(localStorage.getItem(DBG_KEY) || '[]');
+      arr.push(entry);
+      while(arr.length > 400) arr.shift();
+      localStorage.setItem(DBG_KEY, JSON.stringify(arr));
+    } catch(e){ /* ignore */ }
+    fetch(DBG_EP, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ee72b9' },
+      body: JSON.stringify(entry)
+    }).catch(() => {});
+  } catch(e){ /* ignore */ }
+}
+function dbgDump(){
+  try{ return localStorage.getItem(DBG_KEY) || '[]'; } catch(e){ return '[]'; }
+}
+function dbgClear(){
+  try{ localStorage.removeItem(DBG_KEY); } catch(e){ /* ignore */ }
+  dbgSeq = 0;
+}
+// #endregion
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
 const TREND_SUB_SEP = '\x1f';
@@ -5960,6 +6004,12 @@ async function checkBookFileForRemoteChanges(){
   bookFileCheckBusy = true;
   try{
     const sessionAhead = !!(bookSessionDirty || hasBookFileSyncPending(bookId));
+    // #region agent log
+    dbgLog('G', 'nopEKONOMI.html:checkBookFileForRemoteChanges', 'resume-check', {
+      visibility: document.visibilityState, driveContact: bookDriveContact,
+      sessionAhead: sessionAhead, knownSavedAt: bookKnownSavedAt
+    });
+    // #endregion
 
     // Utan kontakt: försök tyst nå filen igen — men aldrig om sessionen ligger före Drive.
     if(!bookDriveContact){
@@ -6095,6 +6145,14 @@ async function writeBookPreferGranted(id, bookData, interactive){
 
   // 1) Befintligt filhandtag med skrivrätt — tyst.
   let handle = await idbGet(id);
+  // #region agent log
+  dbgLog('F', 'nopEKONOMI.html:writeBookPreferGranted', 'save-enter', {
+    id: id, interactive: !!interactive, hasIdbFile: !!handle,
+    fileRw: handle ? await handlePermissionIsGranted(handle, 'readwrite') : null,
+    driveContact: bookDriveContact, sessionDirty: bookSessionDirty,
+    pending: hasBookFileSyncPending(id)
+  });
+  // #endregion
   if(handle && (await handlePermissionIsGranted(handle, 'readwrite'))){
     try{
       return await commitWithHandle(handle);
@@ -6130,6 +6188,9 @@ async function writeBookPreferGranted(id, bookData, interactive){
   }
 
   // 3) Användargest: be om skriv — force så öppningens engångsfråga inte blockerar.
+  // #region agent log
+  dbgLog('F', 'nopEKONOMI.html:writeBookPreferGranted', 'save-step3-interactive', { id: id });
+  // #endregion
   try{
     const dir = await ensureBookFolderAccessOnce(id, { force: true });
     if(dir){
@@ -6195,15 +6256,52 @@ async function ensureHandlePermission(handle, interactive, mode){
   const want = mode || 'readwrite';
   const ask = (interactive !== false && want === 'read') ? 'readwrite' : want;
   try{
-    if(await handle.queryPermission({ mode: ask }) === 'granted') return true;
+    const qAsk = await handle.queryPermission({ mode: ask });
+    // #region agent log
+    dbgLog('A', 'nopEKONOMI.html:ensureHandlePermission', 'perm-check', {
+      kind: handle.kind, name: handle.name, want: want, ask: ask,
+      interactive: interactive === false ? false : true, queryAsk: qAsk,
+      caller: (new Error().stack || '').split('\n').slice(2, 5).join(' | ')
+    });
+    // #endregion
+    if(qAsk === 'granted') return true;
     // Redan läs men vi behöver skriv: fråga bara om skriv (readwrite).
-    if(ask === 'readwrite' && await handle.queryPermission({ mode: 'read' }) === 'granted'){
+    const qRead = (ask === 'readwrite') ? await handle.queryPermission({ mode: 'read' }) : 'n/a';
+    if(ask === 'readwrite' && qRead === 'granted'){
       if(interactive === false) return want === 'read';
-      return await handle.requestPermission({ mode: 'readwrite' }) === 'granted';
+      // #region agent log
+      dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT requestPermission (read->rw)', {
+        kind: handle.kind, name: handle.name, mode: 'readwrite', queryRead: qRead
+      });
+      // #endregion
+      const r1 = await handle.requestPermission({ mode: 'readwrite' });
+      // #region agent log
+      dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT result', {
+        kind: handle.kind, name: handle.name, mode: 'readwrite', result: r1
+      });
+      // #endregion
+      return r1 === 'granted';
     }
     if(interactive === false) return false;
-    return await handle.requestPermission({ mode: ask }) === 'granted';
+    // #region agent log
+    dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT requestPermission', {
+      kind: handle.kind, name: handle.name, mode: ask, queryAsk: qAsk, queryRead: qRead
+    });
+    // #endregion
+    const r2 = await handle.requestPermission({ mode: ask });
+    // #region agent log
+    dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT result', {
+      kind: handle.kind, name: handle.name, mode: ask, result: r2
+    });
+    // #endregion
+    return r2 === 'granted';
   } catch(e){
+    // #region agent log
+    dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'perm-error', {
+      kind: handle && handle.kind, name: handle && handle.name,
+      err: e && (e.name + ': ' + e.message)
+    });
+    // #endregion
     return false;
   }
 }
@@ -6231,6 +6329,11 @@ function resetBookFolderAccessGate(){
 async function ensureBookFolderAccessOnce(id, opts){
   const force = !!(opts && opts.force);
   const silent = await getBookDirHandle(id, false, 'readwrite');
+  // #region agent log
+  dbgLog('D', 'nopEKONOMI.html:ensureBookFolderAccessOnce', 'gate', {
+    id: id, force: force, silentHit: !!silent, askedAlready: bookFolderAccessAsked
+  });
+  // #endregion
   if(silent) return silent;
 
   // Samma fysiska mapp kan ligga som två handtag (arbetsmapp + bokmapp) och
@@ -6270,6 +6373,12 @@ async function bookFileFromDirHandle(id, dir, knownName){
 async function getBookFileHandle(id, interactive, mode){
   mode = mode || 'readwrite';
   let handle = await idbGet(id);
+  // #region agent log
+  dbgLog('E', 'nopEKONOMI.html:getBookFileHandle', 'enter', {
+    id: id, mode: mode, interactive: interactive === false ? false : true,
+    hasIdbFile: !!handle, fileName: handle && handle.name
+  });
+  // #endregion
   // Redan beviljat filhandtag — använd det utan att fråga.
   if(handle && await ensureHandlePermission(handle, false, mode)){
     return handle;
@@ -6318,6 +6427,14 @@ async function cacheBookDirFromFile(bookId, fileHandle){
       await handlePermissionIsGranted(existing, 'readwrite')
       || await handlePermissionIsGranted(existing, 'read')
     );
+
+    // #region agent log
+    dbgLog('C', 'nopEKONOMI.html:cacheBookDirFromFile', 'dir-handle-swap', {
+      bookId: bookId, hadExisting: !!existing, existingName: existing && existing.name,
+      oldRead: !!oldRead, newName: dir.name, newRw: newRw, newRead: newRead,
+      decision: (existing && oldRead && !newRead) ? 'keep-existing' : 'replace-with-getParent'
+    });
+    // #endregion
 
     // Behåll befintligt om det har behörighet och det nya saknar.
     if(existing && oldRead && !newRead) return existing;
@@ -23805,6 +23922,31 @@ function syncSettingsSectionPanels(){
   if(settingsPanelStartmeny) settingsPanelStartmeny.hidden = mode !== 'startmeny';
 }
 
+// #region agent log
+(function bindDebugLogUi(){
+  const showBtn = el('settingsDebugShowBtn');
+  const clearBtn = el('settingsDebugClearBtn');
+  const out = el('settingsDebugOut');
+  if(showBtn && out){
+    showBtn.addEventListener('click', () => {
+      let lines = [];
+      try{ lines = JSON.parse(dbgDump()); } catch(e){ lines = []; }
+      out.textContent = lines.map(e => {
+        const t = new Date(e.timestamp).toLocaleTimeString('sv-SE');
+        return '#' + e.seq + ' ' + t + ' [' + e.hypothesisId + '] ' + e.message
+          + ' ' + JSON.stringify(e.data);
+      }).join('\n') || '(tom logg)';
+    });
+  }
+  if(clearBtn && out){
+    clearBtn.addEventListener('click', () => {
+      dbgClear();
+      out.textContent = '(rensad)';
+    });
+  }
+})();
+// #endregion
+
 function renderSettings(){
   if(settingsBookName) settingsBookName.textContent = bookName(bookId);
   hideRenameField();
@@ -26526,6 +26668,30 @@ function bindCustomMenuSelects(){
 async function initApp(){
   applyAppVersionLabels();
   await openIdb();
+  // #region agent log
+  try{
+    const regNow = readRegistry();
+    const ids = (regNow && Array.isArray(regNow.fileIds)) ? regNow.fileIds.slice(0, 4) : [];
+    const snap = [];
+    for(const id of ids){
+      const f = await idbGet(id);
+      const d = await idbGet(id + BOOK_DIR_SUFFIX);
+      snap.push({
+        id: id,
+        file: f ? { name: f.name, rw: await handlePermissionIsGranted(f, 'readwrite'), r: await handlePermissionIsGranted(f, 'read') } : null,
+        dir: d ? { name: d.name, rw: await handlePermissionIsGranted(d, 'readwrite'), r: await handlePermissionIsGranted(d, 'read') } : null
+      });
+    }
+    const ws = await idbGet(WORKSPACE_DIR_KEY);
+    dbgLog('A', 'nopEKONOMI.html:initApp', 'cold-start-handle-state', {
+      version: APP_VERSION,
+      display: (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ? 'standalone-pwa' : 'browser-tab',
+      ua: (navigator.userAgent || '').slice(0, 120),
+      books: snap,
+      workspace: ws ? { name: ws.name, rw: await handlePermissionIsGranted(ws, 'readwrite'), r: await handlePermissionIsGranted(ws, 'read') } : null
+    });
+  } catch(e){ /* ignore */ }
+  // #endregion
   try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
   await clearInvalidWorkspaceDir();
   // Vid start: synka om behörighet redan finns. Annars sker synk vid Inloggning (användargest).
