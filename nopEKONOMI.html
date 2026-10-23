@@ -5289,38 +5289,64 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-23 v03-debug';
+const APP_VERSION = '2026-10-23 v04-debug';
 
 // #region agent log
 const DBG_EP = 'http://127.0.0.1:7674/ingest/41c900a8-aaca-4462-a722-1ca4ba5a8088';
 const DBG_KEY = 'nop_debug_ee72b9';
+// Loggen MÅSTE vara billig: localStorage är synkront och fryser UI:t om den
+// läses/skrivs per rad. Håll i minnet, skriv ut sällan, lite data per rad.
+const DBG_MAX = 120;
+const DBG_SEND = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const DBG_LOAD = Math.random().toString(36).slice(2, 6);
 let dbgSeq = 0;
-function dbgLog(hypothesisId, location, message, data){
+let dbgBuf = [];
+let dbgFlushTimer = 0;
+try{
+  const prev = JSON.parse(localStorage.getItem(DBG_KEY) || '[]');
+  if(Array.isArray(prev)) dbgBuf = prev.slice(-DBG_MAX);
+} catch(e){ dbgBuf = []; }
+
+function dbgFlush(){
+  dbgFlushTimer = 0;
+  try{ localStorage.setItem(DBG_KEY, JSON.stringify(dbgBuf)); } catch(e){ /* ignore */ }
+}
+function dbgLog(hypothesisId, where, message, data){
   try{
-    const entry = {
-      sessionId: 'ee72b9', runId: 'run1', hypothesisId: hypothesisId,
-      location: location, message: message, data: data || {},
+    dbgBuf.push({
+      sessionId: 'ee72b9', load: DBG_LOAD, hypothesisId: hypothesisId,
+      location: where, message: message, data: data || {},
       timestamp: Date.now(), seq: ++dbgSeq
-    };
-    try{
-      const arr = JSON.parse(localStorage.getItem(DBG_KEY) || '[]');
-      arr.push(entry);
-      while(arr.length > 400) arr.shift();
-      localStorage.setItem(DBG_KEY, JSON.stringify(arr));
-    } catch(e){ /* ignore */ }
-    fetch(DBG_EP, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ee72b9' },
-      body: JSON.stringify(entry)
-    }).catch(() => {});
+    });
+    if(dbgBuf.length > DBG_MAX) dbgBuf.shift();
+    if(!dbgFlushTimer) dbgFlushTimer = setTimeout(dbgFlush, 2000);
+    if(DBG_SEND){
+      fetch(DBG_EP, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ee72b9' },
+        body: JSON.stringify(dbgBuf[dbgBuf.length - 1])
+      }).catch(() => {});
+    }
   } catch(e){ /* ignore */ }
 }
 function dbgDump(){
-  try{ return localStorage.getItem(DBG_KEY) || '[]'; } catch(e){ return '[]'; }
+  try{ return JSON.stringify(dbgBuf); } catch(e){ return '[]'; }
 }
 // Tyst behörighetsmätning: queryPermission visar ALDRIG dialog.
 let dbgLastGrantAt = 0;
 let dbgLastPermSig = '';
+// Träffar på levande handtag är många — logga sammanfattat, inte per anrop.
+const dbgHits = { file: 0, dir: 0 };
+let dbgHitsAt = 0;
+function dbgLiveHit(kind, mode){
+  dbgHits[kind] = (dbgHits[kind] || 0) + 1;
+  const now = Date.now();
+  if(now - dbgHitsAt < 30000) return;
+  dbgHitsAt = now;
+  dbgLog('I', 'nopEKONOMI.html:liveHandle', 'live-hits', {
+    file: dbgHits.file, dir: dbgHits.dir, lastKind: kind, lastMode: mode
+  });
+}
 async function dbgPermLevel(h){
   if(!h) return 'missing';
   if(await handlePermissionIsGranted(h, 'readwrite')) return 'rw';
@@ -5355,8 +5381,9 @@ async function dbgPermSnapshot(tag, extra){
   } catch(e){ /* ignore */ }
 }
 function dbgClear(){
-  try{ localStorage.removeItem(DBG_KEY); } catch(e){ /* ignore */ }
+  dbgBuf = [];
   dbgSeq = 0;
+  try{ localStorage.removeItem(DBG_KEY); } catch(e){ /* ignore */ }
 }
 // #endregion
 
@@ -6295,11 +6322,13 @@ async function ensureHandlePermission(handle, interactive, mode){
   try{
     const qAsk = await handle.queryPermission({ mode: ask });
     // #region agent log
-    dbgLog('A', 'nopEKONOMI.html:ensureHandlePermission', 'perm-check', {
-      kind: handle.kind, name: handle.name, want: want, ask: ask,
-      interactive: interactive === false ? false : true, queryAsk: qAsk,
-      caller: (new Error().stack || '').split('\n').slice(2, 5).join(' | ')
-    });
+    // Bara icke-beviljade lägen loggas — annars flödar loggen över.
+    if(qAsk !== 'granted'){
+      dbgLog('A', 'nopEKONOMI.html:ensureHandlePermission', 'perm-check', {
+        kind: handle.kind, want: want, ask: ask,
+        interactive: interactive === false ? false : true, queryAsk: qAsk
+      });
+    }
     // #endregion
     if(qAsk === 'granted') return true;
     // Redan läs men vi behöver skriv: fråga bara om skriv (readwrite).
@@ -6445,16 +6474,16 @@ async function getBookFileHandle(id, interactive, mode){
   const live = liveHandle(id, 'file');
   if(live && await ensureHandlePermission(live, false, mode)){
     // #region agent log
-    dbgLog('I', 'nopEKONOMI.html:getBookFileHandle', 'live-handle-hit', { id: id, mode: mode });
+    dbgLiveHit('file', mode);
     // #endregion
     return live;
   }
 
   let handle = await idbGet(id);
   // #region agent log
-  dbgLog('E', 'nopEKONOMI.html:getBookFileHandle', 'enter', {
-    id: id, mode: mode, interactive: interactive === false ? false : true,
-    hasIdbFile: !!handle, fileName: handle && handle.name, hadLive: !!live
+  dbgLog('E', 'nopEKONOMI.html:getBookFileHandle', 'file-miss', {
+    mode: mode, interactive: interactive === false ? false : true,
+    hasIdbFile: !!handle, hadLive: !!live
   });
   // #endregion
   // Redan beviljat filhandtag — använd det utan att fråga.
@@ -6664,7 +6693,7 @@ async function getBookDirHandle(bookId, interactive, mode){
   const liveDir = liveHandle(bookId, 'dir');
   if(liveDir && await ensureHandlePermission(liveDir, false, mode)){
     // #region agent log
-    dbgLog('I', 'nopEKONOMI.html:getBookDirHandle', 'live-dir-hit', { bookId: bookId, mode: mode });
+    dbgLiveHit('dir', mode);
     // #endregion
     return liveDir;
   }
@@ -10564,6 +10593,13 @@ async function openBook(id){
   resetImportState();
   resetBookFolderAccessGate();
   if(liveHandles.bookId && liveHandles.bookId !== id) forgetLiveHandles();
+  // #region agent log
+  let openStage = 'start';
+  const openWatchdog = setTimeout(() => {
+    dbgLog('J', 'nopEKONOMI.html:openBook', 'OPENBOOK-HANG', { id: id, stage: openStage });
+    dbgFlush();
+  }, 8000);
+  // #endregion
   reg = readRegistry();
   reg.active = id;
   writeRegistry(reg);
@@ -10598,11 +10634,17 @@ async function openBook(id){
     let fileOk = false;
     try{
       let handle = null;
+      openStage = 'silent-rw';
       try{ handle = await getBookFileHandle(id, false, 'readwrite'); } catch(e){ handle = null; }
       if(!handle){
+        openStage = 'silent-read';
         try{ handle = await getBookFileHandle(id, false, 'read'); } catch(e){ handle = null; }
       }
-      if(!handle) handle = await getBookFileHandle(id, true, 'readwrite');
+      if(!handle){
+        openStage = 'interactive-rw';
+        handle = await getBookFileHandle(id, true, 'readwrite');
+      }
+      openStage = 'read-file';
       parsed = await readBookFileRaw(handle);
       fileOk = true;
     } catch(e){
@@ -10678,6 +10720,10 @@ async function openBook(id){
       ? e.message + ' Boken lämnades orörd.'
       : 'Kunde inte läsa boken. Kontrollera att bokfilen finns kvar.');
     show('login');
+  } finally{
+    // #region agent log
+    clearTimeout(openWatchdog);
+    // #endregion
   }
 }
 
@@ -24001,6 +24047,7 @@ function syncSettingsSectionPanels(){
     const keep = lines.filter(e =>
       e.hypothesisId === 'B' || e.hypothesisId === 'H'
       || e.hypothesisId === 'I' || e.hypothesisId === 'F'
+      || e.hypothesisId === 'E'
       || e.message === 'cold-start-handle-state');
     const rows = keep.map(e => {
       const t = new Date(e.timestamp).toLocaleTimeString('sv-SE');
@@ -24017,7 +24064,8 @@ function syncSettingsSectionPanels(){
           + ' vis=' + d.visibility + ' sinceGrant=' + d.msSinceGrant;
       }
       if(e.hypothesisId === 'B') return t + ' ' + e.message + ' ' + (d.kind || '') + ' ' + (d.mode || '') + ' ' + (d.result || '');
-      if(e.hypothesisId === 'I') return t + ' LIVE-HIT ' + e.message;
+      if(e.message === 'live-hits') return t + ' LIVE-HITS file=' + d.file + ' dir=' + d.dir;
+      if(e.message === 'file-miss') return t + ' FILE-MISS mode=' + d.mode + ' hadLive=' + d.hadLive;
       if(e.message === 'save-enter') return t + ' SAVE fileRw=' + d.fileRw + ' pending=' + d.pending;
       if(e.message === 'save-step3-interactive') return t + ' SAVE-NEEDS-PROMPT';
       return t + ' ' + e.message;
@@ -26825,7 +26873,10 @@ async function initApp(){
   document.addEventListener('visibilitychange', () => {
     dbgPermSnapshot('visibility-' + document.visibilityState);
   });
-  window.addEventListener('pagehide', e => dbgPermSnapshot('pagehide', { persisted: e.persisted }));
+  window.addEventListener('pagehide', () => dbgFlush());
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'hidden') dbgFlush();
+  });
   window.addEventListener('pageshow', e => dbgPermSnapshot('pageshow', { persisted: e.persisted }));
   document.addEventListener('freeze', () => dbgPermSnapshot('freeze'));
   document.addEventListener('resume', () => dbgPermSnapshot('resume'));
