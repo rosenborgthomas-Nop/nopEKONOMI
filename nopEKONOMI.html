@@ -5288,7 +5288,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-23 v01-debug';
+const APP_VERSION = '2026-10-23 v02-debug';
 
 // #region agent log
 const DBG_EP = 'http://127.0.0.1:7674/ingest/41c900a8-aaca-4462-a722-1ca4ba5a8088';
@@ -5316,6 +5316,35 @@ function dbgLog(hypothesisId, location, message, data){
 }
 function dbgDump(){
   try{ return localStorage.getItem(DBG_KEY) || '[]'; } catch(e){ return '[]'; }
+}
+// Tyst behörighetsmätning: queryPermission visar ALDRIG dialog.
+let dbgLastGrantAt = 0;
+let dbgLastPermSig = '';
+async function dbgPermLevel(h){
+  if(!h) return 'missing';
+  if(await handlePermissionIsGranted(h, 'readwrite')) return 'rw';
+  if(await handlePermissionIsGranted(h, 'read')) return 'r';
+  return 'prompt';
+}
+async function dbgPermSnapshot(tag, extra){
+  try{
+    if(!bookId) return;
+    const f = await idbGet(bookId);
+    const d = await idbGet(bookId + BOOK_DIR_SUFFIX);
+    const fileLvl = await dbgPermLevel(f);
+    const dirLvl = await dbgPermLevel(d);
+    if(tag === 'sample'){
+      const sig = fileLvl + '/' + dirLvl;
+      if(sig === dbgLastPermSig) return;
+      dbgLastPermSig = sig;
+    }
+    dbgLog('H', 'nopEKONOMI.html:dbgPermSnapshot', 'perm-snapshot', Object.assign({
+      tag: tag, file: fileLvl, dir: dirLvl,
+      visibility: document.visibilityState,
+      msSinceGrant: dbgLastGrantAt ? (Date.now() - dbgLastGrantAt) : null,
+      userActive: !!(navigator.userActivation && navigator.userActivation.isActive)
+    }, extra || {}));
+  } catch(e){ /* ignore */ }
 }
 function dbgClear(){
   try{ localStorage.removeItem(DBG_KEY); } catch(e){ /* ignore */ }
@@ -6276,6 +6305,7 @@ async function ensureHandlePermission(handle, interactive, mode){
       // #endregion
       const r1 = await handle.requestPermission({ mode: 'readwrite' });
       // #region agent log
+      if(r1 === 'granted') dbgLastGrantAt = Date.now();
       dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT result', {
         kind: handle.kind, name: handle.name, mode: 'readwrite', result: r1
       });
@@ -6290,6 +6320,7 @@ async function ensureHandlePermission(handle, interactive, mode){
     // #endregion
     const r2 = await handle.requestPermission({ mode: ask });
     // #region agent log
+    if(r2 === 'granted') dbgLastGrantAt = Date.now();
     dbgLog('B', 'nopEKONOMI.html:ensureHandlePermission', 'PROMPT result', {
       kind: handle.kind, name: handle.name, mode: ask, result: r2
     });
@@ -6405,45 +6436,23 @@ async function getBookFileHandle(id, interactive, mode){
   throw new Error('Saknar behörighet att läsa bokfilen. Tillåt åtkomst när webbläsaren frågar.');
 }
 
-/**
- * Cacha bokmapp från filens getParent().
- * Viktigt: skriv ALDRIG över ett redan beviljat mapphandtag med ett nytt
- * getParent()-handtag — Chrome ger behörighet per handtag, och det nya
- * saknar ofta skrivrätt (orsakade "Kunde inte spara" direkt efter godkännande).
- */
 async function cacheBookDirFromFile(bookId, fileHandle){
+  // #region agent log
+  dbgLog('C', 'nopEKONOMI.html:cacheBookDirFromFile', 'getParent-support', {
+    bookId: bookId, hasFileHandle: !!fileHandle,
+    getParentType: fileHandle ? typeof fileHandle.getParent : 'no-handle'
+  });
+  // #endregion
   if(!fileHandle || typeof fileHandle.getParent !== 'function') return null;
   try{
-    const existing = await idbGet(bookId + BOOK_DIR_SUFFIX);
-    if(existing && await handlePermissionIsGranted(existing, 'readwrite')){
-      return existing;
-    }
     const dir = await fileHandle.getParent();
-    if(!dir) return existing || null;
-
-    const newRw = await handlePermissionIsGranted(dir, 'readwrite');
-    const newRead = newRw || await handlePermissionIsGranted(dir, 'read');
-    const oldRead = existing && (
-      await handlePermissionIsGranted(existing, 'readwrite')
-      || await handlePermissionIsGranted(existing, 'read')
-    );
-
-    // #region agent log
-    dbgLog('C', 'nopEKONOMI.html:cacheBookDirFromFile', 'dir-handle-swap', {
-      bookId: bookId, hadExisting: !!existing, existingName: existing && existing.name,
-      oldRead: !!oldRead, newName: dir.name, newRw: newRw, newRead: newRead,
-      decision: (existing && oldRead && !newRead) ? 'keep-existing' : 'replace-with-getParent'
-    });
-    // #endregion
-
-    // Behåll befintligt om det har behörighet och det nya saknar.
-    if(existing && oldRead && !newRead) return existing;
-
-    await idbPut(bookId + BOOK_DIR_SUFFIX, dir);
-    await rememberWorkspaceDir(dir, await detectWorkspaceKind(dir));
-    return dir;
+    if(dir){
+      await idbPut(bookId + BOOK_DIR_SUFFIX, dir);
+      await rememberWorkspaceDir(dir, await detectWorkspaceKind(dir));
+      return dir;
+    }
   } catch(e){ /* webbläsaren stödjer inte mappuppslag */ }
-  try{ return await idbGet(bookId + BOOK_DIR_SUFFIX); } catch(e2){ return null; }
+  return null;
 }
 
 async function directoryContainsProgram(dir){
@@ -26711,6 +26720,24 @@ async function initApp(){
   window.addEventListener('focus', () => {
     try{ checkBookFileForRemoteChanges(); } catch(e){ /* ignore */ }
   });
+
+  // #region agent log
+  // Spårar NÄR behörigheten tappas: livscykel + tyst mätare var 20:e sekund.
+  dbgLog('H', 'nopEKONOMI.html:initApp', 'lifecycle-start', {
+    wasDiscarded: document.wasDiscarded === true,
+    swController: !!(navigator.serviceWorker && navigator.serviceWorker.controller)
+  });
+  document.addEventListener('visibilitychange', () => {
+    dbgPermSnapshot('visibility-' + document.visibilityState);
+  });
+  window.addEventListener('pagehide', e => dbgPermSnapshot('pagehide', { persisted: e.persisted }));
+  window.addEventListener('pageshow', e => dbgPermSnapshot('pageshow', { persisted: e.persisted }));
+  document.addEventListener('freeze', () => dbgPermSnapshot('freeze'));
+  document.addEventListener('resume', () => dbgPermSnapshot('resume'));
+  setInterval(() => {
+    if(document.visibilityState === 'visible') dbgPermSnapshot('sample');
+  }, 20000);
+  // #endregion
 }
 
 initApp();
