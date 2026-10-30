@@ -5277,7 +5277,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-23 v05';
+const APP_VERSION = '2026-10-30 v01';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -8244,27 +8244,64 @@ function formatStartTeaserGhostTip(ghostRound, rem, ghostInfo){
   const r = formatBudgetAmtEdit(Math.round(rem));
   if(!ghostInfo) return 'Skugg-saldo ' + g;
   const meanTxt = formatBudgetAmtEdit(Math.round(ghostInfo.mean));
-  if(ghostInfo.usePosted){
-    const fut = formatBudgetAmtEdit(Math.round(ghostInfo.futureNet));
-    const nFut = ghostInfo.futureCount;
-    const nMean = ghostInfo.n;
-    if(ghostInfo.usedMean){
-      return 'Skugg-saldo ' + g
-        + ' (återstår ' + r
-        + ' + medel rest-Ut ' + meanTxt
-        + ', ' + nMean + ' mån — värre än förhandspostat Ut ' + fut
-        + ', ' + nFut + ' st)';
+  const nMean = ghostInfo.n;
+  const futTxt = formatBudgetAmtEdit(Math.round(ghostInfo.futureNet || 0));
+  const nFut = ghostInfo.futureCount || 0;
+  const recTxt = formatBudgetAmtEdit(Math.round(ghostInfo.recurringNet || 0));
+  const nRec = ghostInfo.recurringCount || 0;
+  const source = ghostInfo.tailSource
+    || (ghostInfo.usedRecurring ? 'recurring'
+      : (ghostInfo.usedMean ? 'mean' : (ghostInfo.usePosted ? 'posted' : 'mean')));
+
+  if(source === 'recurring' && nRec > 0){
+    let others = '';
+    if(ghostInfo.usePosted){
+      others += ' — värre än förbokat Ut ' + futTxt + ', ' + nFut + ' st';
+    }
+    if(nMean){
+      others += (others ? ',' : ' —') + ' värre än medel rest-Ut ' + meanTxt
+        + ', ' + nMean + ' mån';
     }
     return 'Skugg-saldo ' + g
       + ' (återstår ' + r
-      + ' + förhandspostat Ut ' + fut
-      + ', ' + nFut + ' st — värre än medel rest-Ut ' + meanTxt + ')';
+      + ' + återkommande Ut ' + recTxt
+      + ', ' + nRec + ' payee' + (nRec === 1 ? '' : 's')
+      + others + ')';
+  }
+  if(source === 'posted' && ghostInfo.usePosted){
+    let others = ' — värre än medel rest-Ut ' + meanTxt
+      + (nMean ? (', ' + nMean + ' mån') : '');
+    if(nRec > 0){
+      others += ', värre än återkommande Ut ' + recTxt + ', ' + nRec + ' st';
+    }
+    return 'Skugg-saldo ' + g
+      + ' (återstår ' + r
+      + ' + förhandspostat Ut ' + futTxt
+      + ', ' + nFut + ' st' + others + ')';
+  }
+  if(nMean){
+    let others = '';
+    if(ghostInfo.usePosted){
+      others += ' — värre än förbokat Ut ' + futTxt + ', ' + nFut + ' st';
+    }
+    if(nRec > 0){
+      others += (others ? ',' : ' —')
+        + ' värre än återkommande Ut ' + recTxt + ', ' + nRec + ' st';
+    }
+    return 'Skugg-saldo ' + g
+      + ' (återstår ' + r
+      + ' + medel rest-Ut ' + meanTxt
+      + ', ' + nMean + ' mån' + others + ')';
+  }
+  if(nRec > 0){
+    return 'Skugg-saldo ' + g
+      + ' (återstår ' + r
+      + ' + återkommande Ut ' + recTxt
+      + ', ' + nRec + ' payee' + (nRec === 1 ? '' : 's') + ')';
   }
   return 'Skugg-saldo ' + g
     + ' (återstår ' + r
-    + (ghostInfo.n
-      ? (' + medel rest-Ut ' + meanTxt + ', ' + ghostInfo.n + ' mån)')
-      : ' — sista dagen, ingen rest-månad kvar)');
+    + ' — sista dagen, ingen rest-månad kvar)';
 }
 
 /** Skuggbudget-fält för pågående månad (samma logik som start-teaser). */
@@ -9029,8 +9066,8 @@ function budgetAmtBarTip(isIncome, actual, budget){
  * Start-teaser: bara utgifter — siffra = återstår (budget − förbrukat),
  * övre stapel = förbrukat/budget (röd från vänster vid överskridande).
  * Undre stapel (bara Pågående månad): skugg = återstår + förväntad Ut
- * resten av månaden (6 föregående månader, morgondagens dagtal→månadsslut).
- * Bocklistan styr vilka poster; inkomster räknas inte in i skuggan.
+ * resten av månaden. Prognos = sämst av medel-svans (6 mån), förbokat och
+ * återkommande payee-Ut. Bocklistan styr; inkomster räknas inte in.
  */
 
 /** Dagtal för morgondagen (1–31).
@@ -9150,10 +9187,136 @@ function sumBocklistaUtInDateRange(fromIso, toIso, opts){
   return { net: net, count: count };
 }
 
+/** Median av numerisk lista (kopierar/sorterar). Tom lista → 0. */
+function medianNumber(values){
+  if(!values || !values.length) return 0;
+  const a = values.slice().sort((x, y) => x - y);
+  const mid = Math.floor(a.length / 2);
+  if(a.length % 2) return a[mid];
+  return (a[mid - 1] + a[mid]) / 2;
+}
+
+/**
+ * Återkommande bockliste-Ut per payee som förväntas [idag … månadsslut]
+ * men ännu inte bokats innevarande månad.
+ * Kriterier: minst 4 av 6 föregående mån, dagtal inom ±3 från median.
+ * @returns {{ net: number, count: number, items: Array<{payee:string,day:number,amount:number,months:number}> }}
+ */
+function detectRecurringBocklistaUtForTail(todayIso){
+  const empty = { net: 0, count: 0, items: [] };
+  if(!book || !book.order) return empty;
+  const iso = todayIso || todayIsoDate();
+  const curMk = monthKeyFromIso(iso);
+  const todayDay = Number(iso.slice(8, 10));
+  const y = Number(curMk.slice(0, 4));
+  const m = Number(curMk.slice(5, 7));
+  const dim = daysInCalendarMonth(y, m);
+  if(!(todayDay >= 1) || !(dim >= 1)) return empty;
+
+  const histSet = Object.create(null);
+  for(let i = 6; i >= 1; i--) histSet[addMonthKey(curMk, -i)] = true;
+
+  syncTrendIncludeMap(book);
+  const signMaps = buildBudgetSignMaps();
+  // payeeKey → { label, months: { mk: { amount, days: number[] } } }
+  const byPayee = Object.create(null);
+  const postedThisMonth = Object.create(null);
+
+  for(const accName of book.order){
+    const acc = book.accounts[accName];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(isOpeningBalanceRow(r)) continue;
+      if(isReportExcludedRow(r)) continue;
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
+      const payeeLabel = (r.payee || '').trim();
+      if(!payeeLabel) continue;
+      const payeeKey = payeeLabel.toLowerCase();
+      const mk = monthKeyFromIso(d);
+      const day = Number(d.slice(8, 10));
+      if(!(day >= 1)) continue;
+
+      let utSum = 0;
+      for(const piece of reportPiecesFromRow(r)){
+        const cat = (piece.category || '').trim();
+        const sub = (piece.subCategory || '').trim();
+        if(!cat || isTransferCategory(cat)) continue;
+        if(!isTrendPieceIncluded(cat, sub)) continue;
+        const leafItem = sub
+          ? { rowKind: 'sub', name: sub, parent: cat, emptySub: false }
+          : { rowKind: 'sub', name: '', parent: cat, emptySub: true };
+        if(budgetSignForItem(leafItem, signMaps) === 'in') continue;
+        const amount = piece.amount;
+        if(!Number.isFinite(amount) || !amount) continue;
+        utSum += amount;
+      }
+      if(!utSum) continue;
+
+      if(mk === curMk){
+        postedThisMonth[payeeKey] = true;
+        continue;
+      }
+      if(!histSet[mk]) continue;
+
+      let slot = byPayee[payeeKey];
+      if(!slot){
+        slot = { label: payeeLabel, months: Object.create(null) };
+        byPayee[payeeKey] = slot;
+      }
+      let monthSlot = slot.months[mk];
+      if(!monthSlot){
+        monthSlot = { amount: 0, days: [] };
+        slot.months[mk] = monthSlot;
+      }
+      monthSlot.amount += utSum;
+      monthSlot.days.push(day);
+    }
+  }
+
+  const items = [];
+  for(const key of Object.keys(byPayee)){
+    if(postedThisMonth[key]) continue;
+    const slot = byPayee[key];
+    const mks = Object.keys(slot.months);
+    if(mks.length < 4) continue;
+
+    const monthDays = [];
+    const monthAmts = [];
+    for(const mk of mks){
+      const ms = slot.months[mk];
+      monthAmts.push(ms.amount);
+      monthDays.push(Math.round(medianNumber(ms.days)));
+    }
+    const medDay = Math.round(medianNumber(monthDays));
+    if(!(medDay >= 1) || medDay > dim) continue;
+    if(!monthDays.every(d => Math.abs(d - medDay) <= 3)) continue;
+    // Förväntas idag eller senare i månaden — redan passerat dagtal utan bokning hoppas över.
+    if(medDay < todayDay) continue;
+
+    const medAmt = medianNumber(monthAmts);
+    if(!(medAmt < 0)) continue;
+
+    items.push({
+      payee: slot.label,
+      day: medDay,
+      amount: medAmt,
+      months: mks.length
+    });
+  }
+
+  let net = 0;
+  for(const it of items) net += it.amount;
+  return { net: net, count: items.length, items: items };
+}
+
 /**
  * Skugg-saldo = återstår + förväntad Ut för rest av månaden.
- * Prognos = historiskt medel Ut (6 mån, morgondagens dagtal→månadsslut, bocklista).
- * Finns förhandspostat Ut: ta det sämre (mer negativt) av förbokat och medlet.
+ * Prognoskandidater (mest negativa vinner, summeras inte):
+ *  - historiskt medel Ut (6 mån, morgondagens dagtal→månadsslut, bocklista)
+ *  - förhandspostat Ut
+ *  - återkommande payee-Ut som förväntas [idag…månadsslut] men ej bokats än
  */
 function computeStartTeaserGhostSaldo(remaining, todayIso){
   const iso = todayIso || todayIsoDate();
@@ -9180,10 +9343,26 @@ function computeStartTeaserGhostSaldo(remaining, todayIso){
     futureCount = fut.count;
   }
 
+  const recurring = detectRecurringBocklistaUtForTail(iso);
   const usePosted = futureCount > 0;
-  // Mer negativ Ut-summa = sämre för återstår.
-  const tail = usePosted ? Math.min(futureNet, mean) : mean;
-  const usedMean = !usePosted || mean <= futureNet;
+  const useRecurring = recurring.count > 0;
+
+  // Mer negativ Ut-summa = sämre för återstår. Summeras inte (undvik dubbelräkning).
+  const candidates = [mean];
+  if(usePosted) candidates.push(futureNet);
+  if(useRecurring) candidates.push(recurring.net);
+  let tail = candidates[0];
+  for(let i = 1; i < candidates.length; i++){
+    if(candidates[i] < tail) tail = candidates[i];
+  }
+
+  let tailSource = 'mean';
+  if(useRecurring && recurring.net <= mean && (!usePosted || recurring.net <= futureNet)){
+    tailSource = 'recurring';
+  } else if(usePosted && futureNet <= mean){
+    tailSource = 'posted';
+  }
+
   return {
     ghost: rem + tail,
     mean: mean,
@@ -9192,7 +9371,13 @@ function computeStartTeaserGhostSaldo(remaining, todayIso){
     futureNet: futureNet,
     futureCount: futureCount,
     usePosted: usePosted,
-    usedMean: usedMean,
+    usedMean: tailSource === 'mean',
+    useRecurring: useRecurring,
+    usedRecurring: tailSource === 'recurring',
+    recurringNet: recurring.net,
+    recurringCount: recurring.count,
+    recurringItems: recurring.items,
+    tailSource: tailSource,
     tail: tail
   };
 }
