@@ -5277,7 +5277,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-30 v01';
+const APP_VERSION = '2026-10-31 v01';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -22873,6 +22873,62 @@ function fillDatalist(datalistEl, items){
   }
 }
 
+/**
+ * Underkategorier som någon gång använts med given huvudkategori
+ * (inkl. splittrader), vanligast först.
+ */
+function subsLinkedToCategoryOrdered(category){
+  const catKey = newTxNormKey(category);
+  if(!catKey || !book || !book.order) return [];
+  const counts = new Map();
+  const labels = new Map();
+
+  function note(cat, sub){
+    if(newTxNormKey(cat) !== catKey) return;
+    const label = (sub || '').trim();
+    if(!label) return;
+    const key = label.toLowerCase();
+    counts.set(key, (counts.get(key) || 0) + 1);
+    if(!labels.has(key)) labels.set(key, label);
+  }
+
+  for(const accName of book.order){
+    const acc = book.accounts[accName];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(rowHasSplits(r)){
+        for(const s of r.splits){
+          note(s.category || r.category, s.subCategory);
+        }
+      } else {
+        note(r.category, r.subCategory);
+      }
+    }
+  }
+
+  return [...labels.keys()].sort((a, b) => {
+    const d = (counts.get(b) || 0) - (counts.get(a) || 0);
+    if(d) return d;
+    return labels.get(a).localeCompare(labels.get(b), 'sv');
+  }).map(k => labels.get(k));
+}
+
+/** Datalist: kopplade till kategorin först, därefter övriga underkategorier. */
+function orderedSubCategoriesForNewTx(category){
+  const linked = subsLinkedToCategoryOrdered(category);
+  const seen = new Set(linked.map(s => s.toLowerCase()));
+  const rest = [];
+  for(const s of bookLookup.subCategories || []){
+    if(!seen.has(String(s || '').toLowerCase())) rest.push(s);
+  }
+  return linked.concat(rest);
+}
+
+function refreshNewTxSubCategoryList(category){
+  if(!newTxSubCategoryList) return;
+  fillDatalist(newTxSubCategoryList, orderedSubCategoriesForNewTx(category));
+}
+
 /** Bästa prefixträff i inputens datalist (skiftlägesokänsligt). */
 function findDatalistPrefixMatch(inputEl){
   if(!inputEl) return null;
@@ -22931,7 +22987,8 @@ function bindNewTxDatalistAutocomplete(){
 function populateNewTxLookups(){
   fillDatalist(newTxPayeeList, bookLookup.payees);
   fillDatalist(newTxCategoryList, bookLookup.categories);
-  fillDatalist(newTxSubCategoryList, bookLookup.subCategories);
+  const ids = newTxActiveIds();
+  refreshNewTxSubCategoryList(newTxNormalizedText(ids.category));
   populateSplitCategoryList();
 }
 
@@ -23082,6 +23139,7 @@ function fillNewTxFromRow(row, accountName){
     el('newTxUtCategory').value = newTxSplitActive ? '' : (row.category || '');
     el('newTxUtSubCategory').value = newTxSplitActive ? '' : (row.subCategory || '');
     el('newTxUtMemo').value = row.memo || '';
+    refreshNewTxSubCategoryList(el('newTxUtCategory').value);
     syncNewTxSplitButtons();
     syncNewTxCategoryLock();
     return;
@@ -23094,6 +23152,7 @@ function fillNewTxFromRow(row, accountName){
   el('newTxInCategory').value = newTxSplitActive ? '' : (row.category || '');
   el('newTxInSubCategory').value = newTxSplitActive ? '' : (row.subCategory || '');
   el('newTxInMemo').value = row.memo || '';
+  refreshNewTxSubCategoryList(el('newTxInCategory').value);
   syncNewTxSplitButtons();
   syncNewTxCategoryLock();
 }
@@ -23935,7 +23994,10 @@ function newTxSuggestFromPayeeCategory(){
   const ids = newTxActiveIds();
   const payee = newTxNormalizedText(ids.payee);
   const category = newTxNormalizedText(ids.category);
-  if(!payee || !category) return;
+  if(!category) return;
+
+  refreshNewTxSubCategoryList(category);
+  if(!payee) return;
 
   const matches = newTxHistoryForPayeeCategory(payee, category);
   const sub = newTxDominantValue(matches, r => r.subCategory);
@@ -23958,15 +24020,31 @@ function newTxOnSuggestBlur(e){
   }
   if(id === 'newTxUtCategory' || id === 'newTxInCategory'){
     if((newTxTab === 'ut' && id === 'newTxUtCategory') || (newTxTab === 'in' && id === 'newTxInCategory')){
+      // Uppdatera underkategori-listan även utan payee (manuellt vald kategori).
+      const ids = newTxActiveIds();
+      refreshNewTxSubCategoryList(newTxNormalizedText(ids.category));
       newTxSuggestFromPayeeCategory();
     }
   }
 }
 
 function newTxOnSuggestFocus(e){
-  if(!e.target || !newTxCanSuggest()) return;
+  if(!e.target) return;
   const id = e.target.id;
   const ids = newTxActiveIds();
+  if(id === ids.subCategory){
+    const category = newTxNormalizedText(ids.category);
+    refreshNewTxSubCategoryList(category);
+    // Autofyll blockerar övriga datalist-förslag — rensa vid fokus så
+    // kopplade underkategorier syns först. Förslaget ligger kvar överst i listan.
+    if(newTxCanSuggest() && newTxSuggest.subCategory){
+      e.target.value = '';
+      newTxSuggest.subCategory = false;
+      syncNewTxOkBtn();
+      return;
+    }
+  }
+  if(!newTxCanSuggest()) return;
   if((id === ids.category && newTxSuggest.category)
     || (id === ids.subCategory && newTxSuggest.subCategory)
     || (id === ids.summa && newTxSuggest.summa)){
