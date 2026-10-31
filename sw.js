@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nopEKONOMI-2026-10-31-v02';
+const CACHE_NAME = 'nopEKONOMI-2026-10-31-v03';
 const ASSETS = [
   './',
   './nopEKONOMI.html',

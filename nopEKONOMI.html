@@ -5277,7 +5277,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-31 v02';
+const APP_VERSION = '2026-10-31 v03';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -24113,31 +24113,12 @@ function newTxOnSuggestFocus(e){
   if(!e.target) return;
   const id = e.target.id;
   const ids = newTxActiveIds();
+  // Håll prioriterad datalist synkad; behåll autofyll och markera texten
+  // så den kan bytas med en tangentryckning.
   if(id === ids.category){
     refreshNewTxCategoryList(newTxNormalizedText(ids.payee));
-    // Autofyll blockerar övriga datalist-förslag — rensa vid fokus så
-    // payee-kopplade kategorier syns först. Förslaget ligger kvar överst.
-    if(newTxCanSuggest() && newTxSuggest.category){
-      e.target.value = '';
-      newTxSuggest.category = false;
-      if(newTxSuggest.subCategory) newTxClearSuggestField(ids.subCategory, 'subCategory');
-      if(newTxSuggest.summa) newTxClearSuggestField(ids.summa, 'summa');
-      refreshNewTxSubCategoryList('');
-      syncNewTxOkBtn();
-      return;
-    }
-  }
-  if(id === ids.subCategory){
-    const category = newTxNormalizedText(ids.category);
-    refreshNewTxSubCategoryList(category);
-    // Autofyll blockerar övriga datalist-förslag — rensa vid fokus så
-    // kopplade underkategorier syns först. Förslaget ligger kvar överst i listan.
-    if(newTxCanSuggest() && newTxSuggest.subCategory){
-      e.target.value = '';
-      newTxSuggest.subCategory = false;
-      syncNewTxOkBtn();
-      return;
-    }
+  } else if(id === ids.subCategory){
+    refreshNewTxSubCategoryList(newTxNormalizedText(ids.category));
   }
   if(!newTxCanSuggest()) return;
   if((id === ids.category && newTxSuggest.category)
