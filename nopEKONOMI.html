@@ -5277,7 +5277,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-31 v03';
+const APP_VERSION = '2026-10-31 v04';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -22440,6 +22440,8 @@ let newTxFormDirty = false;
 let newTxSplits = [];
 // Förslag från historik — rensas om användaren börjar skriva i fältet.
 let newTxSuggest = { category: false, subCategory: false, summa: false };
+// Sparat autofyll-värde (återställs om fältet lämnas tomt efter fokus-rensning).
+let newTxSuggestValue = { category: '', subCategory: '', summa: '' };
 
 const splitOverlay = el('splitOverlay');
 const splitMismatchOverlay = el('splitMismatchOverlay');
@@ -22862,6 +22864,9 @@ function clearNewTxSuggestFlags(){
   newTxSuggest.category = false;
   newTxSuggest.subCategory = false;
   newTxSuggest.summa = false;
+  newTxSuggestValue.category = '';
+  newTxSuggestValue.subCategory = '';
+  newTxSuggestValue.summa = '';
 }
 
 function syncNewTxSplitButtons(){
@@ -22925,17 +22930,21 @@ function catsLinkedToPayeeOrdered(payee){
   }).map(k => labels.get(k));
 }
 
-/** Datalist: kopplade till payee först, därefter övriga kategorier. */
+/**
+ * Datalist för kategori.
+ * Finns payee med historik: bara kategorier använda med den payeen (mest först).
+ * Annars: hela listan (ev. utan överföring).
+ */
 function orderedCategoriesForNewTx(payee, opts){
   const excludeTransfer = !!(opts && opts.excludeTransfer);
   const linked = catsLinkedToPayeeOrdered(payee);
-  const seen = new Set(linked.map(c => c.toLowerCase()));
+  if(newTxNormKey(payee) && linked.length) return linked;
   const rest = [];
   for(const c of bookLookup.categories || []){
     if(excludeTransfer && isTransferCategory(c)) continue;
-    if(!seen.has(String(c || '').toLowerCase())) rest.push(c);
+    rest.push(c);
   }
-  return linked.concat(rest);
+  return rest;
 }
 
 function refreshNewTxCategoryList(payee){
@@ -22989,15 +22998,15 @@ function subsLinkedToCategoryOrdered(category){
   }).map(k => labels.get(k));
 }
 
-/** Datalist: kopplade till kategorin först, därefter övriga underkategorier. */
+/**
+ * Datalist för underkategori.
+ * Finns kategori med historik: bara underkategorier använda med den (mest först).
+ * Annars: hela listan.
+ */
 function orderedSubCategoriesForNewTx(category){
   const linked = subsLinkedToCategoryOrdered(category);
-  const seen = new Set(linked.map(s => s.toLowerCase()));
-  const rest = [];
-  for(const s of bookLookup.subCategories || []){
-    if(!seen.has(String(s || '').toLowerCase())) rest.push(s);
-  }
-  return linked.concat(rest);
+  if(newTxNormKey(category) && linked.length) return linked;
+  return (bookLookup.subCategories || []).slice();
 }
 
 function refreshNewTxSubCategoryList(category){
@@ -24043,6 +24052,7 @@ function newTxApplySuggest(fieldId, value, kind){
   if(cur && !newTxSuggest[kind]) return;
   input.value = value;
   newTxSuggest[kind] = true;
+  newTxSuggestValue[kind] = value;
   syncNewTxOkBtn();
 }
 
@@ -24050,6 +24060,18 @@ function newTxClearSuggestField(fieldId, kind){
   if(!newTxSuggest[kind]) return;
   el(fieldId).value = '';
   newTxSuggest[kind] = false;
+  newTxSuggestValue[kind] = '';
+}
+
+/** Återställ autofyll om användaren lämnade fältet tomt efter fokus-rensning. */
+function newTxRestoreSuggestIfEmpty(fieldId, kind){
+  if(!newTxSuggest[kind]) return;
+  const input = el(fieldId);
+  if(!input) return;
+  if((input.value || '').trim()) return;
+  const saved = newTxSuggestValue[kind];
+  if(!saved) return;
+  input.value = saved;
 }
 
 function newTxSuggestFromPayee(){
@@ -24101,10 +24123,18 @@ function newTxOnSuggestBlur(e){
   }
   if(id === 'newTxUtCategory' || id === 'newTxInCategory'){
     if((newTxTab === 'ut' && id === 'newTxUtCategory') || (newTxTab === 'in' && id === 'newTxInCategory')){
-      // Uppdatera underkategori-listan även utan payee (manuellt vald kategori).
       const ids = newTxActiveIds();
+      // Tomt efter fokus-rensning → lägg tillbaka autofyll-förslaget.
+      newTxRestoreSuggestIfEmpty(ids.category, 'category');
       refreshNewTxSubCategoryList(newTxNormalizedText(ids.category));
       newTxSuggestFromPayeeCategory();
+    }
+    return;
+  }
+  if(id === 'newTxUtSubCategory' || id === 'newTxInSubCategory'){
+    if((newTxTab === 'ut' && id === 'newTxUtSubCategory') || (newTxTab === 'in' && id === 'newTxInSubCategory')){
+      const ids = newTxActiveIds();
+      newTxRestoreSuggestIfEmpty(ids.subCategory, 'subCategory');
     }
   }
 }
@@ -24113,17 +24143,23 @@ function newTxOnSuggestFocus(e){
   if(!e.target) return;
   const id = e.target.id;
   const ids = newTxActiveIds();
-  // Håll prioriterad datalist synkad; behåll autofyll och markera texten
-  // så den kan bytas med en tangentryckning.
   if(id === ids.category){
     refreshNewTxCategoryList(newTxNormalizedText(ids.payee));
+    // Datalist filtrerar på inskrivet värde — töm tillfälligt så alla
+    // payee-kopplade kategorier syns (mest använda först). Återställs vid blur om tomt.
+    if(newTxCanSuggest() && newTxSuggest.category){
+      e.target.value = '';
+      return;
+    }
   } else if(id === ids.subCategory){
     refreshNewTxSubCategoryList(newTxNormalizedText(ids.category));
+    if(newTxCanSuggest() && newTxSuggest.subCategory){
+      e.target.value = '';
+      return;
+    }
   }
   if(!newTxCanSuggest()) return;
-  if((id === ids.category && newTxSuggest.category)
-    || (id === ids.subCategory && newTxSuggest.subCategory)
-    || (id === ids.summa && newTxSuggest.summa)){
+  if(id === ids.summa && newTxSuggest.summa){
     e.target.select();
   }
 }
@@ -24136,12 +24172,15 @@ views.newTransaction.addEventListener('input', e => {
   const ids = newTxActiveIds();
   if(id === ids.category && newTxSuggest.category){
     newTxSuggest.category = false;
+    newTxSuggestValue.category = '';
     if(newTxSuggest.subCategory) newTxClearSuggestField(ids.subCategory, 'subCategory');
     if(newTxSuggest.summa) newTxClearSuggestField(ids.summa, 'summa');
   } else if(id === ids.subCategory && newTxSuggest.subCategory){
     newTxSuggest.subCategory = false;
+    newTxSuggestValue.subCategory = '';
   } else if(id === ids.summa && newTxSuggest.summa){
     newTxSuggest.summa = false;
+    newTxSuggestValue.summa = '';
   }
 });
 bindNewTxDatalistAutocomplete();
