@@ -5277,7 +5277,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-31 v04';
+const APP_VERSION = '2026-10-31 v05';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -18919,6 +18919,11 @@ function careListDeleteBlockReason(name){
   if(careListKind === 'payee' && isProtectedPayeeName(name)){
     return 'Payee "' + PROTECTED_ORPHAN_TRANSFER_PAYEE + '" är skyddad och kan inte tas bort.';
   }
+  // Payee/kategori/underkategori: tillåt radera även med poster — dialogen
+  // kräver då att användaren väljer vart de ska flyttas.
+  if(careListKind === 'payee' || careListKind === 'kategori' || careListKind === 'underkategori'){
+    return '';
+  }
   if(careListUsageCount(name) > 0) return DELETE_BLOCKED_REASON;
   return '';
 }
@@ -18947,6 +18952,24 @@ function rewriteSubCategoryToCategoryInBook(draft, fromSubName, toCategoryName){
       }
     }
   }
+  // Flytta bocklista/budget-nycklar för underkategorin till mål-kategorins "utan underkategori".
+  function remapIncludeMap(map){
+    if(!map || typeof map !== 'object') return map;
+    const next = {};
+    for(const key of Object.keys(map)){
+      const parsed = parseTrendIncludeKey(key);
+      if(!parsed.sub || parsed.sub.trim().toLowerCase() !== fromKey){
+        next[key] = map[key];
+        continue;
+      }
+      if(!toCat) continue;
+      next[trendEmptySubKey(toCat)] = map[key];
+    }
+    return next;
+  }
+  draft.trendInclude = remapIncludeMap(draft.trendInclude);
+  draft.budgetInclude = remapIncludeMap(draft.budgetInclude);
+  draft.budgetMonth = remapIncludeMap(draft.budgetMonth);
   return n;
 }
 
@@ -19372,7 +19395,7 @@ function syncCareListEditHeading(name){
   if(isTaxonomy && name && careListUsageCount(name) > 0){
     careListEditLede.hidden = false;
     careListEditLede.textContent =
-      'Du kan inte radera när det finns data i ' + kindLabel + '.';
+      'Vid radering får du välja vart poster med denna ' + kindLabel + ' ska flyttas.';
   } else {
     careListEditLede.hidden = true;
     careListEditLede.textContent = '';
@@ -20176,6 +20199,7 @@ async function saveCareListEdit(opts){
 function fillCareListDeleteRedirect(name){
   clear(careListDeleteRedirect);
   careListDeleteRedirectWrap.hidden = true;
+  rebuildBookLookup();
 
   if(careListKind === 'payee'){
     const others = bookLookup.payees.filter(c => c.toLowerCase() !== name.toLowerCase());
@@ -20206,7 +20230,7 @@ function fillCareListDeleteRedirect(name){
     for(const cat of bookLookup.categories){
       const opt = document.createElement('option');
       opt.value = 'cat:' + cat;
-      opt.textContent = cat;
+      opt.textContent = 'Kategori: ' + cat;
       careListDeleteRedirect.appendChild(opt);
       hasOptions = true;
     }
@@ -20220,7 +20244,7 @@ function fillCareListDeleteRedirect(name){
       for(const sub of subs){
         const opt = document.createElement('option');
         opt.value = 'sub:' + sub;
-        opt.textContent = sub;
+        opt.textContent = 'Underkategori: ' + sub;
         careListDeleteRedirect.appendChild(opt);
       }
       hasOptions = true;
@@ -20274,6 +20298,22 @@ function showCareListDeleteConfirm(){
 
   const kindLabel = careListKind === 'kategori' ? 'kategorin'
     : careListKind === 'underkategori' ? 'underkategorin' : 'payeen';
+  const usage = careListUsageCount(name);
+  if(usage > 0){
+    const hasRedirect = fillCareListDeleteRedirect(name);
+    if(!hasRedirect){
+      addBox(careListMessages, 'notice',
+        'Kan inte ta bort ' + kindLabel + ' "' + name
+        + '": den används på ' + usage + ' poster och det finns ingen annan att flytta till.');
+      return;
+    }
+    careListDeleteText.textContent = 'Ta bort ' + kindLabel + ' "' + name
+      + '"? ' + usage + ' post' + (usage === 1 ? '' : 'er')
+      + ' flyttas till det du väljer nedan.';
+    careListDeleteBox.hidden = false;
+    return;
+  }
+
   careListDeleteText.textContent = 'Ta bort ' + kindLabel + ' "' + name
     + '"? Den används inte på någon post.';
   careListDeleteRedirectWrap.hidden = true;
@@ -20352,8 +20392,51 @@ async function confirmCareListDelete(){
     return;
   }
 
+  const usage = careListUsageCount(name);
   const draft = JSON.parse(JSON.stringify(book));
   ensureBookTaxonomy(draft);
+  let moved = 0;
+  let moveTargetLabel = '';
+
+  if(usage > 0){
+    const target = (careListDeleteRedirect && careListDeleteRedirect.value || '').trim();
+    if(!target || careListDeleteRedirectWrap.hidden){
+      addBox(careListMessages, 'notice', 'Välj vart posterna ska flyttas innan du tar bort.');
+      return;
+    }
+    if(careListKind === 'payee'){
+      moved = rewritePayeeInBook(draft, name, target);
+      draft.payeeList = addToTaxonomyList(draft.payeeList, target);
+      moveTargetLabel = target;
+    } else if(careListKind === 'kategori'){
+      moved = rewriteCategoryInBook(draft, name, target);
+      draft.categoryList = addToTaxonomyList(draft.categoryList, target);
+      moveTargetLabel = target;
+    } else if(careListKind === 'underkategori'){
+      if(target.indexOf('cat:') === 0){
+        const toCat = target.slice(4).trim();
+        if(!toCat){
+          addBox(careListMessages, 'notice', 'Ogiltigt flyttmål.');
+          return;
+        }
+        moved = rewriteSubCategoryToCategoryInBook(draft, name, toCat);
+        moveTargetLabel = 'kategori ' + toCat;
+      } else if(target.indexOf('sub:') === 0){
+        const toSub = target.slice(4).trim();
+        if(!toSub){
+          addBox(careListMessages, 'notice', 'Ogiltigt flyttmål.');
+          return;
+        }
+        moved = rewriteSubCategoryInBook(draft, name, toSub);
+        draft.subCategoryList = addToTaxonomyList(draft.subCategoryList, toSub);
+        moveTargetLabel = 'underkategori ' + toSub;
+      } else {
+        addBox(careListMessages, 'notice', 'Ogiltigt flyttmål.');
+        return;
+      }
+    }
+  }
+
   if(careListKind === 'kategori'){
     draft.categoryList = removeFromTaxonomyList(draft.categoryList, name);
   } else if(careListKind === 'payee'){
@@ -20363,7 +20446,12 @@ async function confirmCareListDelete(){
   }
 
   try{
-    await writeBookAsync(bookId, draft);
+    const ok = await writeBookAsync(bookId, draft, true);
+    if(ok === false){
+      hideCareListDeleteConfirm();
+      addBox(careListMessages, 'notice', 'Ingen kontakt med bokfilen — inget togs bort.');
+      return;
+    }
   } catch(err){
     hideCareListDeleteConfirm();
     addBox(careListMessages, 'notice',
@@ -20379,7 +20467,12 @@ async function confirmCareListDelete(){
   renderCareList();
   const kindLabel = careListKind === 'kategori' ? 'Kategorin'
     : careListKind === 'underkategori' ? 'Underkategorin' : 'Payeen';
-  addBox(careListMessages, 'report', kindLabel + ' raderades.');
+  let msg = kindLabel + ' raderades.';
+  if(moved > 0 && moveTargetLabel){
+    msg += ' ' + moved + ' post' + (moved === 1 ? '' : 'er')
+      + ' flyttades till ' + moveTargetLabel + '.';
+  }
+  addBox(careListMessages, 'report', msg);
 }
 
 careListBody.addEventListener('click', e => {
