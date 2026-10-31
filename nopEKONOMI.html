@@ -5277,7 +5277,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-31 v01';
+const APP_VERSION = '2026-10-31 v02';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -22677,6 +22677,17 @@ function buildSplitRowEl(data){
   bindDatalistAutocomplete(cat);
   bindDatalistAutocomplete(sub);
 
+  cat.addEventListener('focus', () => {
+    const payeeEl = el(newTxCurrentPayeeId());
+    refreshSplitCategoryList(payeeEl ? payeeEl.value : '');
+  });
+  cat.addEventListener('focusout', () => {
+    refreshNewTxSubCategoryList(cat.value);
+  });
+  sub.addEventListener('focus', () => {
+    refreshNewTxSubCategoryList(cat.value);
+  });
+
   const rm = document.createElement('button');
   rm.type = 'button';
   rm.className = 'split-row-remove';
@@ -22859,9 +22870,10 @@ function syncNewTxSplitButtons(){
 }
 
 function populateSplitCategoryList(){
-  const list = el('splitCategoryList');
-  if(!list) return;
-  fillDatalist(list, bookLookup.categories.filter(c => !isTransferCategory(c)));
+  const payee = typeof newTxCurrentPayeeId === 'function'
+    ? ((el(newTxCurrentPayeeId()) || {}).value || '')
+    : '';
+  refreshSplitCategoryList(payee);
 }
 
 function fillDatalist(datalistEl, items){
@@ -22871,6 +22883,70 @@ function fillDatalist(datalistEl, items){
     opt.value = name;
     datalistEl.appendChild(opt);
   }
+}
+
+/**
+ * Kategorier som någon gång använts med given payee
+ * (inkl. splittrader), vanligast först. Överföringskategorier hoppas över.
+ */
+function catsLinkedToPayeeOrdered(payee){
+  const payeeKey = newTxNormKey(payee);
+  if(!payeeKey || !book || !book.order) return [];
+  const counts = new Map();
+  const labels = new Map();
+
+  function note(p, cat){
+    if(newTxNormKey(p) !== payeeKey) return;
+    const label = (cat || '').trim();
+    if(!label || isTransferCategory(label)) return;
+    const key = label.toLowerCase();
+    counts.set(key, (counts.get(key) || 0) + 1);
+    if(!labels.has(key)) labels.set(key, label);
+  }
+
+  for(const accName of book.order){
+    const acc = book.accounts[accName];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(rowHasSplits(r)){
+        for(const s of r.splits){
+          note(r.payee, s.category || r.category);
+        }
+      } else {
+        note(r.payee, r.category);
+      }
+    }
+  }
+
+  return [...labels.keys()].sort((a, b) => {
+    const d = (counts.get(b) || 0) - (counts.get(a) || 0);
+    if(d) return d;
+    return labels.get(a).localeCompare(labels.get(b), 'sv');
+  }).map(k => labels.get(k));
+}
+
+/** Datalist: kopplade till payee först, därefter övriga kategorier. */
+function orderedCategoriesForNewTx(payee, opts){
+  const excludeTransfer = !!(opts && opts.excludeTransfer);
+  const linked = catsLinkedToPayeeOrdered(payee);
+  const seen = new Set(linked.map(c => c.toLowerCase()));
+  const rest = [];
+  for(const c of bookLookup.categories || []){
+    if(excludeTransfer && isTransferCategory(c)) continue;
+    if(!seen.has(String(c || '').toLowerCase())) rest.push(c);
+  }
+  return linked.concat(rest);
+}
+
+function refreshNewTxCategoryList(payee){
+  if(!newTxCategoryList) return;
+  fillDatalist(newTxCategoryList, orderedCategoriesForNewTx(payee));
+}
+
+function refreshSplitCategoryList(payee){
+  const list = el('splitCategoryList');
+  if(!list) return;
+  fillDatalist(list, orderedCategoriesForNewTx(payee, { excludeTransfer: true }));
 }
 
 /**
@@ -22986,8 +23062,8 @@ function bindNewTxDatalistAutocomplete(){
 
 function populateNewTxLookups(){
   fillDatalist(newTxPayeeList, bookLookup.payees);
-  fillDatalist(newTxCategoryList, bookLookup.categories);
   const ids = newTxActiveIds();
+  refreshNewTxCategoryList(newTxNormalizedText(ids.payee));
   refreshNewTxSubCategoryList(newTxNormalizedText(ids.category));
   populateSplitCategoryList();
 }
@@ -23139,6 +23215,7 @@ function fillNewTxFromRow(row, accountName){
     el('newTxUtCategory').value = newTxSplitActive ? '' : (row.category || '');
     el('newTxUtSubCategory').value = newTxSplitActive ? '' : (row.subCategory || '');
     el('newTxUtMemo').value = row.memo || '';
+    refreshNewTxCategoryList(el('newTxUtPayee').value);
     refreshNewTxSubCategoryList(el('newTxUtCategory').value);
     syncNewTxSplitButtons();
     syncNewTxCategoryLock();
@@ -23152,6 +23229,7 @@ function fillNewTxFromRow(row, accountName){
   el('newTxInCategory').value = newTxSplitActive ? '' : (row.category || '');
   el('newTxInSubCategory').value = newTxSplitActive ? '' : (row.subCategory || '');
   el('newTxInMemo').value = row.memo || '';
+  refreshNewTxCategoryList(el('newTxInPayee').value);
   refreshNewTxSubCategoryList(el('newTxInCategory').value);
   syncNewTxSplitButtons();
   syncNewTxCategoryLock();
@@ -23978,6 +24056,7 @@ function newTxSuggestFromPayee(){
   if(!newTxCanSuggest()) return;
   const ids = newTxActiveIds();
   const payee = newTxNormalizedText(ids.payee);
+  refreshNewTxCategoryList(payee);
   if(!payee) return;
 
   const cat = newTxDominantValue(newTxHistoryForPayee(payee), r => r.category);
@@ -24014,6 +24093,8 @@ function newTxOnSuggestBlur(e){
   if(!id) return;
   if(id === 'newTxUtPayee' || id === 'newTxInPayee'){
     if((newTxTab === 'ut' && id === 'newTxUtPayee') || (newTxTab === 'in' && id === 'newTxInPayee')){
+      const ids = newTxActiveIds();
+      refreshNewTxCategoryList(newTxNormalizedText(ids.payee));
       newTxSuggestFromPayee();
     }
     return;
@@ -24032,6 +24113,20 @@ function newTxOnSuggestFocus(e){
   if(!e.target) return;
   const id = e.target.id;
   const ids = newTxActiveIds();
+  if(id === ids.category){
+    refreshNewTxCategoryList(newTxNormalizedText(ids.payee));
+    // Autofyll blockerar övriga datalist-förslag — rensa vid fokus så
+    // payee-kopplade kategorier syns först. Förslaget ligger kvar överst.
+    if(newTxCanSuggest() && newTxSuggest.category){
+      e.target.value = '';
+      newTxSuggest.category = false;
+      if(newTxSuggest.subCategory) newTxClearSuggestField(ids.subCategory, 'subCategory');
+      if(newTxSuggest.summa) newTxClearSuggestField(ids.summa, 'summa');
+      refreshNewTxSubCategoryList('');
+      syncNewTxOkBtn();
+      return;
+    }
+  }
   if(id === ids.subCategory){
     const category = newTxNormalizedText(ids.category);
     refreshNewTxSubCategoryList(category);
