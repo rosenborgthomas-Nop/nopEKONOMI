@@ -1134,6 +1134,19 @@ body.trend-view-active{
 .trend-line-chart-swatch.is-in{ color:var(--chart-positive); }
 .trend-line-chart-swatch.is-ut{ color:var(--wine); }
 .trend-line-chart-swatch.is-net{ color:var(--teal); }
+.trend-line-chart-swatch.is-mean{ color:#1A3050; }
+#viewDayByDay .trend-line-chart-wrap{
+  margin-top:0;
+}
+#viewDayByDay .trend-line-chart-axis-hint{
+  margin-bottom:8px;
+}
+#viewDayByDay .report-col-label{
+  color:var(--headline-accent);
+}
+#viewDayByDay .menu-select{
+  min-width:12em;
+}
 #viewTrend .report-canvas.has-report,
 #viewTrend.report-mobile .report-canvas.has-report{
   width:100%;
@@ -4247,6 +4260,7 @@ tbody tr.row-future td{ font-style:italic; }
             <span id="startPeriodValueGhost" class="start-period-value start-period-value-ghost" hidden aria-live="polite"></span>
           </span>
           <select id="startPeriodMenu" class="menu-select start-period-select" title="Budgetperiod" aria-label="Budgetperiod">
+            <option value="dayByDay">Dag för dag</option>
             <option value="currentMonth">Pågående månad</option>
             <option value="last30">Senaste 30 dagarna</option>
             <option value="last3m">Senaste 3 månader</option>
@@ -4282,6 +4296,32 @@ tbody tr.row-future td{ font-style:italic; }
         <div id="accountsList" hidden></div>
       </div>
     </main>
+
+    <footer>
+      <p class="app-version"></p>
+    </footer>
+
+  </div>
+</div>
+
+<!-- ===================== VY: DAG FÖR DAG ===================== -->
+<div class="view" id="viewDayByDay" hidden>
+  <div class="wrap wide">
+
+    <button class="nav-link nav-back" id="dayByDayBackBtn" type="button">← Start</button>
+    <p class="eyebrow view-headline" id="dayByDayViewHeadline">nopEKONOMI - — - Dag för dag</p>
+
+    <div class="menu-row">
+      <label class="report-col-label" for="dayByDayRangeMenu">Medel</label>
+      <select id="dayByDayRangeMenu" class="menu-select" aria-label="Medelperiod">
+        <option value="1">Förra månaden</option>
+        <option value="3">3 månader</option>
+        <option value="6">6 månader</option>
+        <option value="12">12 månader</option>
+      </select>
+    </div>
+
+    <main class="panel" id="dayByDayBody"></main>
 
     <footer>
       <p class="app-version"></p>
@@ -5277,7 +5317,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-10-31 v05';
+const APP_VERSION = '2026-11-12 v01';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -9658,6 +9698,239 @@ function saveStartPeriodMode(mode){
   } catch(e){ /* ignore */ }
 }
 
+function dayOfMonthBucket(iso){
+  const d = Number(String(iso || '').slice(8, 10));
+  if(!Number.isFinite(d) || d < 1) return 0;
+  return d >= 29 ? 29 : d;
+}
+
+function emptyDayNetBuckets(){
+  const daily = [];
+  for(let i = 0; i <= 29; i++) daily[i] = 0;
+  return daily;
+}
+
+function cumulativeFromDailyNet(daily){
+  const cum = [];
+  let sum = 0;
+  for(let d = 1; d <= 29; d++){
+    sum += daily[d] || 0;
+    cum[d] = sum;
+  }
+  return cum;
+}
+
+/** Netto (In−Ut) per dag-hink 1–29, samma bocklista som Trend/budgetstapeln. */
+function collectDailyNetBuckets(fromIso, toIso){
+  const daily = emptyDayNetBuckets();
+  if(!book || !book.order || !fromIso || !toIso) return daily;
+  syncTrendIncludeMap(book);
+  for(const name of book.order){
+    const acc = book.accounts[name];
+    if(!acc || !Array.isArray(acc.rows)) continue;
+    for(const r of acc.rows){
+      if(isReportExcludedRow(r)) continue;
+      const d = (r.date || '').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if(!txDateIsCountable(d)) continue;
+      if(d < fromIso || d > toIso) continue;
+      if(rowIsPureTransfer(r) && !rowHasSplits(r)) continue;
+      for(const piece of reportPiecesFromRow(r)){
+        const cat = (piece.category || '').trim();
+        const sub = (piece.subCategory || '').trim();
+        if(!isTrendPieceIncluded(cat, sub)) continue;
+        const amount = piece.amount;
+        if(!Number.isFinite(amount) || !amount) continue;
+        const bucket = dayOfMonthBucket(d);
+        if(bucket) daily[bucket] += amount;
+      }
+    }
+  }
+  return daily;
+}
+
+function previousCalendarMonths(count){
+  const n = Math.max(1, Math.min(12, Number(count) || 1));
+  const today = todayIsoDate();
+  const y = Number(today.slice(0, 4));
+  const m = Number(today.slice(5, 7));
+  const out = [];
+  for(let i = 1; i <= n; i++){
+    const p = shiftCalendarMonth(y, m, -i);
+    out.push({
+      y: p.y,
+      m: p.m,
+      from: startOfMonthIso(p.y, p.m),
+      to: endOfCalendarMonthIso(p.y, p.m)
+    });
+  }
+  return out;
+}
+
+function dayByDayMeanLabel(months){
+  if(months === 1) return 'Förra månaden';
+  return months + ' månader';
+}
+
+function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
+  const W = 560;
+  const H = 232;
+  const colNow = '#2B8A6E';
+  const colMean = '#1A3050';
+  const grid = '#A8BDD4';
+  const axis = '#5A6F88';
+
+  let ymin = Infinity;
+  let ymax = -Infinity;
+  const bump = v => {
+    if(!Number.isFinite(v)) return;
+    if(v < ymin) ymin = v;
+    if(v > ymax) ymax = v;
+  };
+  for(let d = 1; d <= 29; d++) bump(meanCum[d]);
+  for(let d = 1; d <= currentLastDay; d++) bump(currentCum[d]);
+  bump(0);
+  if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){
+    ymin = 0;
+    ymax = 1;
+  }
+  if(ymax <= ymin) ymax = ymin + 1;
+  const padY = (ymax - ymin) * 0.08 || 1;
+  ymin -= padY;
+  ymax += padY;
+
+  const yPad = trendChartYAxisPad(ymin, ymax);
+  const padL = yPad.padL;
+  const padR = 12;
+  const padT = 14;
+  const padB = 28;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const xAtDay = d => padL + ((d - 1) / 28) * plotW;
+  const xAt = i => xAtDay(i + 1);
+  const yAt = v => padT + plotH - ((v - ymin) / (ymax - ymin)) * plotH;
+
+  let svg = '';
+  for(let g = 0; g <= 3; g++){
+    const gy = padT + (plotH * g) / 3;
+    svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '"'
+      + ' stroke="' + grid + '" stroke-width="0.6" opacity="0.55"/>';
+  }
+  if(ymin < 0 && ymax > 0){
+    const zy = yAt(0);
+    svg += '<line x1="' + padL + '" y1="' + zy + '" x2="' + (W - padR) + '" y2="' + zy + '"'
+      + ' stroke="' + axis + '" stroke-width="1" opacity="0.45"/>';
+  }
+
+  const ptsMean = [];
+  for(let d = 1; d <= 29; d++){
+    ptsMean.push(xAtDay(d).toFixed(1) + ',' + yAt(meanCum[d] || 0).toFixed(1));
+  }
+  svg += '<polyline fill="none" stroke="' + colMean + '" stroke-width="2"'
+    + ' stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4" points="'
+    + ptsMean.join(' ') + '"/>';
+
+  const ptsNow = [];
+  for(let d = 1; d <= currentLastDay; d++){
+    ptsNow.push(xAtDay(d).toFixed(1) + ',' + yAt(currentCum[d] || 0).toFixed(1));
+  }
+  if(ptsNow.length === 1){
+    svg += '<circle cx="' + xAtDay(1).toFixed(1) + '" cy="' + yAt(currentCum[1] || 0).toFixed(1)
+      + '" r="3.2" fill="' + colNow + '"/>';
+  } else if(ptsNow.length > 1){
+    svg += '<polyline fill="none" stroke="' + colNow + '" stroke-width="2.2"'
+      + ' stroke-linejoin="round" stroke-linecap="round" points="'
+      + ptsNow.join(' ') + '"/>';
+  }
+
+  for(let g = 0; g <= 3; g++){
+    const val = ymax - ((ymax - ymin) * g) / 3;
+    const gy = padT + (plotH * g) / 3;
+    svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
+  }
+
+  const xLabels = [1, 5, 10, 15, 20, 25, 29];
+  for(const d of xLabels){
+    const lab = d === 29 ? '29+' : String(d);
+    svg += '<text x="' + xAtDay(d).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+      + lab + '</text>';
+  }
+
+  for(let i = 0; i < 29; i++){
+    const d = i + 1;
+    const lines = [];
+    if(d <= currentLastDay){
+      lines.push('Pågående  ' + formatReportInt(Math.round(currentCum[d] || 0)));
+    }
+    lines.push('Medel  ' + formatReportInt(Math.round(meanCum[d] || 0)));
+    const lab = d === 29 ? 'Dag 29+' : ('Dag ' + d);
+    svg += trendLineMonthHitMarkup(xAt, i, 29, padT, plotH, lab, lines);
+  }
+
+  const nowVal = currentCum[currentLastDay] || 0;
+  const meanVal = meanCum[currentLastDay] || 0;
+  const dd = Math.round(nowVal - meanVal);
+  const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
+  const deltaTxt = (dd > 0 ? '+' : '') + formatReportInt(dd);
+  const legend = '<p class="trend-line-chart-legend">'
+    + '<span class="trend-legend-series">'
+    + '<i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
+    + '<span class="trend-legend-label">Pågående</span>'
+    + ' <span class="trend-legend-value">' + escapeHtml(formatReportInt(Math.round(nowVal))) + '</span>'
+    + '</span>'
+    + '<span class="trend-legend-series">'
+    + '<i class="trend-line-chart-swatch is-mean is-dash" aria-hidden="true"></i>'
+    + '<span class="trend-legend-label">' + escapeHtml(dayByDayMeanLabel(months)) + '</span>'
+    + ' <span class="trend-legend-value">' + escapeHtml(formatReportInt(Math.round(meanVal))) + '</span>'
+    + '</span>'
+    + '<span class="trend-delta' + (cls ? ' ' + cls : '') + '">'
+    + escapeHtml(deltaTxt) + '</span>'
+    + '</p>'
+    + '<p class="trend-line-chart-axis-hint">Kumulativt In minus Ut. Dag 29 = den 29:e och senare.</p>';
+
+  return '<div class="trend-line-chart-wrap">'
+    + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
+    + ' aria-label="Dag för dag In minus Ut">'
+    + svg + '</svg>'
+    + legend
+    + '</div>';
+}
+
+function renderDayByDayPage(){
+  const body = el('dayByDayBody');
+  const menu = el('dayByDayRangeMenu');
+  if(!body) return;
+  if(menu && !['1', '3', '6', '12'].includes(menu.value)) menu.value = '1';
+  const months = menu ? (Number(menu.value) || 1) : 1;
+
+  if(!book || !book.order || !book.order.length){
+    body.innerHTML = '<p class="sub">Inga konton i boken.</p>';
+    return;
+  }
+
+  const today = todayIsoDate();
+  const y = Number(today.slice(0, 4));
+  const m = Number(today.slice(5, 7));
+  const currentDaily = collectDailyNetBuckets(startOfMonthIso(y, m), today);
+  const currentCum = cumulativeFromDailyNet(currentDaily);
+  const currentLastDay = dayOfMonthBucket(today) || 1;
+
+  const meanAcc = emptyDayNetBuckets();
+  const hist = previousCalendarMonths(months);
+  for(const month of hist){
+    const cum = cumulativeFromDailyNet(collectDailyNetBuckets(month.from, month.to));
+    for(let d = 1; d <= 29; d++) meanAcc[d] += cum[d] || 0;
+  }
+  const n = hist.length || 1;
+  const meanCum = emptyDayNetBuckets();
+  for(let d = 1; d <= 29; d++) meanCum[d] = meanAcc[d] / n;
+
+  body.innerHTML = buildDayByDayChart(currentCum, meanCum, currentLastDay, months);
+}
+
 /** Nyckel för sumraden i book.startInclude. */
 const START_INCLUDE_SUMMA_KEY = '__summa__';
 
@@ -10508,6 +10781,7 @@ function markBookClean(){
 const views = {
   login: el('viewLogin'),
   start: el('viewStart'),
+  dayByDay: el('viewDayByDay'),
   report: el('viewReport'),
   trend: el('viewTrend'),
   careHub: el('viewCareHub'),
@@ -10524,6 +10798,7 @@ const views = {
 const VIEW_HEADLINES = {
   login: { id: 'loginViewHeadline', title: 'Inloggning', withBook: false },
   start: { id: 'startViewHeadline', title: 'Start' },
+  dayByDay: { id: 'dayByDayViewHeadline', title: 'Dag för dag' },
   trend: { id: 'trendViewHeadline', title: 'Trendhantering' },
   accountEdit: { id: 'acctEditViewHeadline', title: 'Konto' },
   careHub: { id: 'careHubViewHeadline', title: 'Registervård' },
@@ -10577,6 +10852,7 @@ async function show(name, opts){
   document.body.classList.toggle('trend-view-active', name === 'trend');
 
   if(name === 'start') renderStart();
+  if(name === 'dayByDay') renderDayByDayPage();
   if(name === 'report'){
     syncReportMobileLayout();
     renderReport();
@@ -11289,10 +11565,27 @@ const startMenu = el('startMenu');
 const startPeriodMenu = el('startPeriodMenu');
 if(startPeriodMenu){
   startPeriodMenu.addEventListener('change', () => {
-    startPeriodMode = startPeriodMenu.value || 'currentMonth';
+    const picked = startPeriodMenu.value || 'currentMonth';
+    if(picked === 'dayByDay'){
+      startPeriodMenu.value = START_PERIOD_ALLOWED[startPeriodMode] ? startPeriodMode : 'currentMonth';
+      show('dayByDay');
+      return;
+    }
+    startPeriodMode = picked;
     if(!START_PERIOD_ALLOWED[startPeriodMode]) startPeriodMode = 'currentMonth';
     saveStartPeriodMode(startPeriodMode);
     paintStartPeriodBar();
+  });
+}
+
+const dayByDayBackBtn = el('dayByDayBackBtn');
+if(dayByDayBackBtn){
+  dayByDayBackBtn.addEventListener('click', () => show('start'));
+}
+const dayByDayRangeMenu = el('dayByDayRangeMenu');
+if(dayByDayRangeMenu){
+  dayByDayRangeMenu.addEventListener('change', () => {
+    if(views.dayByDay && !views.dayByDay.hidden) renderDayByDayPage();
   });
 }
 
@@ -26793,6 +27086,9 @@ function triggerEscapeBack(){
       closeSubCategoryEdit();
       return true;
     case 'report':
+      show('start');
+      return true;
+    case 'dayByDay':
       show('start');
       return true;
     case 'trend':
