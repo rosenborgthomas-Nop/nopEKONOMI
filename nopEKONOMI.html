@@ -5450,7 +5450,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-14 v07';
+const APP_VERSION = '2026-11-14 v08';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -27809,7 +27809,17 @@ async function initApp(){
   await clearInvalidWorkspaceDir();
   // Vid start: synka om behörighet redan finns. Annars sker synk vid Inloggning (användargest).
   await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
-  await show('login');
+
+  // Återöppna förra sessionens bok tyst. openBook faller tillbaka till inloggning
+  // om filen/spegeln saknas, så ingen extra felväg behövs här.
+  reg = readRegistry();
+  const resumeId = (reg.active && reg.order.includes(reg.active)) ? reg.active : '';
+  if(resumeId){
+    await openBook(resumeId);
+  } else {
+    await show('login');
+  }
+
   bindAppBackNavigation();
   bindCustomMenuSelects();
   window.addEventListener('resize', syncReportMobileLayout, { passive: true });
