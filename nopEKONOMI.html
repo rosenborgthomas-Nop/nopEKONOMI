@@ -1138,8 +1138,12 @@ body.trend-view-active{
 #viewDayByDay .trend-line-chart-wrap{
   margin-top:0;
 }
+#viewDayByDay .trend-line-chart-legend{
+  font-size:10.5px; /* 75 % av 14 */
+}
 #viewDayByDay .trend-line-chart-axis-hint{
   margin-bottom:8px;
+  font-size:9px; /* 75 % av 12 */
 }
 #viewDayByDay .report-col-label{
   color:var(--headline-accent);
@@ -5353,7 +5357,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-14 v02';
+const APP_VERSION = '2026-11-14 v03';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -9887,14 +9891,14 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months, zoomed)
   ymax += padY;
 
   const mobile = isReportMobileLayout();
-  const axisFs = mobile ? 13.5 : 9; // mobil: 150 % av desktop
+  const axisFs = mobile ? 20.25 : 9; // mobil: 150 % × 150 % av desktop
   const axisWeight = mobile ? '700' : '500';
   const yPad = trendChartYAxisPad(ymin, ymax);
   let padL = yPad.padL;
-  if(mobile) padL = Math.max(padL, Math.ceil(yPad.yChars * 11.2) + 20);
+  if(mobile) padL = Math.max(padL, Math.ceil(yPad.yChars * 16.5) + 24);
   const padR = 22;
   const padT = 22;
-  const padB = mobile ? 38 : 30;
+  const padB = mobile ? 48 : 30;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const xAtDay = d => padL + ((d - dayFrom) / span) * plotW;
