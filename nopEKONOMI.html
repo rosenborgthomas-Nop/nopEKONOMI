@@ -1147,6 +1147,33 @@ body.trend-view-active{
 #viewDayByDay .menu-select{
   min-width:12em;
 }
+#viewDayByDay .day-by-day-toolbar{
+  width:100%;
+}
+#viewDayByDay .day-by-day-zoom-btn{
+  margin-left:auto;
+  width:2.4rem;
+  height:2.4rem;
+  padding:0;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:8px;
+}
+#viewDayByDay .day-by-day-zoom-icon{
+  width:1.35rem;
+  height:1.35rem;
+  display:block;
+}
+#viewDayByDay .day-by-day-zoom-btn[aria-pressed="true"] .day-by-day-zoom-plus{
+  display:none;
+}
+#viewDayByDay .day-by-day-zoom-btn[aria-pressed="true"] .day-by-day-zoom-minus{
+  display:block;
+}
+#viewDayByDay .day-by-day-zoom-btn:not([aria-pressed="true"]) .day-by-day-zoom-minus{
+  display:none;
+}
 #viewTrend .report-canvas.has-report,
 #viewTrend.report-mobile .report-canvas.has-report{
   width:100%;
@@ -4311,7 +4338,7 @@ tbody tr.row-future td{ font-style:italic; }
     <button class="nav-link nav-back" id="dayByDayBackBtn" type="button">← Start</button>
     <p class="eyebrow view-headline" id="dayByDayViewHeadline">nopEKONOMI - — - Dag för dag</p>
 
-    <div class="menu-row">
+    <div class="menu-row day-by-day-toolbar">
       <label class="report-col-label" for="dayByDayRangeMenu">Medel</label>
       <select id="dayByDayRangeMenu" class="menu-select" aria-label="Medelperiod">
         <option value="1">Förra månaden</option>
@@ -4319,6 +4346,15 @@ tbody tr.row-future td{ font-style:italic; }
         <option value="6">6 månader</option>
         <option value="12">12 månader</option>
       </select>
+      <button type="button" class="btn-quiet day-by-day-zoom-btn" id="dayByDayZoomBtn"
+        aria-label="Zooma in runt idag" aria-pressed="false" title="Zooma in runt idag">
+        <svg class="day-by-day-zoom-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="10.5" cy="10.5" r="6.2" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M15.2 15.2 L20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path class="day-by-day-zoom-plus" d="M10.5 7.6 V13.4 M7.6 10.5 H13.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path class="day-by-day-zoom-minus" d="M7.6 10.5 H13.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
     </div>
 
     <main class="panel" id="dayByDayBody"></main>
@@ -5317,7 +5353,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-12 v02';
+const APP_VERSION = '2026-11-14 v01';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -9772,13 +9808,16 @@ function dayByDayMeanLabel(months){
   return months + ' månader';
 }
 
-function dayByDaySeriesExtrema(cum, lastDay){
+let dayByDayZoomed = false;
+
+function dayByDaySeriesExtrema(cum, lastDay, fromDay){
   let hi = -Infinity;
   let lo = Infinity;
   let hiD = 1;
   let loD = 1;
-  const end = Math.max(1, Math.min(29, lastDay || 1));
-  for(let d = 1; d <= end; d++){
+  const start = Math.max(1, Math.min(29, fromDay || 1));
+  const end = Math.max(start, Math.min(29, lastDay || 1));
+  for(let d = start; d <= end; d++){
     const v = cum[d] || 0;
     if(v > hi){ hi = v; hiD = d; }
     if(v < lo){ lo = v; loD = d; }
@@ -9786,11 +9825,33 @@ function dayByDaySeriesExtrema(cum, lastDay){
   if(!Number.isFinite(hi) || !Number.isFinite(lo)){
     hi = 0;
     lo = 0;
+    hiD = start;
+    loD = start;
   }
   return { hi: hi, lo: lo, hiD: hiD, loD: loD, same: Math.round(hi) === Math.round(lo) };
 }
 
-function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
+function dayByDayZoomWindow(currentLastDay){
+  const today = Math.max(1, Math.min(29, currentLastDay || 1));
+  return {
+    from: Math.max(1, today - 2),
+    to: Math.min(29, today + 2),
+    today: today
+  };
+}
+
+function syncDayByDayZoomBtn(){
+  const btn = el('dayByDayZoomBtn');
+  if(!btn) return;
+  btn.setAttribute('aria-pressed', dayByDayZoomed ? 'true' : 'false');
+  const tip = dayByDayZoomed
+    ? 'Zooma ut till hela månaden'
+    : 'Zooma in runt idag (±2 dagar)';
+  btn.title = tip;
+  btn.setAttribute('aria-label', tip);
+}
+
+function buildDayByDayChart(currentCum, meanCum, currentLastDay, months, zoomed){
   const W = 560;
   const H = 248;
   const colNow = '#2B8A6E';
@@ -9798,6 +9859,13 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
   const grid = '#A8BDD4';
   const axis = '#5A6F88';
   const halo = '#E8EFF7';
+  const win = zoomed
+    ? dayByDayZoomWindow(currentLastDay)
+    : { from: 1, to: 29, today: currentLastDay };
+  const dayFrom = win.from;
+  const dayTo = win.to;
+  const nowEnd = Math.min(currentLastDay, dayTo);
+  const span = Math.max(1, dayTo - dayFrom);
 
   let ymin = Infinity;
   let ymax = -Infinity;
@@ -9806,15 +9874,15 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
     if(v < ymin) ymin = v;
     if(v > ymax) ymax = v;
   };
-  for(let d = 1; d <= 29; d++) bump(meanCum[d]);
-  for(let d = 1; d <= currentLastDay; d++) bump(currentCum[d]);
-  bump(0);
+  for(let d = dayFrom; d <= dayTo; d++) bump(meanCum[d]);
+  for(let d = dayFrom; d <= nowEnd; d++) bump(currentCum[d]);
+  if(!zoomed) bump(0);
   if(!Number.isFinite(ymin) || !Number.isFinite(ymax)){
     ymin = 0;
     ymax = 1;
   }
   if(ymax <= ymin) ymax = ymin + 1;
-  const padY = (ymax - ymin) * 0.12 || 1;
+  const padY = (ymax - ymin) * (zoomed ? 0.18 : 0.12) || 1;
   ymin -= padY;
   ymax += padY;
 
@@ -9825,8 +9893,7 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
   const padB = 30;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
-  const xAtDay = d => padL + ((d - 1) / 28) * plotW;
-  const xAt = i => xAtDay(i + 1);
+  const xAtDay = d => padL + ((d - dayFrom) / span) * plotW;
   const yAt = v => padT + plotH - ((v - ymin) / (ymax - ymin)) * plotH;
 
   let svg = '';
@@ -9842,7 +9909,7 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
   }
 
   const ptsMean = [];
-  for(let d = 1; d <= 29; d++){
+  for(let d = dayFrom; d <= dayTo; d++){
     ptsMean.push(xAtDay(d).toFixed(1) + ',' + yAt(meanCum[d] || 0).toFixed(1));
   }
   svg += '<polyline fill="none" stroke="' + colMean + '" stroke-width="2"'
@@ -9850,11 +9917,11 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
     + ptsMean.join(' ') + '"/>';
 
   const ptsNow = [];
-  for(let d = 1; d <= currentLastDay; d++){
+  for(let d = dayFrom; d <= nowEnd; d++){
     ptsNow.push(xAtDay(d).toFixed(1) + ',' + yAt(currentCum[d] || 0).toFixed(1));
   }
   if(ptsNow.length === 1){
-    svg += '<circle cx="' + xAtDay(1).toFixed(1) + '" cy="' + yAt(currentCum[1] || 0).toFixed(1)
+    svg += '<circle cx="' + xAtDay(dayFrom).toFixed(1) + '" cy="' + yAt(currentCum[dayFrom] || 0).toFixed(1)
       + '" r="3.2" fill="' + colNow + '"/>';
   } else if(ptsNow.length > 1){
     svg += '<polyline fill="none" stroke="' + colNow + '" stroke-width="2.2"'
@@ -9862,8 +9929,8 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
       + ptsNow.join(' ') + '"/>';
   }
 
-  const nowExt = dayByDaySeriesExtrema(currentCum, currentLastDay);
-  const meanExt = dayByDaySeriesExtrema(meanCum, 29);
+  const nowExt = dayByDaySeriesExtrema(currentCum, nowEnd, dayFrom);
+  const meanExt = dayByDaySeriesExtrema(meanCum, dayTo, dayFrom);
   const extremaMarks = [];
   const pushExt = (ext, color, series) => {
     extremaMarks.push({
@@ -9876,7 +9943,7 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
     }
   };
   pushExt(meanExt, colMean, 'mean');
-  pushExt(nowExt, colNow, 'now');
+  if(nowEnd >= dayFrom) pushExt(nowExt, colNow, 'now');
 
   const labelSlots = [];
   const dayByDayExtremaLabel = mark => {
@@ -9884,8 +9951,8 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
     const y = yAt(mark.v);
     const txt = formatReportInt(Math.round(mark.v));
     let anchor = 'middle';
-    if(mark.d <= 3) anchor = 'start';
-    else if(mark.d >= 27) anchor = 'end';
+    if(mark.d <= dayFrom + (zoomed ? 0 : 2)) anchor = 'start';
+    else if(mark.d >= dayTo - (zoomed ? 0 : 2)) anchor = 'end';
     let dy = mark.kind === 'hi' ? -9 : 13;
     const siblings = labelSlots.filter(s => Math.abs(s.x - x) < 54 && Math.abs((s.y + s.dy) - (y + dy)) < 12);
     if(siblings.length){
@@ -9913,7 +9980,13 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
 
-  const xLabels = [1, 5, 10, 15, 20, 25, 29];
+  const xLabels = zoomed
+    ? (() => {
+        const list = [];
+        for(let d = dayFrom; d <= dayTo; d++) list.push(d);
+        return list;
+      })()
+    : [1, 5, 10, 15, 20, 25, 29];
   for(const d of xLabels){
     const lab = d === 29 ? '29+' : String(d);
     svg += '<text x="' + xAtDay(d).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
@@ -9921,8 +9994,11 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
       + lab + '</text>';
   }
 
-  for(let i = 0; i < 29; i++){
-    const d = i + 1;
+  const visibleDays = [];
+  for(let d = dayFrom; d <= dayTo; d++) visibleDays.push(d);
+  const xAt = i => xAtDay(visibleDays[i]);
+  for(let i = 0; i < visibleDays.length; i++){
+    const d = visibleDays[i];
     const lines = [];
     if(d <= currentLastDay){
       let nowLine = 'Pågående  ' + formatReportInt(Math.round(currentCum[d] || 0));
@@ -9935,7 +10011,7 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
     else if(!meanExt.same && d === meanExt.loD) meanLine += '  lägsta';
     lines.push(meanLine);
     const lab = d === 29 ? 'Dag 29+' : ('Dag ' + d);
-    svg += trendLineMonthHitMarkup(xAt, i, 29, padT, plotH, lab, lines);
+    svg += trendLineMonthHitMarkup(xAt, i, visibleDays.length, padT, plotH, lab, lines);
   }
 
   const nowVal = currentCum[currentLastDay] || 0;
@@ -9943,6 +10019,9 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
   const dd = Math.round(nowVal - meanVal);
   const cls = dd < 0 ? 'is-neg' : (dd > 0 ? 'is-pos' : '');
   const deltaTxt = (dd > 0 ? '+' : '') + formatReportInt(dd);
+  const hint = zoomed
+    ? 'Inzoomad runt idag (±2 dagar). Y-axeln följer synliga värden.'
+    : 'Kumulativt In minus Ut. Punkterna visar högsta och lägsta. Dag 29 = den 29:e och senare.';
   const legend = '<p class="trend-line-chart-legend">'
     + '<span class="trend-legend-series">'
     + '<i class="trend-line-chart-swatch is-net" aria-hidden="true"></i>'
@@ -9957,7 +10036,7 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months){
     + '<span class="trend-delta' + (cls ? ' ' + cls : '') + '">'
     + escapeHtml(deltaTxt) + '</span>'
     + '</p>'
-    + '<p class="trend-line-chart-axis-hint">Kumulativt In minus Ut. Punkterna visar högsta och lägsta. Dag 29 = den 29:e och senare.</p>';
+    + '<p class="trend-line-chart-axis-hint">' + escapeHtml(hint) + '</p>';
 
   return '<div class="trend-line-chart-wrap">'
     + '<svg class="payee-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img"'
@@ -9971,6 +10050,7 @@ function renderDayByDayPage(){
   const body = el('dayByDayBody');
   const menu = el('dayByDayRangeMenu');
   if(!body) return;
+  syncDayByDayZoomBtn();
   if(menu && !['1', '3', '6', '12'].includes(menu.value)) menu.value = '1';
   const months = menu ? (Number(menu.value) || 1) : 1;
 
@@ -9996,7 +10076,7 @@ function renderDayByDayPage(){
   const meanCum = emptyDayNetBuckets();
   for(let d = 1; d <= 29; d++) meanCum[d] = meanAcc[d] / n;
 
-  body.innerHTML = buildDayByDayChart(currentCum, meanCum, currentLastDay, months);
+  body.innerHTML = buildDayByDayChart(currentCum, meanCum, currentLastDay, months, dayByDayZoomed);
 }
 
 /** Nyckel för sumraden i book.startInclude. */
@@ -11653,6 +11733,14 @@ if(dayByDayBackBtn){
 const dayByDayRangeMenu = el('dayByDayRangeMenu');
 if(dayByDayRangeMenu){
   dayByDayRangeMenu.addEventListener('change', () => {
+    if(views.dayByDay && !views.dayByDay.hidden) renderDayByDayPage();
+  });
+}
+const dayByDayZoomBtn = el('dayByDayZoomBtn');
+if(dayByDayZoomBtn){
+  dayByDayZoomBtn.addEventListener('click', () => {
+    dayByDayZoomed = !dayByDayZoomed;
+    syncDayByDayZoomBtn();
     if(views.dayByDay && !views.dayByDay.hidden) renderDayByDayPage();
   });
 }
