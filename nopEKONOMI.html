@@ -1135,6 +1135,21 @@ body.trend-view-active{
 .trend-line-chart-swatch.is-ut{ color:var(--wine); }
 .trend-line-chart-swatch.is-net{ color:var(--teal); }
 .trend-line-chart-swatch.is-mean{ color:#1A3050; }
+.help-text-panel .section h2{
+  margin:0 0 12px;
+  font-family:'Fraunces', serif;
+  font-size:1.55rem;
+  font-weight:600;
+  color:var(--text-on-paper);
+  letter-spacing:0.01em;
+}
+.help-text-panel .section p{
+  max-width:56ch;
+}
+.help-text-panel .section p strong{
+  color:var(--text-on-paper);
+  font-weight:700;
+}
 #viewDayByDay .trend-line-chart-wrap{
   margin-top:0;
 }
@@ -4299,6 +4314,8 @@ tbody tr.row-future td{ font-style:italic; }
             <option value="last12m">Senaste 12 månader</option>
             <option value="last24m">Senaste 24 månader</option>
             <option value="allt">Allt</option>
+            <option value="" disabled class="menu-sep">────────</option>
+            <option value="helpText">Hjälptext</option>
           </select>
         </span>
       </div>
@@ -4326,6 +4343,67 @@ tbody tr.row-future td{ font-style:italic; }
         </div>
         <div id="accountsList" hidden></div>
       </div>
+    </main>
+
+    <footer>
+      <p class="app-version"></p>
+    </footer>
+
+  </div>
+</div>
+
+<!-- ===================== VY: HJÄLPTEXT ===================== -->
+<div class="view" id="viewHelpText" hidden>
+  <div class="wrap medium">
+
+    <button class="nav-link nav-back" id="helpTextBackBtn" type="button">← Start</button>
+    <p class="eyebrow view-headline" id="helpTextViewHeadline">nopEKONOMI - — - Hjälptext</p>
+
+    <main class="panel help-text-panel">
+      <section class="section">
+        <h2>Skuggbudget</h2>
+        <p>
+          Skuggbudget syns bara när periodvalet är <strong>Pågående månad</strong>.
+          Den undre siffran är inte utfall hittills — den är en prognos för hur mycket
+          budget som <em>kan återstå</em> när månaden är slut.
+        </p>
+        <p>
+          Börja med <strong>återstår nu</strong> (budget minus förbrukat hittills, samma som
+          den övre siffran). Lägg sedan till förväntad <strong>Ut</strong> för resten av månaden,
+          bara för kategorier som är ibockade i bocklistan. Inkomster räknas inte in.
+        </p>
+        <p>
+          Resten av månaden beräknas från <strong>i morgon till månadsslut</strong>.
+          På månadens sista dag finns ingen rest kvar — då blir skuggvärdet samma som återstår.
+        </p>
+        <p>
+          Programmet jämför tre kandidater och tar den <strong>mest negativa</strong>
+          (den som drar ner återstår mest). De summeras inte, så samma utgift räknas inte dubbelt:
+        </p>
+        <p>
+          1. <strong>Medel från 6 månader bakåt</strong> — samma dagfönster
+          (morgondagtal → månadsslut) i de sex föregående kalendermånaderna.
+          Månader där dagtalet inte finns (t.ex. den 31:e i februari) hoppas över.
+        </p>
+        <p>
+          2. <strong>Förhandspostat Ut</strong> — utgifter som redan är bokade på framtida
+          datum i den här månaden.
+        </p>
+        <p>
+          3. <strong>Återkommande payee-Ut</strong> — payees som dykt upp i minst
+          <strong>4 av 6</strong> föregående månader, med dagtal inom <strong>±3</strong>
+          från medianen, och som förväntas idag eller senare men ännu inte bokats
+          innevarande månad.
+        </p>
+        <p>
+          Den undre stapeln visar hur stor del av budgeten som “förbrukas” enligt den prognosen.
+          Ett <strong>negativt</strong> skuggvärde betyder att du riskerar att gå över budget
+          om resten av månaden blir lika tuff som prognosen.
+        </p>
+        <p>
+          Håll inne / hovra på stapeln eller siffran för mer detalj om vilken kandidat som vann.
+        </p>
+      </section>
     </main>
 
     <footer>
@@ -5357,7 +5435,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-14 v03';
+const APP_VERSION = '2026-11-14 v04';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -10940,6 +11018,7 @@ const views = {
   login: el('viewLogin'),
   start: el('viewStart'),
   dayByDay: el('viewDayByDay'),
+  helpText: el('viewHelpText'),
   report: el('viewReport'),
   trend: el('viewTrend'),
   careHub: el('viewCareHub'),
@@ -10957,6 +11036,7 @@ const VIEW_HEADLINES = {
   login: { id: 'loginViewHeadline', title: 'Inloggning', withBook: false },
   start: { id: 'startViewHeadline', title: 'Start' },
   dayByDay: { id: 'dayByDayViewHeadline', title: 'Dag för dag' },
+  helpText: { id: 'helpTextViewHeadline', title: 'Hjälptext' },
   trend: { id: 'trendViewHeadline', title: 'Trendhantering' },
   accountEdit: { id: 'acctEditViewHeadline', title: 'Konto' },
   careHub: { id: 'careHubViewHeadline', title: 'Registervård' },
@@ -11729,6 +11809,11 @@ if(startPeriodMenu){
       show('dayByDay');
       return;
     }
+    if(picked === 'helpText'){
+      startPeriodMenu.value = START_PERIOD_ALLOWED[startPeriodMode] ? startPeriodMode : 'currentMonth';
+      show('helpText');
+      return;
+    }
     startPeriodMode = picked;
     if(!START_PERIOD_ALLOWED[startPeriodMode]) startPeriodMode = 'currentMonth';
     saveStartPeriodMode(startPeriodMode);
@@ -11739,6 +11824,10 @@ if(startPeriodMenu){
 const dayByDayBackBtn = el('dayByDayBackBtn');
 if(dayByDayBackBtn){
   dayByDayBackBtn.addEventListener('click', () => show('start'));
+}
+const helpTextBackBtn = el('helpTextBackBtn');
+if(helpTextBackBtn){
+  helpTextBackBtn.addEventListener('click', () => show('start'));
 }
 const dayByDayRangeMenu = el('dayByDayRangeMenu');
 if(dayByDayRangeMenu){
@@ -27255,6 +27344,9 @@ function triggerEscapeBack(){
       show('start');
       return true;
     case 'dayByDay':
+      show('start');
+      return true;
+    case 'helpText':
       show('start');
       return true;
     case 'trend':
