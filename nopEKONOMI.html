@@ -5435,7 +5435,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-14 v04';
+const APP_VERSION = '2026-11-14 v05';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -6406,6 +6406,24 @@ function forgetLiveHandles(){
 }
 
 /**
+ * Be webbläsaren behålla IndexedDB (bokens fil- och mapphandtag) vid städning.
+ * Skyddar inte behörigheten — bara handtagen, så mappen aldrig behöver väljas
+ * om på nytt. Nekas tyst när webbläsaren inte vill.
+ */
+async function requestPersistentStorage(){
+  try{
+    if(!navigator.storage || typeof navigator.storage.persist !== 'function') return false;
+    if(typeof navigator.storage.persisted === 'function'
+      && await navigator.storage.persisted()){
+      return true;
+    }
+    return await navigator.storage.persist();
+  } catch(e){
+    return false;
+  }
+}
+
+/**
  * Behörighet begärs på MAPPEN, högst en dialog per session.
  * Mappen räcker för både läs och skriv — filen härleds via dir.getFileHandle,
  * så inget separat filhandtag behöver frågas (det gav tidigare dubbla dialoger).
@@ -6477,22 +6495,28 @@ async function getBookFileHandle(id, interactive, mode){
     rememberLiveHandle(id, 'file', handle);
     return handle;
   }
-  // Interaktivt: be om behörighet på befintligt filhandtag (vanligt på Android).
-  if(handle && interactive !== false && await ensureHandlePermission(handle, true, mode)){
-    rememberLiveHandle(id, 'file', handle);
-    return handle;
-  }
 
-  // Tyst mapp först, sedan (vid behov) mappdialog.
-  // force vid sparning (interactive): öppningen kan ha frågat redan men
-  // handtaget bytts ut / bara läs beviljats.
+  // Mappen FÖRE filen när vi måste fråga. Ett mappmedgivande ärvs av alla
+  // filer i mappen och räcker hela sessionen (spara, säkerhetskopia, byt
+  // namn). Ett medgivande på enbart filhandtaget gäller bara den filen, så
+  // mappen gav en andra dialog senare i samma session.
   let dir = await getBookDirHandle(id, false, mode);
   if(!dir && interactive !== false){
     dir = await ensureBookFolderAccessOnce(id, { force: mode === 'readwrite' });
   }
   if(dir){
-    const fresh = await bookFileFromDirHandle(id, dir, handle && handle.name);
-    if(fresh) return fresh;
+    try{
+      const fresh = await bookFileFromDirHandle(id, dir, handle && handle.name);
+      if(fresh) return fresh;
+    } catch(e){
+      /* Filen ligger inte i mappen (flyttad/omdöpt) — testa filhandtaget. */
+    }
+  }
+
+  // Ingen mapp att fråga om (bok vald via filväljare) — fråga på filen.
+  if(handle && interactive !== false && await ensureHandlePermission(handle, true, mode)){
+    rememberLiveHandle(id, 'file', handle);
+    return handle;
   }
 
   if(!handle) throw new Error('Kan inte hitta bokens fil.');
@@ -6724,6 +6748,8 @@ async function grantWorkspaceOnce(){
   });
   const kind = await detectWorkspaceKind(dirHandle);
   await rememberWorkspaceDir(dirHandle, kind);
+  // Användargest pågår — bästa läget att få lagringen markerad som varaktig.
+  requestPersistentStorage();
   return { dir: dirHandle, kind: kind };
 }
 
@@ -27596,6 +27622,7 @@ function bindCustomMenuSelects(){
 async function initApp(){
   applyAppVersionLabels();
   await openIdb();
+  requestPersistentStorage();
   try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
   await clearInvalidWorkspaceDir();
   // Vid start: synka om behörighet redan finns. Annars sker synk vid Inloggning (användargest).
