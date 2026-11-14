@@ -5450,7 +5450,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-14 v06';
+const APP_VERSION = '2026-11-14 v07';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -19361,15 +19361,8 @@ function showCareHubSection(key, opts){
   const cfg = CARE_HUB_SECTIONS[key];
   if(!cfg) return;
 
-  // Alla hubbens avdelningar ändrar boken (register, konto, bocklista, budget,
-  // säkerhetskopia) — hämta behörigheten innan avdelningen öppnas.
-  if(isBookReadOnly()){
-    ensureBookWriteAccess().then(ok => {
-      if(ok) showCareHubSection(key, opts);
-      else if(careHubMenu) careHubMenu.value = '';
-    });
-    return;
-  }
+  // Avdelningarna går att läsa utan behörighet. Dialogen hör till första
+  // ändringen i stället: krysset, beloppet, Ny/öppna post, OK, Säkerhetskopiera.
 
   if(key === 'trend' && !bookMeetsTrendMonthGate()){
     syncTrendMenuGates();
@@ -19548,6 +19541,12 @@ function closeCareList(){
 async function confirmCareListTrend(){
   clear(careListMessages);
   hideCareListLeaveConfirm();
+  if(isBookReadOnly()){
+    // Bocklistan ändrades utan att grinden hann gå (tangentbord): ändringen
+    // ligger i minnet, så den skrivs UT — filen får aldrig läsas över den.
+    bookSessionDirty = true;
+    if(!await ensureBookWriteAccess()) return;
+  }
   try{
     await commitTrendIncludeEdit();
   } catch(e){
@@ -19560,6 +19559,12 @@ async function confirmCareListTrend(){
 
 async function confirmCareListBudget(){
   clear(careListMessages);
+  if(isBookReadOnly()){
+    // Beloppen ändrades utan att grinden hann gå (tangentbord): ändringen
+    // ligger i minnet, så den skrivs UT — filen får aldrig läsas över den.
+    bookSessionDirty = true;
+    if(!await ensureBookWriteAccess()) return;
+  }
   try{
     await commitBudgetEdit();
     // Ny snapshot så vidare redigering / Avbryt utgår från det sparade.
@@ -20092,6 +20097,12 @@ function syncCareListEditHeading(name){
 }
 
 function openCareListEdit(name){
+  // Listan går att läsa fritt — redigeringsrutan är första ändringen.
+  if(isBookReadOnly()){
+    ensureBookWriteAccess().then(ok => { if(ok) openCareListEdit(name); });
+    return;
+  }
+
   const meta = careListMeta();
   if(careListKind === 'bok'){
     if(!name) return;
@@ -21201,10 +21212,28 @@ careListBody.addEventListener('click', e => {
     const next = item.rowKind === 'cat'
       ? item.checkState !== 'all'
       : toggle.checked;
+    if(isBookReadOnly()){
+      // Rita om så listan visar sitt sparade läge tills filen går att skriva till.
+      renderCareList();
+      ensureBookWriteAccess().then(ok => { if(ok) setTrendIncludeForItem(idx, next); });
+      return;
+    }
     setTrendIncludeForItem(idx, next);
     return;
   }
-  if(e.target.closest('input[data-budget-amt]')) return;
+  const amtInput = e.target.closest('input[data-budget-amt]');
+  if(amtInput){
+    // Första tryck i ett beloppsfält är starten på en ändring.
+    if(careListKind === 'budget' && !amtInput.readOnly && isBookReadOnly()){
+      amtInput.blur();
+      ensureBookWriteAccess().then(ok => {
+        if(!ok) return;
+        amtInput.focus();
+        amtInput.select();
+      });
+    }
+    return;
+  }
   const tr = e.target.closest('tr[data-idx]');
   if(!tr || careListIsEditOpen()) return;
   const idx = +tr.dataset.idx;
@@ -21586,6 +21615,10 @@ async function openBackupPage(){
 function showBackupRestoreConfirm(){
   const row = backupHighlightedRow();
   if(!row || row.kind !== 'backup') return;
+  if(isBookReadOnly()){
+    ensureBookWriteAccess().then(ok => { if(ok) showBackupRestoreConfirm(); });
+    return;
+  }
   clear(backupMessages);
   const name = bookName(bookId);
   const mainName = bookMainFileName(name);
@@ -21756,11 +21789,13 @@ async function runBookBackupRotation(){
   setBackupAwaitingAck(true);
 }
 
-function onBackupRunClick(){
+async function onBackupRunClick(){
   if(backupAwaitingAck){
     closeBackupPage();
     return;
   }
+  // Listan får visas tom utan behörighet — kopieringen är första ändringen.
+  if(!await ensureBookWriteAccess()) return;
   runBookBackupRotation();
 }
 
@@ -22976,6 +23011,9 @@ function renderAccountEdit(){
 }
 
 async function saveAccountEdit(){
+  // Kontoformuläret går att läsa — OK är första ändringen.
+  if(!await ensureBookWriteAccess()) return;
+
   clear(acctEditMessages);
   hideAcctEditDeleteConfirm();
 
@@ -23055,6 +23093,10 @@ async function saveAccountEdit(){
 function showAcctEditDeleteConfirm(){
   if(acctEditIsNew()) return;
   if(acctEditDeleteBtn && acctEditDeleteBtn.disabled) return;
+  if(isBookReadOnly()){
+    ensureBookWriteAccess().then(ok => { if(ok) showAcctEditDeleteConfirm(); });
+    return;
+  }
   const name = acctEditSelectedName();
   clear(acctEditMessages);
   hideAcctEditDeleteConfirm();
