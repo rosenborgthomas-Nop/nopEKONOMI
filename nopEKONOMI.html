@@ -5353,7 +5353,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-14 v01';
+const APP_VERSION = '2026-11-14 v02';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -9886,11 +9886,15 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months, zoomed)
   ymin -= padY;
   ymax += padY;
 
+  const mobile = isReportMobileLayout();
+  const axisFs = mobile ? 13.5 : 9; // mobil: 150 % av desktop
+  const axisWeight = mobile ? '700' : '500';
   const yPad = trendChartYAxisPad(ymin, ymax);
-  const padL = yPad.padL;
+  let padL = yPad.padL;
+  if(mobile) padL = Math.max(padL, Math.ceil(yPad.yChars * 11.2) + 20);
   const padR = 22;
   const padT = 22;
-  const padB = 30;
+  const padB = mobile ? 38 : 30;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const xAtDay = d => padL + ((d - dayFrom) / span) * plotW;
@@ -9975,8 +9979,9 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months, zoomed)
   for(let g = 0; g <= 3; g++){
     const val = ymax - ((ymax - ymin) * g) / 3;
     const gy = padT + (plotH * g) / 3;
-    svg += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end"'
-      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+    svg += '<text x="' + (padL - 6) + '" y="' + (gy + 4) + '" text-anchor="end"'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="' + axisFs + '"'
+      + ' font-weight="' + axisWeight + '" fill="' + axis + '">'
       + escapeHtml(formatReportInt(Math.round(val))) + '</text>';
   }
 
@@ -9989,8 +9994,9 @@ function buildDayByDayChart(currentCum, meanCum, currentLastDay, months, zoomed)
     : [1, 5, 10, 15, 20, 25, 29];
   for(const d of xLabels){
     const lab = d === 29 ? '29+' : String(d);
-    svg += '<text x="' + xAtDay(d).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle"'
-      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="9" fill="' + axis + '">'
+    svg += '<text x="' + xAtDay(d).toFixed(1) + '" y="' + (H - (mobile ? 10 : 8)) + '" text-anchor="middle"'
+      + ' class="tl-axis" font-family="JetBrains Mono, monospace" font-size="' + axisFs + '"'
+      + ' font-weight="' + axisWeight + '" fill="' + axis + '">'
       + lab + '</text>';
   }
 
