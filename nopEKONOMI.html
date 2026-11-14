@@ -508,6 +508,21 @@ h1{
   margin-bottom:14px;
   line-height:1.45;
 }
+#appToastHost{
+  position:fixed;
+  left:50%;
+  bottom:18px;
+  transform:translateX(-50%);
+  z-index:9000;
+  width:min(520px, calc(100vw - 28px));
+  pointer-events:none;
+}
+#appToastHost > div{
+  margin:0 0 8px;
+  box-shadow:0 6px 18px rgba(16,32,52,0.22);
+  background:#FBEDED;
+}
+#appToastHost > div.report{ background:#ECF1F9; }
 .messages:not(:empty){ margin-bottom:8px; }
 .section .hint{
   font-family:'JetBrains Mono', monospace;
@@ -5435,7 +5450,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-14 v05';
+const APP_VERSION = '2026-11-14 v06';
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -5960,6 +5975,73 @@ function enterBookReadOnlyFromMirror(id){
   markBookClean();
 }
 
+function bookContentSignature(data){
+  try{ return JSON.stringify(data); } catch(e){ return ''; }
+}
+
+async function redrawViewAfterBookSwap(){
+  const view = typeof currentViewName === 'function' ? currentViewName() : '';
+  if(!view || view === 'login') return;
+  try{ await show(view, { fromHash: true }); } catch(e){ /* ignore */ }
+}
+
+/**
+ * Grind före varje ändring i en filbok. Boken öppnas tyst och skrivskyddat, så
+ * behörighetsdialogen hör hit i stället — måste därför anropas direkt ur en
+ * användargest, annars vägrar webbläsaren visa den.
+ * @param {{ holdsRowRefs?: boolean }} [opts] holdsRowRefs=true när anroparen
+ *   pekar på en rad i den öppna boken. Inläsningen byter ut bokobjektet, så en
+ *   sådan referens måste plockas om — annars kan ändringen träffa fel rad.
+ * @returns {Promise<boolean>} true när ändringen kan fortsätta.
+ */
+async function ensureBookWriteAccess(opts){
+  if(!isBookReadOnly()) return true;
+
+  // Användaren ber uttryckligen om skrivläge — tillåt en ny dialog.
+  resetBookFolderAccessGate();
+
+  // Osparade ändringar i minnet: skriv UT dem, läs aldrig filen över dem.
+  if(bookSessionDirty && book && Array.isArray(book.order)){
+    const flush = await flushBookFileToFolderInteractive();
+    if(!flush.ok){
+      denyBookWriteAccess(flush.message);
+      return false;
+    }
+    setBookDriveContact(true);
+    rebuildBookLookup();
+    updateBookFileSyncStatusUi();
+    return true;
+  }
+
+  const res = await tryEstablishBookDriveContact(true);
+  if(!res.ok || !res.parsed){
+    denyBookWriteAccess(res && res.message);
+    return false;
+  }
+
+  const before = bookContentSignature(book);
+  await enterBookLiveFromFile(res.parsed);
+  rebuildBookLookup();
+  updateBookFileSyncStatusUi();
+  const changed = bookContentSignature(book) !== before;
+
+  if(!changed && !(opts && opts.holdsRowRefs)) return true;
+
+  await redrawViewAfterBookSwap();
+  showAppToast(changed
+    ? 'Bokfilen hade nyare innehåll och lästes in. Gör om ditt val.'
+    : 'Kontakt med bokfilen. Gör om ditt val.', 'report');
+  return false;
+}
+
+function denyBookWriteAccess(message){
+  setBookDriveContact(false);
+  updateBookFileSyncStatusUi();
+  showAppToast(message
+    ? message + ' Boken är kvar oförändrad.'
+    : 'Utan åtkomst till bokfilen kan inget ändras. Boken är kvar oförändrad.');
+}
+
 function updateBookFileSyncStatusUi(){
   // Gamla meny-raden dold — meddelandet visas som .notice i startMessages.
   const hint = typeof el === 'function' ? el('startFileSyncHint') : null;
@@ -6009,8 +6091,10 @@ function updateBookFileSyncStatusUi(){
       box.title = 'Den här enheten ligger före Drive. Tryck för att spara till bokmappen.';
       box.textContent = 'Den här enheten ligger före bokmappen/Drive — ingen skrivkontakt. Tryck för att spara.';
     } else {
-      box.title = 'Tryck för att försöka nå bokfilen igen';
-      box.textContent = 'Ingen kontakt med bokfil — endast läsning. Tryck för att försöka igen.';
+      // Normalläget vid öppning: boken visas från spegeln och bokfilen ansluts
+      // först när något ska ändras. Notisen är en genväg, inte ett felmeddelande.
+      box.title = 'Tryck för att ansluta bokfilen nu';
+      box.textContent = 'Läsläge — bokfilen ansluts när du ändrar något. Tryck för att ansluta nu.';
     }
   } else {
     box.title = 'Lokala ändringar har inte skrivits till Drive än. Tryck för att spara.';
@@ -7262,6 +7346,22 @@ function addBox(node, className, text){
   div.className = className;
   div.textContent = text;
   node.appendChild(div);
+}
+
+/** Kort meddelande som syns oavsett vilken vy som är öppen. */
+function showAppToast(text, kind){
+  if(!text) return;
+  let host = document.getElementById('appToastHost');
+  if(!host){
+    host = document.createElement('div');
+    host.id = 'appToastHost';
+    document.body.appendChild(host);
+  }
+  const box = document.createElement('div');
+  box.className = kind === 'report' ? 'report' : 'notice';
+  box.textContent = text;
+  host.appendChild(box);
+  setTimeout(() => { try{ box.remove(); } catch(e){ /* ignore */ } }, 5200);
 }
 
 function escapeHtml(str){
@@ -11173,8 +11273,9 @@ async function openBook(id){
       return;
     }
 
-    // Filbok: högst EN dialog, och den gäller mappen (läs+skriv).
-    // 1) Tyst om redan beviljat  2) Annars en mappdialog som räcker hela sessionen.
+    // Filbok: inga dialoger vid öppning. Går filen att nå tyst körs boken live,
+    // annars öppnas den skrivskyddat från spegeln och behörigheten frågas först
+    // när något ska ändras (ensureBookWriteAccess).
     let parsed = null;
     let fileOk = false;
     try{
@@ -11183,7 +11284,11 @@ async function openBook(id){
       if(!handle){
         try{ handle = await getBookFileHandle(id, false, 'read'); } catch(e){ handle = null; }
       }
-      if(!handle) handle = await getBookFileHandle(id, true, 'readwrite');
+      // Ingen spegel att visa: då måste vi fråga, annars går boken inte att öppna.
+      if(!handle && !hasBookLocalMirror(id)){
+        handle = await getBookFileHandle(id, true, 'readwrite');
+      }
+      if(!handle) throw new Error('Ingen tyst åtkomst till bokfilen.');
       parsed = await readBookFileRaw(handle);
       fileOk = true;
     } catch(e){
@@ -19256,6 +19361,16 @@ function showCareHubSection(key, opts){
   const cfg = CARE_HUB_SECTIONS[key];
   if(!cfg) return;
 
+  // Alla hubbens avdelningar ändrar boken (register, konto, bocklista, budget,
+  // säkerhetskopia) — hämta behörigheten innan avdelningen öppnas.
+  if(isBookReadOnly()){
+    ensureBookWriteAccess().then(ok => {
+      if(ok) showCareHubSection(key, opts);
+      else if(careHubMenu) careHubMenu.value = '';
+    });
+    return;
+  }
+
   if(key === 'trend' && !bookMeetsTrendMonthGate()){
     syncTrendMenuGates();
     if(careHubMenu) careHubMenu.value = '';
@@ -23837,6 +23952,15 @@ function closeNewTransaction(){
 }
 
 function openNewTransaction(fromView, preselectAccount, sourceRow){
+  // Skrivskyddad filbok: hämta behörigheten innan formuläret öppnas, så en
+  // ändring aldrig byggs på en bok som sedan byts ut under händerna.
+  if(isBookReadOnly()){
+    ensureBookWriteAccess({ holdsRowRefs: !!sourceRow }).then(ok => {
+      if(ok) openNewTransaction(fromView, preselectAccount, sourceRow);
+    });
+    return;
+  }
+
   const accounts = bookAccountNames();
   if(!accounts.length){
     show('start');
@@ -25144,6 +25268,11 @@ function renderSettingsStartIncludeList(){
 
 async function setStartInclude(key, included){
   if(!book || !key) return;
+  // Kontourvalet ligger i boken, så kryssrutan är en ändring som kräver filen.
+  if(!await ensureBookWriteAccess()){
+    renderSettingsStartIncludeList();
+    return;
+  }
   syncStartIncludeMap(book);
   book.startInclude[key] = !!included;
   try{
@@ -25154,6 +25283,9 @@ async function setStartInclude(key, included){
 
 el('renameBtn').addEventListener('click', async () => {
   if(renameFieldWrap.hidden){
+    // Namnbytet döper om filerna på disk — be om behörigheten redan här, så att
+    // fältet bara öppnas när det går att slutföra.
+    if(!await ensureBookWriteAccess()) return;
     showRenameField();
     return;
   }
@@ -25231,7 +25363,8 @@ el('warnCloseBtn').addEventListener('click', () => {
   if(!renameFieldWrap.hidden) renameInput.focus();
 });
 
-el('deleteBtn').addEventListener('click', () => {
+el('deleteBtn').addEventListener('click', async () => {
+  if(!await ensureBookWriteAccess()) return;
   warnBox.hidden = true;
   confirmText.textContent = 'Boken "' + bookName(bookId)
     + '" raderas med alla sina konton, transaktioner och filer på disk'
@@ -25294,6 +25427,7 @@ el('settingsCancelBtn').addEventListener('click', () => {
 
 el('toImportBtn').addEventListener('click', async () => {
   if(!bookIsImportEmpty()) return;
+  if(!await ensureBookWriteAccess()) return;
   // Import sparar via webbläsarspegel (samma modell som vardagstransaktioner).
   resetImportState();
   importSessionBookId = bookId;
@@ -26484,6 +26618,12 @@ function populateLedgerDeletePreview(row, accountName){
 
 function showLedgerDeleteConfirm(){
   if(!ledgerHighlight || isLockedLedgerRow(ledgerHighlight)) return;
+  if(isBookReadOnly()){
+    ensureBookWriteAccess({ holdsRowRefs: true }).then(ok => {
+      if(ok) showLedgerDeleteConfirm();
+    });
+    return;
+  }
   hideTooltip();
   populateLedgerDeletePreview(ledgerHighlight, ledgerHighlightAccount());
   ledgerDeleteOverlay.hidden = false;
