@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v25';
+const APP_VERSION = '2026-11-25 v26';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -12592,6 +12592,10 @@ views.start.addEventListener('keydown', e => {
 });
 
 function leaveBook(){
+  agentDebugLog('H7', 'nopEKONOMI.html:leaveBook', 'leaveBook entered', {
+    view: currentViewName()
+  });
+  showAppToast('Debug: leaveBook start', 'report');
   resetImportState();
   bookId = '';
   book = { order: [], accounts: {} };
@@ -12599,9 +12603,16 @@ function leaveBook(){
   markBookClean();
   creating = false;
   show('login');
+  showAppToast('Debug: show(login) anropad', 'report');
 }
 
-el('startBackBtn').addEventListener('click', leaveBook);
+el('startBackBtn').addEventListener('click', () => {
+  agentDebugLog('H7', 'nopEKONOMI.html:startBackBtn', 'start back clicked', {
+    view: currentViewName()
+  });
+  showAppToast('Debug: Start-back klick', 'report');
+  leaveBook();
+});
 
 
 /* --- 7a0. Rapport ---------------------------------------------------- */
