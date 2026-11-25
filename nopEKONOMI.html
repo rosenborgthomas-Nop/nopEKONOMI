@@ -5451,11 +5451,11 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v09';
+const APP_VERSION = '2026-11-25 v10';
 
 function agentLog(hypothesisId, location, message, data){
   // #region agent log
-  fetch('http://127.0.0.1:7378/ingest/d3775674-b797-47ef-a42a-ab3621e89ce9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5ad466'},body:JSON.stringify({sessionId:'5ad466',runId:'pre',hypothesisId:hypothesisId,location:location,message:message,data:data||{},timestamp:Date.now()})}).catch(()=>{});
+  fetch('http://127.0.0.1:7378/ingest/d3775674-b797-47ef-a42a-ab3621e89ce9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5ad466'},body:JSON.stringify({sessionId:'5ad466',runId:'post-fix',hypothesisId:hypothesisId,location:location,message:message,data:data||{},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
   try{
     const n = document.getElementById('bootStatus');
@@ -6331,7 +6331,8 @@ function hasBookLocalMirror(id){
 async function handlePermissionIsGranted(handle, mode){
   if(!handle || typeof handle.queryPermission !== 'function') return false;
   try{
-    return await handle.queryPermission({ mode: mode || 'readwrite' }) === 'granted';
+    const state = await withTimeout(handle.queryPermission({ mode: mode || 'readwrite' }), 1200, 'timeout');
+    return state === 'granted';
   } catch(e){
     return false;
   }
@@ -6464,10 +6465,13 @@ async function ensureHandlePermission(handle, interactive, mode){
   const want = mode || 'readwrite';
   const ask = (interactive !== false && want === 'read') ? 'readwrite' : want;
   try{
-    const qAsk = await handle.queryPermission({ mode: ask });
+    // queryPermission kan hänga på handtag från IndexedDB (Drive). Vänta inte ut det.
+    const qAsk = await withTimeout(handle.queryPermission({ mode: ask }), 1200, 'timeout');
     if(qAsk === 'granted') return true;
     // Redan läs men vi behöver skriv: fråga bara om skriv (readwrite).
-    const qRead = (ask === 'readwrite') ? await handle.queryPermission({ mode: 'read' }) : 'n/a';
+    const qRead = (ask === 'readwrite')
+      ? await withTimeout(handle.queryPermission({ mode: 'read' }), 1200, 'timeout')
+      : 'n/a';
     if(ask === 'readwrite' && qRead === 'granted'){
       if(interactive === false) return want === 'read';
       const r1 = await handle.requestPermission({ mode: 'readwrite' });
@@ -11314,21 +11318,38 @@ async function openBook(id){
     // när något ska ändras (ensureBookWriteAccess).
     let parsed = null;
     let fileOk = false;
+    const mirrorAtStart = hasBookLocalMirror(id);
     try{
-      let handle = null;
-      try{ handle = await getBookFileHandle(id, false, 'readwrite'); } catch(e){ handle = null; }
-      if(!handle){
-        try{ handle = await getBookFileHandle(id, false, 'read'); } catch(e){ handle = null; }
-      }
-      // Ingen spegel att visa: då måste vi fråga, annars går boken inte att öppna.
-      if(!handle && !hasBookLocalMirror(id)){
+      const silentRead = (async () => {
+        let handle = null;
+        try{ handle = await getBookFileHandle(id, false, 'readwrite'); } catch(e){ handle = null; }
+        if(!handle){
+          try{ handle = await getBookFileHandle(id, false, 'read'); } catch(e){ handle = null; }
+        }
+        if(!handle) throw new Error('Ingen tyst åtkomst till bokfilen.');
+        agentLog('C', 'nopEKONOMI.html:openBook', 'reading book file', {});
+        return await readBookFileRaw(handle);
+      })();
+      // Drive-handtag kan hänga i queryPermission/getFile. Spegeln får inte vänta på det.
+      let silent = mirrorAtStart
+        ? await withTimeout(silentRead, 2500, null)
+        : await silentRead;
+      if(!silent && !mirrorAtStart){
         agentLog('B', 'nopEKONOMI.html:openBook', 'asking for file access', {});
-        handle = await getBookFileHandle(id, true, 'readwrite');
+        const handle = await getBookFileHandle(id, true, 'readwrite');
+        if(!handle) throw new Error('Ingen tyst åtkomst till bokfilen.');
+        agentLog('C', 'nopEKONOMI.html:openBook', 'reading book file', {});
+        silent = await readBookFileRaw(handle);
       }
-      if(!handle) throw new Error('Ingen tyst åtkomst till bokfilen.');
-      agentLog('C', 'nopEKONOMI.html:openBook', 'reading book file', {});
-      parsed = await readBookFileRaw(handle);
-      fileOk = true;
+      if(silent){
+        parsed = silent;
+        fileOk = true;
+      } else {
+        agentLog('B', 'nopEKONOMI.html:openBook', 'silent file read failed', {
+          name: 'Timeout',
+          message: 'file access gave up, using mirror'
+        });
+      }
     } catch(e){
       fileOk = false;
       agentLog('B', 'nopEKONOMI.html:openBook', 'silent file read failed', {
@@ -11377,6 +11398,7 @@ async function openBook(id){
       await cacheBookDirFromFile(id, file);
     } else if(hasBookLocalMirror(id)){
       // Ingen kontakt — öppna skrivskyddat med senaste spegel.
+      agentLog('B', 'nopEKONOMI.html:openBook', 'opening mirror', {});
       enterBookReadOnlyFromMirror(id);
       try{
         const file = await idbGet(id);
@@ -11393,7 +11415,7 @@ async function openBook(id){
       markBookClean();
     }
     rebuildBookLookup();
-    await syncBookDriveContactFromHandles();
+    await withTimeout(syncBookDriveContactFromHandles(), 1500, false);
     updateBookFileSyncStatusUi();
     show('start');
     if(lastTaxonomyHealNotes.length){
@@ -27922,7 +27944,7 @@ if ('serviceWorker' in navigator) {
     location.reload();
   });
   navigator.serviceWorker.register('sw.js').then(reg => {
-    const check = () => { try{ reg.update(); }catch(err){} };
+    const check = () => { reg.update().catch(() => {}); };
     check();
     document.addEventListener('visibilitychange', () => {
       if(document.visibilityState === 'visible') check();

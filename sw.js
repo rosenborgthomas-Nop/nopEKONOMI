@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nopEKONOMI-2026-11-25-v09';
+const CACHE_NAME = 'nopEKONOMI-2026-11-25-v10';
 const ASSETS = [
   './',
   './nopEKONOMI.html',
@@ -35,7 +35,7 @@ self.addEventListener('fetch', e => {
         return res;
       }).catch(err => {
         // #region agent log
-        fetch('http://127.0.0.1:7378/ingest/d3775674-b797-47ef-a42a-ab3621e89ce9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5ad466'},body:JSON.stringify({sessionId:'5ad466',runId:'pre',hypothesisId:'E',location:'sw.js:fetch',message:'html fetch failed',data:{name:err&&err.name,message:String(err&&err.message||err).slice(0,180)},timestamp:Date.now()})}).catch(()=>{});
+        fetch('http://127.0.0.1:7378/ingest/d3775674-b797-47ef-a42a-ab3621e89ce9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5ad466'},body:JSON.stringify({sessionId:'5ad466',runId:'post-fix',hypothesisId:'E',location:'sw.js:fetch',message:'html fetch failed',data:{name:err&&err.name,message:String(err&&err.message||err).slice(0,180)},timestamp:Date.now()})}).catch(()=>{});
         // #endregion
         return caches.match(req);
       })
