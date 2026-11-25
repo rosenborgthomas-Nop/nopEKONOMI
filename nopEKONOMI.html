@@ -5450,7 +5450,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v11';
+const APP_VERSION = '2026-11-25 v12';
 
 function agentLog(hypothesisId, location, message, data){
   // #region agent log
@@ -5939,8 +5939,11 @@ async function tryEstablishBookDriveContact(interactive){
   try{
     // En dialog, och den gäller mappen (läs+skriv). Filen härleds därifrån.
     if(interactive){
+      showAppToast('Läser bokfilen…', 'report');
       const handle = await getBookFileHandle(bookId, true, 'readwrite');
-      const parsed = await readBookFileRaw(handle);
+      const parsed = await withTimeout(readBookFileRaw(handle), 20000, null);
+      if(!parsed) throw new Error('Bokfilen svarade inte.');
+      setBookDriveContact(true);
       return { ok: true, parsed: parsed };
     }
     const handle = await getBookFileHandle(bookId, false, 'read');
@@ -6062,9 +6065,16 @@ async function ensureBookWriteAccess(opts){
 function denyBookWriteAccess(message){
   setBookDriveContact(false);
   updateBookFileSyncStatusUi();
-  showAppToast(message
+  const text = message
     ? message + ' Boken är kvar oförändrad.'
-    : 'Utan åtkomst till bokfilen kan inget ändras. Boken är kvar oförändrad.');
+    : 'Utan åtkomst till bokfilen kan inget ändras. Boken är kvar oförändrad.';
+  showAppToast(text);
+  try{
+    if(typeof backupMessages !== 'undefined' && backupMessages
+      && views.backup && !views.backup.hidden){
+      addBox(backupMessages, 'notice', text);
+    }
+  } catch(e){ /* ignore */ }
 }
 
 function updateBookFileSyncStatusUi(){
@@ -6544,6 +6554,8 @@ async function requestPersistentStorage(){
  * så inget separat filhandtag behöver frågas (det gav tidigare dubbla dialoger).
  */
 let bookFolderAccessAsked = false;
+/** Mappvalet såg inte bokfilen. Nästa klick får peka ut själva .json-filen. */
+let preferBookFilePicker = false;
 
 function resetBookFolderAccessGate(){
   bookFolderAccessAsked = false;
@@ -6578,6 +6590,11 @@ async function ensureBookFolderAccessOnce(id, opts){
 
   if(bookFolderAccessAsked && !force) return null;
   bookFolderAccessAsked = true;
+  if(force && preferBookFilePicker){
+    preferBookFilePicker = false;
+    await pickBookFileOnly(id);
+    return await getBookDirHandle(id, false, 'readwrite');
+  }
   const fromStored = await getBookDirHandle(id, true, 'readwrite');
   if(fromStored) return fromStored;
   // Sparat handtag svarar inte. Filen kan ändå synas i filhanteraren — peka ut mappen på nytt.
@@ -6598,16 +6615,87 @@ async function pickBookFolderInteractive(id){
     throw e;
   }
   const wanted = bookMainFileName(bookName(id));
-  const fileHandle = await withTimeout(picked.getFileHandle(wanted), 8000, null);
+  const found = await resolveBookFileInDir(picked, id, wanted);
+  const fileHandle = found && found.handle;
   if(!fileHandle){
-    throw new Error('Bokfilen "' + wanted + '" finns inte i den valda mappen, eller mappen svarade inte.');
+    preferBookFilePicker = true;
+    const where = picked.name ? '«' + picked.name + '»' : 'den valda mappen';
+    const seen = found && found.seen;
+    throw new Error(
+      'Hittade inte "' + wanted + '" i ' + where + '.'
+      + (seen && seen.length
+        ? ' Filer där: ' + seen.slice(0, 6).join(', ') + '.'
+        : ' Mappen gick inte att läsa — Chrome når ofta inte en nätverksmapp även när Utforskaren gör det.')
+      + ' Tryck igen och välj själva filen ' + wanted + '.'
+    );
   }
   await idbPut(id, fileHandle);
   await idbPut(id + BOOK_DIR_SUFFIX, picked);
   rememberLiveHandle(id, 'file', fileHandle);
   rememberLiveHandle(id, 'dir', picked);
   await rememberWorkspaceDir(picked, 'books');
+  preferBookFilePicker = false;
   return picked;
+}
+
+async function resolveBookFileInDir(dir, id, wanted){
+  const names = [];
+  if(wanted) names.push(wanted);
+  try{
+    const stored = await idbGet(id);
+    if(stored && stored.name && names.indexOf(stored.name) === -1) names.push(stored.name);
+  } catch(e){ /* ignore */ }
+  for(const name of names){
+    const handle = await withTimeout(dir.getFileHandle(name), 2500, null);
+    if(handle) return { handle: handle, seen: [] };
+  }
+  const listed = await withTimeout((async () => {
+    const seen = [];
+    const want = String(bookName(id) || '').toLowerCase();
+    let hit = null;
+    for await (const [entryName, handle] of dir.entries()){
+      if(!handle || handle.kind !== 'file') continue;
+      seen.push(String(entryName));
+      const title = bookNameFromMainFileName(entryName);
+      if(title && title.toLowerCase() === want) hit = handle;
+      if(seen.length >= 40) break;
+    }
+    return { handle: hit, seen: seen };
+  })(), 4000, null);
+  return listed || { handle: null, seen: null };
+}
+
+async function pickBookFileOnly(id){
+  if(typeof window.showOpenFilePicker !== 'function'){
+    throw new Error('Den här webbläsaren kan inte välja en enstaka bokfil.');
+  }
+  const wanted = bookMainFileName(bookName(id));
+  let fileHandle;
+  try{
+    const picks = await window.showOpenFilePicker({
+      id: 'hemekonomi-bookfile-' + STORAGE_SCOPE,
+      mode: 'readwrite',
+      multiple: false,
+      startIn: 'documents',
+      types: [{ description: 'Bokfil', accept: { 'application/json': ['.json'] } }]
+    });
+    fileHandle = picks && picks[0];
+  } catch(e){
+    if(e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) return null;
+    throw e;
+  }
+  if(!fileHandle) return null;
+  const title = bookNameFromMainFileName(fileHandle.name || '');
+  if(title && title.toLowerCase() !== String(bookName(id) || '').toLowerCase()){
+    throw new Error('Valde "' + fileHandle.name + '" men den öppna boken är "' + wanted + '".');
+  }
+  if(!(await storedFileReadable(fileHandle, 15000))){
+    throw new Error('Filen "' + (fileHandle.name || wanted) + '" gick inte att läsa.');
+  }
+  await idbPut(id, fileHandle);
+  rememberLiveHandle(id, 'file', fileHandle);
+  preferBookFilePicker = false;
+  return fileHandle;
 }
 
 /** Hämta filen ur en mapp vi redan har behörighet på (ingen extra dialog). */
@@ -6655,11 +6743,16 @@ async function getBookFileHandle(id, interactive, mode){
   }
   if(dir){
     try{
-      const fresh = await bookFileFromDirHandle(id, dir, handle && handle.name);
+      const fresh = await withTimeout(
+        bookFileFromDirHandle(id, dir, handle && handle.name), 8000, null);
       if(fresh) return fresh;
     } catch(e){
       /* Filen ligger inte i mappen (flyttad/omdöpt) — testa filhandtaget. */
     }
+  }
+  if(interactive !== false){
+    const pickedFile = liveHandle(id, 'file');
+    if(pickedFile && await storedFileReadable(pickedFile, 15000)) return pickedFile;
   }
 
   // Ingen mapp att fråga om (bok vald via filväljare) — fråga på filen.
@@ -7191,18 +7284,19 @@ async function probeDirFile(dir, fileName, ms){
 async function dirHandleReaches(dir, sampleFileName, interactive){
   if(!dir || typeof dir.queryPermission !== 'function') return false;
   const q = await withTimeout(dir.queryPermission({ mode: 'read' }), 400, 'timeout');
-  if(q === 'granted') return true;
-  if(q === 'timeout'){
-    if(await probeDirFile(dir, sampleFileName, interactive ? 800 : 1500)) return true;
+  if(q === 'prompt' || q === 'denied'){
+    if(!interactive) return false;
+    try{
+      const r = await dir.requestPermission({ mode: 'readwrite' });
+      if(r !== 'granted') return false;
+    } catch(e){
+      return false;
+    }
+  } else if(q !== 'granted' && q !== 'timeout'){
     return false;
   }
-  if(!interactive) return false;
-  try{
-    const r = await dir.requestPermission({ mode: 'readwrite' });
-    return r === 'granted';
-  } catch(e){
-    return false;
-  }
+  // "granted" räcker inte: nätverkshandtag säger ofta ja utan att filen går att läsa.
+  return probeDirFile(dir, sampleFileName, interactive ? 2500 : 1500);
 }
 
 async function listMainBookFilesInDir(dir){
