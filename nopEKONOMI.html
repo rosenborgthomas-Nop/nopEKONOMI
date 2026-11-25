@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v22';
+const APP_VERSION = '2026-11-25 v23';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -12074,6 +12074,19 @@ async function renderLogin(){
   }
 
   syncLoginMode();
+  loginDebugNotice('Inloggning ritad: version=' + APP_VERSION
+    + ', böcker=' + (reg.order || []).length
+    + ', valt=' + (bookSelect.value || '(tomt)')
+    + ', knappDisabled=' + (openBookBtn.disabled ? 'ja' : 'nej')
+    + ', panelDold=' + (loginPanelMain && loginPanelMain.hidden ? 'ja' : 'nej'));
+  agentDebugLog('H3', 'nopEKONOMI.html:renderLogin', 'login rendered', {
+    version: APP_VERSION,
+    books: (reg.order || []).length,
+    selected: bookSelect.value || '',
+    openDisabled: !!openBookBtn.disabled,
+    panelHidden: !!(loginPanelMain && loginPanelMain.hidden),
+    blocked: fileHandleProbeBlocksUi()
+  });
 }
 
 function syncLoginMode(){
