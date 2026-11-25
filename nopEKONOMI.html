@@ -4216,6 +4216,7 @@ tbody tr.row-future td{ font-style:italic; }
 </style>
 </head>
 <body>
+<div id="bootStatus" style="position:fixed;left:0;right:0;bottom:0;z-index:100000;padding:8px 12px;background:#111;color:#fff;font:14px/1.3 sans-serif">startar…</div>
 
 <!-- ===================== VY: INLOGGNING ===================== -->
 <div class="view" id="viewLogin" hidden>
@@ -5450,7 +5451,31 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-14 v08';
+const APP_VERSION = '2026-11-25 v09';
+
+function agentLog(hypothesisId, location, message, data){
+  // #region agent log
+  fetch('http://127.0.0.1:7378/ingest/d3775674-b797-47ef-a42a-ab3621e89ce9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5ad466'},body:JSON.stringify({sessionId:'5ad466',runId:'pre',hypothesisId:hypothesisId,location:location,message:message,data:data||{},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  try{
+    const n = document.getElementById('bootStatus');
+    if(n) n.textContent = message;
+  }catch(err){}
+}
+agentLog('E', 'nopEKONOMI.html:script', 'script started', { version: APP_VERSION });
+window.addEventListener('error', ev => {
+  agentLog('D', 'nopEKONOMI.html:error', 'window error', {
+    message: String(ev && ev.message || '').slice(0, 180),
+    line: ev && ev.lineno
+  });
+});
+window.addEventListener('unhandledrejection', ev => {
+  const reason = ev && ev.reason;
+  agentLog('A', 'nopEKONOMI.html:rejection', 'unhandled rejection', {
+    name: reason && reason.name,
+    message: String(reason && reason.message || reason || '').slice(0, 180)
+  });
+});
 
 
 /** Avgränsare kategori ↔ underkategori i book.trendInclude-nycklar. */
@@ -11212,6 +11237,7 @@ async function show(name, opts){
   if(name === 'login') await renderLogin();
 
   for(const key in views) views[key].hidden = (key !== name);
+  agentLog('D', 'nopEKONOMI.html:show', 'view shown', { name: name });
 
   document.body.classList.toggle('trend-view-active', name === 'trend');
 
@@ -11242,6 +11268,14 @@ async function show(name, opts){
 }
 
 async function openBook(id){
+  agentLog('B', 'nopEKONOMI.html:openBook', 'openBook entered', {
+    fileBook: isFileBook(id),
+    mirror: hasBookLocalMirror(id),
+    pending: hasBookFileSyncPending(id)
+  });
+  const openStall = setTimeout(() => {
+    agentLog('B', 'nopEKONOMI.html:openBook', 'openBook still running after 8s', {});
+  }, 8000);
   resetImportState();
   resetBookFolderAccessGate();
   if(liveHandles.bookId && liveHandles.bookId !== id) forgetLiveHandles();
@@ -11270,6 +11304,8 @@ async function openBook(id){
           'Register städat: ' + lastTaxonomyHealNotes.slice(0, 3).join(' '));
         lastTaxonomyHealNotes = [];
       }
+      clearTimeout(openStall);
+      agentLog('D', 'nopEKONOMI.html:openBook', 'openBook returned', { path: 'local' });
       return;
     }
 
@@ -11286,14 +11322,24 @@ async function openBook(id){
       }
       // Ingen spegel att visa: då måste vi fråga, annars går boken inte att öppna.
       if(!handle && !hasBookLocalMirror(id)){
+        agentLog('B', 'nopEKONOMI.html:openBook', 'asking for file access', {});
         handle = await getBookFileHandle(id, true, 'readwrite');
       }
       if(!handle) throw new Error('Ingen tyst åtkomst till bokfilen.');
+      agentLog('C', 'nopEKONOMI.html:openBook', 'reading book file', {});
       parsed = await readBookFileRaw(handle);
       fileOk = true;
     } catch(e){
       fileOk = false;
+      agentLog('B', 'nopEKONOMI.html:openBook', 'silent file read failed', {
+        name: e && e.name,
+        message: String(e && e.message || e || '').slice(0, 160)
+      });
     }
+    agentLog('C', 'nopEKONOMI.html:openBook', 'file resolve done', {
+      fileOk: fileOk,
+      hasParsed: !!parsed
+    });
 
     if(fileOk && parsed){
       const hadPending = hasBookFileSyncPending(id);
@@ -11301,6 +11347,7 @@ async function openBook(id){
       // Pending: lokal spegel ligger före Drive — fråga innan filen skriver över.
       // Ingen pending + fil läsbar: filen är alltid primär (ersätter spegeln).
       if(hadPending && hasMirror){
+        agentLog('D', 'nopEKONOMI.html:openBook', 'waiting on confirm dialog', {});
         const loadRemote = window.confirm(
           'Den här enheten ligger före bokmappen/Drive (osynkade lokala ändringar).\n\n'
           + 'OK = ladda från mappen (kasta lokala ändringar — gemensam sanning)\n'
@@ -11360,11 +11407,17 @@ async function openBook(id){
     bookLookup = emptyBookLookup();
     bookDriveContact = false;
     markBookClean();
+    agentLog('D', 'nopEKONOMI.html:openBook', 'openBook failed', {
+      name: e && e.name,
+      message: String(e && e.message || e || '').slice(0, 180)
+    });
     loginNotice(e && e.message
       ? e.message + ' Boken lämnades orörd.'
       : 'Kunde inte läsa boken. Kontrollera att bokfilen finns kvar.');
     show('login');
   }
+  clearTimeout(openStall);
+  agentLog('D', 'nopEKONOMI.html:openBook', 'openBook returned', {});
 }
 
 function bookName(id){
@@ -27802,23 +27855,42 @@ function bindCustomMenuSelects(){
 }
 
 async function initApp(){
+  agentLog('A', 'nopEKONOMI.html:initApp', 'initApp entered', {});
+  const initStall = setTimeout(() => {
+    agentLog('A', 'nopEKONOMI.html:initApp', 'initApp still running after 8s', {});
+  }, 8000);
   applyAppVersionLabels();
   await openIdb();
+  agentLog('A', 'nopEKONOMI.html:initApp', 'idb open', {});
   requestPersistentStorage();
   try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
   await clearInvalidWorkspaceDir();
   // Vid start: synka om behörighet redan finns. Annars sker synk vid Inloggning (användargest).
-  await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
+  const reconciled = await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
+  agentLog('A', 'nopEKONOMI.html:initApp', 'reconcile done', {
+    scanned: !!(reconciled && reconciled.scanned),
+    added: reconciled && reconciled.added,
+    removed: reconciled && reconciled.removed
+  });
 
   // Återöppna förra sessionens bok tyst. openBook faller tillbaka till inloggning
   // om filen/spegeln saknas, så ingen extra felväg behövs här.
   reg = readRegistry();
   const resumeId = (reg.active && reg.order.includes(reg.active)) ? reg.active : '';
+  agentLog('B', 'nopEKONOMI.html:initApp', resumeId ? 'resume book' : 'no resume, show login', {
+    hasResume: !!resumeId,
+    order: (reg.order || []).length,
+    fileBook: resumeId ? isFileBook(resumeId) : false,
+    mirror: resumeId ? hasBookLocalMirror(resumeId) : false,
+    pending: resumeId ? hasBookFileSyncPending(resumeId) : false
+  });
   if(resumeId){
     await openBook(resumeId);
   } else {
     await show('login');
   }
+  clearTimeout(initStall);
+  agentLog('D', 'nopEKONOMI.html:initApp', 'initApp finished', { viewVisible: !!(document.querySelector('.view:not([hidden])')) });
 
   bindAppBackNavigation();
   bindCustomMenuSelects();
