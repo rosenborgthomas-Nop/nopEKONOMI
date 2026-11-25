@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v21';
+const APP_VERSION = '2026-11-25 v22';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -12105,9 +12105,17 @@ if(loginWorkspaceBtn){
 
 async function runConnectFolderFromLogin(){
   loginNotice('');
+  loginDebugNotice('startar Koppla bokmapp');
+  agentDebugLog('H2', 'nopEKONOMI.html:runConnectFolderFromLogin', 'connect folder start', {
+    blocked: fileHandleProbeBlocksUi()
+  });
   openBookBtn.disabled = true;
   try{
     const ok = await connectWorkspaceFromLogin({ forcePick: true });
+    loginDebugNotice('Koppla bokmapp klart: ' + (ok ? 'ok' : 'nej'));
+    agentDebugLog('H2', 'nopEKONOMI.html:runConnectFolderFromLogin', 'connect folder done', {
+      ok: !!ok
+    });
     if(ok){
       let folderLabel = '';
       try{
@@ -12128,6 +12136,11 @@ async function runConnectFolderFromLogin(){
 function loginNotice(msg, kind){
   clear(loginMessages);
   if(msg) addBox(loginMessages, kind === 'report' ? 'report' : 'notice', msg);
+}
+
+function loginDebugNotice(msg){
+  if(!fileHandleProbeBlocksUi() || !loginMessages || !msg) return;
+  addBox(loginMessages, 'report', 'Debug: ' + msg);
 }
 
 function nameTakenBy(reg, name, exceptId){
@@ -12176,9 +12189,24 @@ openBookBtn.addEventListener('click', async () => {
   const chosen = bookSelect.value;
   const wasCreating = creating;
   reg = readRegistry();
+  const chosenInRegistry = reg.order.includes(chosen);
+  const chosenMirror = chosenInRegistry ? hasBookLocalMirror(chosen) : false;
+  agentDebugLog('H5', 'nopEKONOMI.html:openBookBtn', 'open button pressed', {
+    chosen: chosen,
+    creating: !!wasCreating,
+    inRegistry: chosenInRegistry,
+    mirror: chosenMirror,
+    connectOption: chosen === LOGIN_CONNECT_FOLDER,
+    blocked: fileHandleProbeBlocksUi()
+  });
+  loginDebugNotice('Öppna: val=' + chosen
+    + ', i register=' + (chosenInRegistry ? 'ja' : 'nej')
+    + ', kopia=' + (chosenMirror ? 'ja' : 'nej')
+    + ', koppla=' + (chosen === LOGIN_CONNECT_FOLDER ? 'ja' : 'nej'));
 
   if(!wasCreating){
     if(chosen === LOGIN_CONNECT_FOLDER){
+      loginDebugNotice('går till Koppla bokmapp');
       await runConnectFolderFromLogin();
       return;
     }
@@ -12200,6 +12228,7 @@ openBookBtn.addEventListener('click', async () => {
       show('start');
       return;
     }
+    loginDebugNotice('går till openBook');
     await openBook(chosen);
     return;
   }
