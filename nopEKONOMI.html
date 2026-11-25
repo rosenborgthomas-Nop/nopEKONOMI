@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v28';
+const APP_VERSION = '2026-11-25 v29';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -12197,7 +12197,11 @@ bookSelect.addEventListener('change', () => {
   syncLoginMode();
 });
 
-openBookBtn.addEventListener('click', async () => {
+let openBookTapAt = 0;
+async function runLoginOpenAction(source){
+  const now = Date.now();
+  if(now - openBookTapAt < 700) return;
+  openBookTapAt = now;
   loginNotice('');
   const chosen = bookSelect.value;
   const wasCreating = creating;
@@ -12210,12 +12214,14 @@ openBookBtn.addEventListener('click', async () => {
     inRegistry: chosenInRegistry,
     mirror: chosenMirror,
     connectOption: chosen === LOGIN_CONNECT_FOLDER,
-    blocked: fileHandleProbeBlocksUi()
+    blocked: fileHandleProbeBlocksUi(),
+    source: source
   });
   loginDebugNotice('Öppna: val=' + chosen
     + ', i register=' + (chosenInRegistry ? 'ja' : 'nej')
     + ', kopia=' + (chosenMirror ? 'ja' : 'nej')
-    + ', koppla=' + (chosen === LOGIN_CONNECT_FOLDER ? 'ja' : 'nej'));
+    + ', koppla=' + (chosen === LOGIN_CONNECT_FOLDER ? 'ja' : 'nej')
+    + ', källa=' + source);
 
   if(!wasCreating){
     if(chosen === LOGIN_CONNECT_FOLDER){
@@ -12332,6 +12338,15 @@ openBookBtn.addEventListener('click', async () => {
   creating = false;
   newNameInput.value = '';
   await openBook(id);
+}
+
+openBookBtn.addEventListener('click', () => {
+  runLoginOpenAction('click');
+});
+openBookBtn.addEventListener('pointerup', e => {
+  if(!fileHandleProbeBlocksUi()) return;
+  e.preventDefault();
+  runLoginOpenAction('pointerup');
 });
 
 views.login.addEventListener('keydown', e => {
