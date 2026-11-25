@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v17';
+const APP_VERSION = '2026-11-25 v18';
 
 function agentLog(hypothesisId, location, message, data){
   // #region agent log
@@ -7035,7 +7035,9 @@ async function getWorkspaceDirHandle(interactive){
 
 async function getBookDirHandle(bookId, interactive, mode){
   mode = mode || 'readwrite';
-  if(fileHandleProbeBlocksUi() && !interactive){
+  if(fileHandleProbeBlocksUi()){
+    // Tyst läsning av den valda mappen anropar queryPermission och låser telefonen.
+    if(!interactive) return null;
     return bookDirConfirmed ? liveHandle(bookId, 'dir') : null;
   }
   const sampleName = bookMainFileName(bookName(bookId));
@@ -11763,6 +11765,7 @@ async function hasUsableProgramWorkspace(){
 
 // 'ready' | 'confirm' (sparad mapp, behörighet saknas) | 'pick' (första gången)
 async function getWorkspaceSetupMode(){
+  if(fileHandleProbeBlocksUi()) return 'pick';
   if(!bookStorageSupported()) return 'pick';
   const dir = await idbGet(WORKSPACE_DIR_KEY);
   if(!dir) return 'pick';
@@ -11889,11 +11892,12 @@ async function renderLogin(){
   const embHint = el('loginEmbeddedHint');
   if(embHint) embHint.hidden = !isEmbeddedFileViewer();
 
-  try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
-
-  try{
-    await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
-  } catch(e){ /* login ska alltid visas */ }
+  if(!fileHandleProbeBlocksUi()){
+    try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
+    try{
+      await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
+    } catch(e){ /* login ska alltid visas */ }
+  }
 
   reg = readRegistry();
   clear(bookSelect);
@@ -12179,6 +12183,7 @@ function paintStartBackupHint(at, backupPosts){
 }
 
 async function refreshStartBackupHintFromDisk(){
+  if(fileHandleProbeBlocksUi()) return;
   if(!bookId || !isFileBook(bookId) || !bookDirConfirmed) return;
   try{
     const dir = liveHandle(bookId, 'dir');
