@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v27';
+const APP_VERSION = '2026-11-25 v28';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -12606,12 +12606,27 @@ function leaveBook(){
   showAppToast('Debug: show(login) anropad', 'report');
 }
 
-el('startBackBtn').addEventListener('click', () => {
+let startBackTapAt = 0;
+function runStartBackNav(source){
+  const now = Date.now();
+  if(now - startBackTapAt < 700) return;
+  startBackTapAt = now;
   agentDebugLog('H7', 'nopEKONOMI.html:startBackBtn', 'start back clicked', {
-    view: currentViewName()
+    view: currentViewName(),
+    source: source
   });
-  showAppToast('Debug: Start-back klick', 'report');
+  showAppToast('Debug: Start-back ' + source, 'report');
   leaveBook();
+}
+
+const startBackBtnEl = el('startBackBtn');
+startBackBtnEl.addEventListener('click', () => {
+  runStartBackNav('click');
+});
+startBackBtnEl.addEventListener('pointerup', e => {
+  if(!fileHandleProbeBlocksUi()) return;
+  e.preventDefault();
+  runStartBackNav('pointerup');
 });
 
 
