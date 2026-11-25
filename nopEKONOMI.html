@@ -2718,6 +2718,17 @@ body.app-select-open{
 .nav-link.nav-back:hover{
   color:var(--gold);
 }
+@media (pointer:coarse){
+  .nav-link.nav-back{
+    display:inline-flex;
+    align-items:center;
+    min-height:48px;
+    padding:12px 16px;
+    margin:0 0 8px -12px;
+    touch-action:manipulation;
+  }
+  #ledgerNewTxBtn{ min-height:48px; touch-action:manipulation; }
+}
 .view-headline{
   margin:0 0 28px;
 }
@@ -5450,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v15';
+const APP_VERSION = '2026-11-25 v16';
 
 function agentLog(hypothesisId, location, message, data){
   // #region agent log
@@ -6030,53 +6041,13 @@ async function ensureBookWriteAccess(opts){
 
   // Användaren ber uttryckligen om skrivläge — tillåt en ny dialog.
   resetBookFolderAccessGate();
-  // Mappväljaren måste starta i samma klick. En await före den tappar gesten på telefonen.
-  try{
-    if(preferBookFilePicker && typeof window.showOpenFilePicker === 'function'){
-      preferBookFilePicker = false;
-      const picks = await window.showOpenFilePicker({
-        id: 'hemekonomi-bookfile-' + STORAGE_SCOPE,
-        mode: 'readwrite',
-        multiple: false,
-        startIn: 'documents',
-        types: [{ description: 'Bokfil', accept: { 'application/json': ['.json'] } }]
-      });
-      const fileHandle = picks && picks[0];
-      if(!fileHandle){
-        denyBookWriteAccess('Filen valdes inte.');
-        return false;
-      }
-      await idbPut(bookId, fileHandle);
-      rememberLiveHandle(bookId, 'file', fileHandle);
-    } else if(typeof window.showDirectoryPicker === 'function'){
-      const pickedNow = await window.showDirectoryPicker({
-        id: 'hemekonomi-workspace-' + STORAGE_SCOPE,
-        mode: 'readwrite',
-        startIn: 'documents'
-      });
-      const wanted = bookMainFileName(bookName(bookId));
-      const found = await resolveBookFileInDir(pickedNow, bookId, wanted);
-      if(!found || !found.handle){
-        preferBookFilePicker = true;
-        const where = pickedNow.name ? '«' + pickedNow.name + '»' : 'mappen';
-        denyBookWriteAccess('Hittade inte "' + wanted + '" i ' + where + '. Tryck igen och välj själva filen.');
-        return false;
-      }
-      await idbPut(bookId, found.handle);
-      await idbPut(bookId + BOOK_DIR_SUFFIX, pickedNow);
-      rememberLiveHandle(bookId, 'file', found.handle);
-      rememberLiveHandle(bookId, 'dir', pickedNow);
-      bookDirConfirmed = true;
-      await rememberWorkspaceDir(pickedNow, 'books');
-    }
-  } catch(e){
-    if(e && (e.name === 'AbortError' || e.name === 'NotAllowedError')){
-      denyBookWriteAccess('Ingen mapp valdes.');
-      return false;
-    }
-    denyBookWriteAccess(e && e.message ? e.message : 'Kunde inte välja mapp.');
+  // Mappväljaren måste vara första await. En filläsning efter den låser telefonen.
+  const picked = await pickBookFolderFromGesture();
+  if(!picked.ok){
+    denyBookWriteAccess(picked.message);
     return false;
   }
+  if(fileHandleProbeBlocksUi()) return true;
 
   // Osparade ändringar i minnet: skriv UT dem, läs aldrig filen över dem.
   if(bookSessionDirty && book && Array.isArray(book.order)){
@@ -6158,15 +6129,30 @@ function updateBookFileSyncStatusUi(){
     box.setAttribute('role', 'button');
     box.tabIndex = 0;
     box.addEventListener('click', e => {
+      e.preventDefault();
       e.stopPropagation();
-      if(isBookReadOnly()) runStartDriveContactRetry();
-      else runStartFileSyncFlush();
+      if(!isBookReadOnly()){
+        runStartFileSyncFlush();
+        return;
+      }
+      box.textContent = 'Öppnar mappväljaren…';
+      pickBookFolderFromGesture().then(picked => {
+        if(!picked.ok){
+          box.textContent = picked.message || 'Ingen mapp valdes.';
+          return;
+        }
+        if(typeof renderStart === 'function') renderStart();
+        const msgs = el('startMessages');
+        if(msgs){
+          clear(msgs);
+          addBox(msgs, 'report', 'Mappen är vald.');
+        }
+      });
     });
     box.addEventListener('keydown', e => {
       if(e.key === 'Enter' || e.key === ' '){
         e.preventDefault();
-        if(isBookReadOnly()) runStartDriveContactRetry();
-        else runStartFileSyncFlush();
+        box.click();
       }
     });
     msgs.appendChild(box);
@@ -6607,9 +6593,52 @@ let preferBookFilePicker = false;
 /** Sant bara när den här sessionen redan läst mappen. Annars får knappar inte röra det sparade handtaget — det kan hänga telefonen. */
 let bookDirConfirmed = false;
 
-/** Android: queryPermission/getFile på ett sparat handtag kan låsa hela sidan, även efter en timeout. */
+/** Telefon: queryPermission/getFile på ett sparat handtag kan låsa hela sidan, även efter en timeout. */
 function fileHandleProbeBlocksUi(){
-  return /Android/i.test(navigator.userAgent || '');
+  try{
+    const ua = navigator.userAgent || '';
+    if(/Android|iPhone|iPad|iPod/i.test(ua)) return true;
+    if(navigator.userAgentData && navigator.userAgentData.mobile) return true;
+    if(window.matchMedia && window.matchMedia('(pointer:coarse)').matches) return true;
+  } catch(e){ /* ignore */ }
+  return false;
+}
+
+/** Första await i ett klick. Inget sparat handtag rörs före väljaren. */
+async function pickBookFolderFromGesture(){
+  if(typeof window.showDirectoryPicker !== 'function'){
+    return { ok: false, message: 'Den här webbläsaren kan inte öppna en mappväljare.' };
+  }
+  let pickedNow;
+  try{
+    pickedNow = await window.showDirectoryPicker({
+      id: 'hemekonomi-workspace-' + STORAGE_SCOPE,
+      mode: 'readwrite',
+      startIn: 'documents'
+    });
+  } catch(e){
+    if(e && (e.name === 'AbortError' || e.name === 'NotAllowedError')){
+      return { ok: false, message: 'Ingen mapp valdes.' };
+    }
+    return { ok: false, message: (e && e.message) ? e.message : 'Kunde inte välja mapp.' };
+  }
+  const wanted = bookMainFileName(bookName(bookId));
+  const found = await resolveBookFileInDir(pickedNow, bookId, wanted);
+  if(!found || !found.handle){
+    const where = pickedNow.name ? '«' + pickedNow.name + '»' : 'mappen';
+    return {
+      ok: false,
+      message: 'Hittade inte "' + wanted + '" i ' + where + '. Välj mappen där den filen ligger.'
+    };
+  }
+  await idbPut(bookId, found.handle);
+  await idbPut(bookId + BOOK_DIR_SUFFIX, pickedNow);
+  rememberLiveHandle(bookId, 'file', found.handle);
+  rememberLiveHandle(bookId, 'dir', pickedNow);
+  bookDirConfirmed = true;
+  setBookDriveContact(true);
+  await rememberWorkspaceDir(pickedNow, 'books');
+  return { ok: true, dir: pickedNow, file: found.handle };
 }
 
 function resetBookFolderAccessGate(){
@@ -27105,7 +27134,21 @@ function renderLedgerMenu(){
 
 ledgerNewTxBtn.addEventListener('click', () => {
   hideLedgerDeleteConfirm();
-  openNewTransaction('ledger', ledgerAccount);
+  if(!isBookReadOnly()){
+    openNewTransaction('ledger', ledgerAccount);
+    return;
+  }
+  const label = ledgerNewTxBtn.textContent;
+  ledgerNewTxBtn.textContent = 'Öppnar mapp…';
+  pickBookFolderFromGesture().then(picked => {
+    ledgerNewTxBtn.textContent = label;
+    if(!picked.ok){
+      clear(ledgerMessages);
+      addBox(ledgerMessages, 'notice', picked.message || 'Ingen mapp valdes.');
+      return;
+    }
+    openNewTransaction('ledger', ledgerAccount);
+  });
 });
 
 ledgerMenu.addEventListener('change', () => {
@@ -27721,7 +27764,8 @@ function positionTooltip(e){
   txTooltip.style.top = Math.max(8, y) + 'px';
 }
 
-el('ledgerBackBtn').addEventListener('click', () => {
+el('ledgerBackBtn').addEventListener('click', e => {
+  if(e){ e.preventDefault(); e.stopPropagation(); }
   hideLedgerDeleteConfirm();
   if(ledgerMode === 'reportDrill'){
     const ret = reportDrillReturnView;
@@ -27929,6 +27973,11 @@ let appHashNavEnabled = null;
 function isHashNavSafe(){
   if(appHashNavEnabled != null) return appHashNavEnabled;
   try{
+    // På telefonen slåss hash-historiken med ← Start och studsar tillbaka till kontot.
+    if(fileHandleProbeBlocksUi()){
+      appHashNavEnabled = false;
+      return false;
+    }
     const ua = navigator.userAgent || '';
     // Android System WebView (filhanterare, inbäddade visare)
     if(/\bwv\b/.test(ua)){
