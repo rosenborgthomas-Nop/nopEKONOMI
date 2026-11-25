@@ -5450,7 +5450,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v12';
+const APP_VERSION = '2026-11-25 v13';
 
 function agentLog(hypothesisId, location, message, data){
   // #region agent log
@@ -5959,7 +5959,9 @@ async function tryEstablishBookDriveContact(interactive){
 
 async function enterBookLiveFromFile(parsed){
   await applyBookFromFilePayload(parsed);
-  await syncBookDriveContactFromHandles();
+  await withTimeout(syncBookDriveContactFromHandles(), 1500, false);
+  // Filen lästes just. En senare behörighetskoll får inte ta bort kontakten.
+  setBookDriveContact(true);
 }
 
 /** Uppdatera bookDriveContact utifrån skrivrätt (eller läs om skriv saknas men fil nås). */
@@ -6027,6 +6029,52 @@ async function ensureBookWriteAccess(opts){
 
   // Användaren ber uttryckligen om skrivläge — tillåt en ny dialog.
   resetBookFolderAccessGate();
+  // Mappväljaren måste starta i samma klick. En await före den tappar gesten på telefonen.
+  try{
+    if(preferBookFilePicker && typeof window.showOpenFilePicker === 'function'){
+      preferBookFilePicker = false;
+      const picks = await window.showOpenFilePicker({
+        id: 'hemekonomi-bookfile-' + STORAGE_SCOPE,
+        mode: 'readwrite',
+        multiple: false,
+        startIn: 'documents',
+        types: [{ description: 'Bokfil', accept: { 'application/json': ['.json'] } }]
+      });
+      const fileHandle = picks && picks[0];
+      if(!fileHandle){
+        denyBookWriteAccess('Filen valdes inte.');
+        return false;
+      }
+      await idbPut(bookId, fileHandle);
+      rememberLiveHandle(bookId, 'file', fileHandle);
+    } else if(typeof window.showDirectoryPicker === 'function'){
+      const pickedNow = await window.showDirectoryPicker({
+        id: 'hemekonomi-workspace-' + STORAGE_SCOPE,
+        mode: 'readwrite',
+        startIn: 'documents'
+      });
+      const wanted = bookMainFileName(bookName(bookId));
+      const found = await resolveBookFileInDir(pickedNow, bookId, wanted);
+      if(!found || !found.handle){
+        preferBookFilePicker = true;
+        const where = pickedNow.name ? '«' + pickedNow.name + '»' : 'mappen';
+        denyBookWriteAccess('Hittade inte "' + wanted + '" i ' + where + '. Tryck igen och välj själva filen.');
+        return false;
+      }
+      await idbPut(bookId, found.handle);
+      await idbPut(bookId + BOOK_DIR_SUFFIX, pickedNow);
+      rememberLiveHandle(bookId, 'file', found.handle);
+      rememberLiveHandle(bookId, 'dir', pickedNow);
+      await rememberWorkspaceDir(pickedNow, 'books');
+    }
+  } catch(e){
+    if(e && (e.name === 'AbortError' || e.name === 'NotAllowedError')){
+      denyBookWriteAccess('Ingen mapp valdes.');
+      return false;
+    }
+    denyBookWriteAccess(e && e.message ? e.message : 'Kunde inte välja mapp.');
+    return false;
+  }
 
   // Osparade ändringar i minnet: skriv UT dem, läs aldrig filen över dem.
   if(bookSessionDirty && book && Array.isArray(book.order)){
@@ -6239,36 +6287,20 @@ async function checkBookFileForRemoteChanges(){
   try{
     const sessionAhead = !!(bookSessionDirty || hasBookFileSyncPending(bookId));
 
-    // Utan kontakt: försök tyst nå filen igen — men aldrig om sessionen ligger före Drive.
-    if(!bookDriveContact){
-      if(sessionAhead) return;
-      const res = await tryEstablishBookDriveContact(false);
-      if(!res.ok || !res.parsed) return;
-      await enterBookLiveFromFile(res.parsed);
-      if(typeof currentViewName === 'function' && currentViewName() === 'start'){
-        renderStart();
-        clear(startMessages);
-        addBox(startMessages, 'report', 'Kontakt med bokfilen återställd (laddad från mappen).');
-      } else if(typeof currentViewName === 'function'){
-        const view = currentViewName();
-        if(view && view !== 'login'){
-          try{ await show(view, { fromHash: true }); } catch(e){ /* ignore */ }
-        }
-      }
-      return;
-    }
+    // Utan kontakt: rör inte filen i bakgrunden. På telefonen hänger den kollen
+    // och knapparna (tillbaka, ny transaktion) slutar svara. Användaren ansluter själv.
+    if(!bookDriveContact) return;
 
-    // Fil via mapp om IDB-handtaget saknar läs — undvik falsk "ingen kontakt".
-    let handle = await idbGet(bookId);
-    if(!handle || !(await handlePermissionIsGranted(handle, 'read'))){
-      try{ handle = await getBookFileHandle(bookId, false, 'read'); } catch(e){ handle = null; }
-      if(!handle){
-        setBookDriveContact(false);
-        return;
-      }
+    // Levande handtag först. IDB-kopian tappar ofta behörigheten på telefonen
+    // även när filen nyss gick att läsa. En misslyckad koll får inte låsa boken.
+    let handle = liveHandle(bookId, 'file');
+    if(!handle || !(await storedFileReadable(handle, 1500))){
+      handle = await idbGet(bookId);
     }
+    if(!handle || !(await storedFileReadable(handle, 1500))) return;
 
-    const parsed = await readBookFileRaw(handle);
+    const parsed = await withTimeout(readBookFileRaw(handle), 4000, null);
+    if(!parsed) return;
     const fileAt = payloadSavedAt(parsed.raw, parsed.lastModified);
     if(!fileAt) return;
 
@@ -6321,7 +6353,7 @@ async function checkBookFileForRemoteChanges(){
       }
     }
   } catch(e){
-    setBookDriveContact(false);
+    // Behåll kontakten. Telefonen tappar annars skrivläget bara av att gå tillbaka till start.
   } finally{
     bookFileCheckBusy = false;
   }
@@ -6721,7 +6753,7 @@ async function getBookFileHandle(id, interactive, mode){
   const readBudget = interactive === false ? 5000 : 800;
   // Levande objekt först. Prova filen själv — queryPermission kan hänga i onödan.
   const live = liveHandle(id, 'file');
-  if(live && await storedFileReadable(live, readBudget)){
+  if(live && await storedFileReadable(live, interactive === false ? readBudget : 15000)){
     return live;
   }
 
@@ -12082,7 +12114,8 @@ function renderStart(){
 
   const rec = lastBackupRecord(bookId);
   paintStartBackupHint(rec && rec.at, rec && rec.posts);
-  refreshStartBackupHintFromDisk();
+  // Inte i samma klick: mappkollen kan hänga på telefonen och då ritas inte start.
+  setTimeout(() => { refreshStartBackupHintFromDisk(); }, 0);
 
   clear(startMessages);
   for(const msg of importReport) addBox(startMessages, 'report', msg);
