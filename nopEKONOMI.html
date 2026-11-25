@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v31';
+const APP_VERSION = '2026-11-25 v32';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -6094,7 +6094,10 @@ async function ensureBookWriteAccess(opts){
     dirty: !!bookSessionDirty,
     pending: !!(bookId && hasBookFileSyncPending(bookId))
   });
-  if(fileHandleProbeBlocksUi()) return true;
+  if(fileHandleProbeBlocksUi()){
+    denyBookWriteAccess('Telefonen är i stabilt läsläge. Inga ändringar sparas här just nu.');
+    return false;
+  }
   if(!isBookReadOnly()) return true;
 
   // Användaren ber uttryckligen om skrivläge — tillåt en ny dialog.
@@ -6111,7 +6114,10 @@ async function ensureBookWriteAccess(opts){
     denyBookWriteAccess(picked.message);
     return false;
   }
-  if(fileHandleProbeBlocksUi()) return true;
+  if(fileHandleProbeBlocksUi()){
+    denyBookWriteAccess('Telefonen är i stabilt läsläge. Inga ändringar sparas här just nu.');
+    return false;
+  }
 
   // Osparade ändringar i minnet: skriv UT dem, läs aldrig filen över dem.
   if(bookSessionDirty && book && Array.isArray(book.order)){
@@ -6196,9 +6202,7 @@ function updateBookFileSyncStatusUi(){
     phoneBox.removeAttribute('role');
     phoneBox.tabIndex = -1;
     phoneBox.title = '';
-    phoneBox.textContent = localAhead
-      ? 'Ändringen finns i telefonen. Bokfilen rörs inte här.'
-      : 'Telefonkopia. Bokfilen lämnas orörd så att sidan inte låser sig.';
+    phoneBox.textContent = 'Telefonläge: läsning från kopia. Inga ändringar sparas här just nu.';
     return;
   }
 
@@ -6480,18 +6484,17 @@ async function writeBookPreferGranted(id, bookData, interactive){
     return true;
   }
   if(fileHandleProbeBlocksUi()){
-    agentDebugLog('H4', 'nopEKONOMI.html:writeBookPreferGranted', 'mobile local write path', {
+    agentDebugLog('H4', 'nopEKONOMI.html:writeBookPreferGranted', 'mobile read-only write blocked', {
       interactive: !!interactive,
       sameBook: id === bookId,
       readOnly: isBookReadOnly()
     });
-    writeBook(id, bookData);
-    markBookFileSyncPending(id);
     if(id === bookId){
-      bookSessionDirty = true;
+      notifyBookReadOnlyBlocked();
+      showAppToast('Telefonen är i stabilt läsläge. Inga ändringar sparas här just nu.');
       updateBookFileSyncStatusUi();
     }
-    return true;
+    return false;
   }
 
   async function commitWithHandle(handle){
