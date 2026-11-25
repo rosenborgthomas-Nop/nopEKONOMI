@@ -5461,9 +5461,10 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v18';
+const APP_VERSION = '2026-11-25 v19';
 
 function agentLog(hypothesisId, location, message, data){
+  if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
   // #region agent log
   fetch('http://127.0.0.1:7378/ingest/d3775674-b797-47ef-a42a-ab3621e89ce9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5ad466'},body:JSON.stringify({sessionId:'5ad466',runId:'post-fix',hypothesisId:hypothesisId,location:location,message:message,data:data||{},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
@@ -5950,6 +5951,9 @@ function notifyBookReadOnlyBlocked(){
  * @returns {{ ok: true, parsed: object } | { ok: false, message?: string }}
  */
 async function tryEstablishBookDriveContact(interactive){
+  if(fileHandleProbeBlocksUi()){
+    return { ok: false, message: 'Telefonen läser inte bokfilen.' };
+  }
   if(!bookId || !isFileBook(bookId)){
     return { ok: true, parsed: null };
   }
@@ -6043,6 +6047,7 @@ async function redrawViewAfterBookSwap(){
  * @returns {Promise<boolean>} true när ändringen kan fortsätta.
  */
 async function ensureBookWriteAccess(opts){
+  if(fileHandleProbeBlocksUi()) return true;
   if(!isBookReadOnly()) return true;
 
   // Användaren ber uttryckligen om skrivläge — tillåt en ny dialog.
@@ -6114,6 +6119,28 @@ function updateBookFileSyncStatusUi(){
 
   const msgs = typeof el === 'function' ? el('startMessages') : null;
   if(!msgs) return;
+
+  if(fileHandleProbeBlocksUi()){
+    if(!onStart){
+      const gone = el('startFileSyncNotice');
+      if(gone) gone.remove();
+      return;
+    }
+    let phoneBox = el('startFileSyncNotice');
+    if(!phoneBox){
+      phoneBox = document.createElement('div');
+      phoneBox.id = 'startFileSyncNotice';
+      msgs.appendChild(phoneBox);
+    }
+    phoneBox.className = 'notice';
+    phoneBox.removeAttribute('role');
+    phoneBox.tabIndex = -1;
+    phoneBox.title = '';
+    phoneBox.textContent = localAhead
+      ? 'Ändringen finns i telefonen. Bokfilen rörs inte här.'
+      : 'Telefonkopia. Bokfilen lämnas orörd så att sidan inte låser sig.';
+    return;
+  }
 
   const existing = el('startFileSyncNotice');
   const onStart = typeof views !== 'undefined' && views.start && !views.start.hidden;
@@ -6399,6 +6426,15 @@ async function writeBookPreferGranted(id, bookData, interactive){
     bookSessionDirty = false;
     return true;
   }
+  if(fileHandleProbeBlocksUi()){
+    writeBook(id, bookData);
+    markBookFileSyncPending(id);
+    if(id === bookId){
+      bookSessionDirty = true;
+      updateBookFileSyncStatusUi();
+    }
+    return true;
+  }
 
   async function commitWithHandle(handle){
     await writeBookFile(handle, bookData, bookName(id));
@@ -6473,6 +6509,9 @@ async function writeBookPreferGranted(id, bookData, interactive){
 
 // Användargest: skriv aktuell bok i minnet till bokfilen (aldrig ladda fil över osparad data).
 async function flushBookFileToFolderInteractive(){
+  if(fileHandleProbeBlocksUi()){
+    return { ok: false, message: 'Telefonen skriver inte till bokfilen. Ändringen finns kvar i telefonen.' };
+  }
   if(!bookId || !isFileBook(bookId)){
     return { ok: false, message: 'Ingen bokfil att synka.' };
   }
@@ -6627,6 +6666,9 @@ async function pickBookFolderFromGesture(){
       return { ok: false, message: 'Ingen mapp valdes.' };
     }
     return { ok: false, message: (e && e.message) ? e.message : 'Kunde inte välja mapp.' };
+  }
+  if(fileHandleProbeBlocksUi()){
+    return { ok: true, dir: null, file: null };
   }
   const wanted = bookMainFileName(bookName(bookId));
   const found = await resolveBookFileInDir(pickedNow, bookId, wanted);
@@ -12199,6 +12241,10 @@ async function refreshStartBackupHintFromDisk(){
 }
 
 function renderStart(){
+  if(fileHandleProbeBlocksUi() && startAccountsOverviewHead){
+    const sub = startAccountsOverviewHead.querySelector('.sub');
+    if(sub) sub.textContent = 'Saldon för dina konton. Tryck på ett konto för att öppna dess kontoutdrag.';
+  }
   startMenu.selectedIndex = 0;
   syncTrendMenuGates();
   startPeriodMode = loadStartPeriodMode();
@@ -12271,8 +12317,14 @@ function summaryRow(labelText, value, isTotal){
 
   // Summaraden är ingen plats man kan gå in i — bara kontona öppnas.
   if(!isTotal){
-    row.title = 'Dubbelklicka för att öppna kontoutdraget';
-    row.addEventListener('dblclick', () => openLedger(labelText));
+    const open = () => openLedger(labelText);
+    if(fileHandleProbeBlocksUi()){
+      row.title = 'Tryck för att öppna kontoutdraget';
+      row.addEventListener('click', open);
+    } else {
+      row.title = 'Dubbelklicka för att öppna kontoutdraget';
+      row.addEventListener('dblclick', open);
+    }
   }
 
   const label = document.createElement('span');
