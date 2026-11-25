@@ -5450,7 +5450,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v13';
+const APP_VERSION = '2026-11-25 v14';
 
 function agentLog(hypothesisId, location, message, data){
   // #region agent log
@@ -6065,6 +6065,7 @@ async function ensureBookWriteAccess(opts){
       await idbPut(bookId + BOOK_DIR_SUFFIX, pickedNow);
       rememberLiveHandle(bookId, 'file', found.handle);
       rememberLiveHandle(bookId, 'dir', pickedNow);
+      bookDirConfirmed = true;
       await rememberWorkspaceDir(pickedNow, 'books');
     }
   } catch(e){
@@ -6560,6 +6561,7 @@ function forgetLiveHandles(){
   liveHandles.bookId = '';
   liveHandles.file = null;
   liveHandles.dir = null;
+  bookDirConfirmed = false;
 }
 
 /**
@@ -6588,6 +6590,8 @@ async function requestPersistentStorage(){
 let bookFolderAccessAsked = false;
 /** Mappvalet såg inte bokfilen. Nästa klick får peka ut själva .json-filen. */
 let preferBookFilePicker = false;
+/** Sant bara när den här sessionen redan läst mappen. Annars får knappar inte röra det sparade handtaget — det kan hänga telefonen. */
+let bookDirConfirmed = false;
 
 function resetBookFolderAccessGate(){
   bookFolderAccessAsked = false;
@@ -6665,6 +6669,7 @@ async function pickBookFolderInteractive(id){
   await idbPut(id + BOOK_DIR_SUFFIX, picked);
   rememberLiveHandle(id, 'file', fileHandle);
   rememberLiveHandle(id, 'dir', picked);
+  bookDirConfirmed = true;
   await rememberWorkspaceDir(picked, 'books');
   preferBookFilePicker = false;
   return picked;
@@ -6977,12 +6982,14 @@ async function getBookDirHandle(bookId, interactive, mode){
   // Levande objekt först — behörigheten sitter på objektet.
   const liveDir = liveHandle(bookId, 'dir');
   if(liveDir && await dirHandleReaches(liveDir, sampleName, false)){
+    bookDirConfirmed = true;
     return liveDir;
   }
 
   let dir = await idbGet(bookId + BOOK_DIR_SUFFIX);
   if(dir && await dirHandleReaches(dir, sampleName, !!interactive)){
     rememberLiveHandle(bookId, 'dir', dir);
+    bookDirConfirmed = true;
     await rememberWorkspaceDir(dir, 'books');
     return dir;
   }
@@ -6992,6 +6999,7 @@ async function getBookDirHandle(bookId, interactive, mode){
     dir = await cacheBookDirFromFile(bookId, file);
     if(dir && await dirHandleReaches(dir, sampleName, !!interactive)){
       rememberLiveHandle(bookId, 'dir', dir);
+      bookDirConfirmed = true;
       await rememberWorkspaceDir(dir, 'books');
       return dir;
     }
@@ -11484,6 +11492,7 @@ async function openBook(id){
   markBookClean();
   bookKnownSavedAt = 0;
   bookDriveContact = false;
+  bookDirConfirmed = false;
   book = { order: [], accounts: {} };
   bookLookup = emptyBookLookup();
   try{
@@ -12093,9 +12102,9 @@ function paintStartBackupHint(at, backupPosts){
 }
 
 async function refreshStartBackupHintFromDisk(){
-  if(!bookId || !isFileBook(bookId)) return;
+  if(!bookId || !isFileBook(bookId) || !bookDirConfirmed) return;
   try{
-    const dir = await getBookDirHandle(bookId, false);
+    const dir = liveHandle(bookId, 'dir');
     if(!dir) return;
     const rows = await scanBookBackupFiles(dir, bookName(bookId));
     const backups = rows.filter(r => r.kind === 'backup' && r.madeAt);
@@ -21854,13 +21863,8 @@ async function renderBackupPage(){
   }
   if(backupRunBtn) backupRunBtn.disabled = false;
 
-  // Bara vybyte — fråga aldrig om behörighet här. Dialogen hör till knapparna.
-  let dir;
-  try{
-    dir = await getBookDirHandle(bookId, false);
-  } catch(e){
-    dir = null;
-  }
+  // Rör inte sparade handtag här. På telefonen hänger den kollen och inga knappar svarar.
+  const dir = bookDirConfirmed ? liveHandle(bookId, 'dir') : null;
   if(!dir){
     renderBackupList([]);
     addBox(backupMessages, 'notice',
@@ -21885,10 +21889,6 @@ async function openBackupPage(){
 function showBackupRestoreConfirm(){
   const row = backupHighlightedRow();
   if(!row || row.kind !== 'backup') return;
-  if(isBookReadOnly()){
-    ensureBookWriteAccess().then(ok => { if(ok) showBackupRestoreConfirm(); });
-    return;
-  }
   clear(backupMessages);
   const name = bookName(bookId);
   const mainName = bookMainFileName(name);
@@ -21915,12 +21915,7 @@ async function confirmBackupRestore(){
   const mainName = bookMainFileName(name);
   const fromName = row.fileName;
 
-  let dir;
-  try{
-    dir = await ensureBookFolderAccessOnce(bookId);
-  } catch(e){
-    dir = null;
-  }
+  const dir = bookDirConfirmed ? liveHandle(bookId, 'dir') : null;
   if(!dir){
     addBox(backupMessages, 'notice',
       'Saknar skrivbehörighet till programmets mapp. Inget återställdes.');
@@ -21962,7 +21957,7 @@ async function confirmBackupRestore(){
     'Återställd från "' + fromName + '". Originalfilen är nu "' + mainName + '".');
 }
 
-async function runBookBackupRotation(){
+async function runBookBackupRotation(existingDir){
   clear(backupMessages);
   hideBackupRestoreConfirm();
   if(!isFileBook(bookId)){
@@ -21976,12 +21971,7 @@ async function runBookBackupRotation(){
   const g2 = bookBackupFileName(name, 2);
   const g3 = bookBackupFileName(name, 3);
 
-  let dir;
-  try{
-    dir = await ensureBookFolderAccessOnce(bookId);
-  } catch(e){
-    dir = null;
-  }
+  const dir = existingDir || (bookDirConfirmed ? liveHandle(bookId, 'dir') : null);
   if(!dir){
     addBox(backupMessages, 'notice',
       'Saknar skrivbehörighet till programmets mapp. Boken kopierades inte.');
@@ -22064,9 +22054,55 @@ async function onBackupRunClick(){
     closeBackupPage();
     return;
   }
-  // Listan får visas tom utan behörighet — kopieringen är första ändringen.
-  if(!await ensureBookWriteAccess()) return;
-  runBookBackupRotation();
+  if(!isFileBook(bookId)){
+    clear(backupMessages);
+    addBox(backupMessages, 'notice', 'Säkerhetskopia kräver en bokfil på disk.');
+    return;
+  }
+  // Mappväljaren måste vara första await. En koll mot sparat handtag före den
+  // hänger telefonen, och då går varken den här knappen eller Avbryt att trycka.
+  let dir = bookDirConfirmed ? liveHandle(bookId, 'dir') : null;
+  if(!dir){
+    if(typeof window.showDirectoryPicker !== 'function'){
+      clear(backupMessages);
+      addBox(backupMessages, 'notice', 'Den här webbläsaren kan inte välja bokmapp.');
+      return;
+    }
+    try{
+      const pickedNow = await window.showDirectoryPicker({
+        id: 'hemekonomi-workspace-' + STORAGE_SCOPE,
+        mode: 'readwrite',
+        startIn: 'documents'
+      });
+      const wanted = bookMainFileName(bookName(bookId));
+      const found = await resolveBookFileInDir(pickedNow, bookId, wanted);
+      if(!found || !found.handle){
+        preferBookFilePicker = true;
+        const where = pickedNow.name ? '«' + pickedNow.name + '»' : 'mappen';
+        clear(backupMessages);
+        addBox(backupMessages, 'notice',
+          'Hittade inte "' + wanted + '" i ' + where + '. Välj mappen där den filen ligger.');
+        return;
+      }
+      await idbPut(bookId, found.handle);
+      await idbPut(bookId + BOOK_DIR_SUFFIX, pickedNow);
+      rememberLiveHandle(bookId, 'file', found.handle);
+      rememberLiveHandle(bookId, 'dir', pickedNow);
+      bookDirConfirmed = true;
+      setBookDriveContact(true);
+      await rememberWorkspaceDir(pickedNow, 'books');
+      dir = pickedNow;
+    } catch(e){
+      clear(backupMessages);
+      if(e && (e.name === 'AbortError' || e.name === 'NotAllowedError')){
+        addBox(backupMessages, 'notice', 'Ingen mapp valdes.');
+      } else {
+        addBox(backupMessages, 'notice', e && e.message ? e.message : 'Kunde inte välja mapp.');
+      }
+      return;
+    }
+  }
+  await runBookBackupRotation(dir);
 }
 
 if(backupBackBtn) backupBackBtn.addEventListener('click', closeBackupPage);
