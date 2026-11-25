@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v23';
+const APP_VERSION = '2026-11-25 v24';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -12229,16 +12229,32 @@ openBookBtn.addEventListener('click', async () => {
       return;
     }
     if(fileHandleProbeBlocksUi() && hasBookLocalMirror(chosen)){
-      bookId = chosen;
-      reg.active = chosen;
-      writeRegistry(reg);
-      bookDriveContact = false;
-      bookDirConfirmed = false;
-      enterBookReadOnlyFromMirror(chosen);
-      rebuildBookLookup();
-      markBookClean();
-      updateBookFileSyncStatusUi();
-      show('start');
+      try{
+        loginDebugNotice('mobilkopiagren: start');
+        agentDebugLog('H6', 'nopEKONOMI.html:openBookBtn', 'mobile mirror branch start', {});
+        bookId = chosen;
+        reg.active = chosen;
+        writeRegistry(reg);
+        loginDebugNotice('register skrivet');
+        bookDriveContact = false;
+        bookDirConfirmed = false;
+        loginDebugNotice('läser lokal kopia');
+        enterBookReadOnlyFromMirror(chosen);
+        loginDebugNotice('lokal kopia läst');
+        rebuildBookLookup();
+        loginDebugNotice('lookup klar');
+        markBookClean();
+        updateBookFileSyncStatusUi();
+        loginDebugNotice('visar start');
+        show('start');
+      } catch(err){
+        const msg = String(err && err.message || err || '').slice(0, 180);
+        agentDebugLog('H6', 'nopEKONOMI.html:openBookBtn', 'mobile mirror branch failed', {
+          name: err && err.name,
+          message: msg
+        });
+        loginNotice('Öppna stoppade i mobilkopian: ' + msg);
+      }
       return;
     }
     loginDebugNotice('går till openBook');
