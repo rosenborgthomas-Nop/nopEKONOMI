@@ -5450,7 +5450,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v14';
+const APP_VERSION = '2026-11-25 v15';
 
 function agentLog(hypothesisId, location, message, data){
   // #region agent log
@@ -5970,6 +5970,7 @@ async function syncBookDriveContactFromHandles(){
     bookDriveContact = true;
     return true;
   }
+  if(fileHandleProbeBlocksUi()) return !!bookDriveContact;
   try{
     const file = await idbGet(bookId);
     // queryPermission kan hänga fastän getFile fungerar — samma fil som i filhanteraren.
@@ -6189,6 +6190,18 @@ function updateBookFileSyncStatusUi(){
 async function runStartDriveContactRetry(){
   const msgs = el('startMessages');
   const box = el('startFileSyncNotice');
+  // Läsläge: mappväljaren måste vara första await. En filkoll före den låser telefonen.
+  if(isBookReadOnly()){
+    const ok = await ensureBookWriteAccess();
+    updateBookFileSyncStatusUi();
+    if(!ok) return;
+    if(typeof renderStart === 'function') renderStart();
+    if(msgs){
+      clear(msgs);
+      addBox(msgs, 'report', 'Kontakt med bokfilen återställd.');
+    }
+    return;
+  }
   if(box) box.style.opacity = '0.6';
   // Användaren ber uttryckligen om nytt försök — tillåt en ny dialog.
   resetBookFolderAccessGate();
@@ -6280,6 +6293,7 @@ async function applyBookFromFilePayload(parsed){
 // Vid återkomst till fliken: återställ kontakt / ladda om om Drive-filen är nyare.
 // Ren session (ej dirty, ej pending): alltid ta nyare fil utan dialog.
 async function checkBookFileForRemoteChanges(){
+  if(fileHandleProbeBlocksUi()) return;
   if(bookFileCheckBusy) return;
   if(!bookId || !isFileBook(bookId)) return;
   if(typeof currentViewName === 'function' && currentViewName() === 'login') return;
@@ -6593,6 +6607,11 @@ let preferBookFilePicker = false;
 /** Sant bara när den här sessionen redan läst mappen. Annars får knappar inte röra det sparade handtaget — det kan hänga telefonen. */
 let bookDirConfirmed = false;
 
+/** Android: queryPermission/getFile på ett sparat handtag kan låsa hela sidan, även efter en timeout. */
+function fileHandleProbeBlocksUi(){
+  return /Android/i.test(navigator.userAgent || '');
+}
+
 function resetBookFolderAccessGate(){
   bookFolderAccessAsked = false;
 }
@@ -6755,6 +6774,9 @@ async function bookFileFromDirHandle(id, dir, knownName){
 // annars om mappen — filen plockas därifrån.
 async function getBookFileHandle(id, interactive, mode){
   mode = mode || 'readwrite';
+  if(fileHandleProbeBlocksUi() && interactive === false){
+    return bookDirConfirmed ? liveHandle(id, 'file') : null;
+  }
   const readBudget = interactive === false ? 5000 : 800;
   // Levande objekt först. Prova filen själv — queryPermission kan hänga i onödan.
   const live = liveHandle(id, 'file');
@@ -6978,6 +7000,9 @@ async function getWorkspaceDirHandle(interactive){
 
 async function getBookDirHandle(bookId, interactive, mode){
   mode = mode || 'readwrite';
+  if(fileHandleProbeBlocksUi() && !interactive){
+    return bookDirConfirmed ? liveHandle(bookId, 'dir') : null;
+  }
   const sampleName = bookMainFileName(bookName(bookId));
   // Levande objekt först — behörigheten sitter på objektet.
   const liveDir = liveHandle(bookId, 'dir');
@@ -11519,6 +11544,23 @@ async function openBook(id){
     // Filbok: inga dialoger vid öppning. Går filen att nå tyst körs boken live,
     // annars öppnas den skrivskyddat från spegeln och behörigheten frågas först
     // när något ska ändras (ensureBookWriteAccess).
+    // Telefonen får inte röra sparade handtag här. Kollen låser sidan efter att start redan visats.
+    if(fileHandleProbeBlocksUi() && hasBookLocalMirror(id)){
+      agentLog('B', 'nopEKONOMI.html:openBook', 'android mirror without file probe', {});
+      enterBookReadOnlyFromMirror(id);
+      rebuildBookLookup();
+      markBookClean();
+      updateBookFileSyncStatusUi();
+      show('start');
+      if(lastTaxonomyHealNotes.length){
+        addBox(startMessages, 'report',
+          'Register städat: ' + lastTaxonomyHealNotes.slice(0, 3).join(' '));
+        lastTaxonomyHealNotes = [];
+      }
+      clearTimeout(openStall);
+      agentLog('D', 'nopEKONOMI.html:openBook', 'openBook returned', { path: 'android-mirror' });
+      return;
+    }
     let parsed = null;
     let fileOk = false;
     const mirrorAtStart = hasBookLocalMirror(id);
@@ -28116,10 +28158,13 @@ async function initApp(){
   await openIdb();
   agentLog('A', 'nopEKONOMI.html:initApp', 'idb open', {});
   requestPersistentStorage();
-  try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
-  await clearInvalidWorkspaceDir();
-  // Vid start: synka om behörighet redan finns. Annars sker synk vid Inloggning (användargest).
-  const reconciled = await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
+  let reconciled = { scanned: false };
+  if(!fileHandleProbeBlocksUi()){
+    try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
+    await clearInvalidWorkspaceDir();
+    // Vid start: synka om behörighet redan finns. Annars sker synk vid Inloggning (användargest).
+    reconciled = await withTimeout(reconcileBooksWithWorkspace(false), 4000, { scanned: false });
+  }
   agentLog('A', 'nopEKONOMI.html:initApp', 'reconcile done', {
     scanned: !!(reconciled && reconciled.scanned),
     added: reconciled && reconciled.added,
