@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v24';
+const APP_VERSION = '2026-11-25 v25';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -6173,6 +6173,13 @@ function updateBookFileSyncStatusUi(){
   const msgs = typeof el === 'function' ? el('startMessages') : null;
   if(!msgs) return;
 
+  const existing = el('startFileSyncNotice');
+  const onStart = typeof views !== 'undefined' && views.start && !views.start.hidden;
+  const readOnly = isBookReadOnly();
+  const pendingFlag = !!(bookId && isFileBook(bookId) && hasBookFileSyncPending(bookId));
+  const localAhead = !!(pendingFlag || bookSessionDirty);
+  const pending = !!(pendingFlag && bookDriveContact);
+
   if(fileHandleProbeBlocksUi()){
     if(!onStart){
       const gone = el('startFileSyncNotice');
@@ -6194,13 +6201,6 @@ function updateBookFileSyncStatusUi(){
       : 'Telefonkopia. Bokfilen lämnas orörd så att sidan inte låser sig.';
     return;
   }
-
-  const existing = el('startFileSyncNotice');
-  const onStart = typeof views !== 'undefined' && views.start && !views.start.hidden;
-  const readOnly = isBookReadOnly();
-  const pendingFlag = !!(bookId && isFileBook(bookId) && hasBookFileSyncPending(bookId));
-  const localAhead = !!(pendingFlag || bookSessionDirty);
-  const pending = !!(pendingFlag && bookDriveContact);
 
   if(!onStart || (!readOnly && !pending && !localAhead)){
     if(existing) existing.remove();
