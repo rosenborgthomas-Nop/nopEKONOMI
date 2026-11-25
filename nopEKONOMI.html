@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v29';
+const APP_VERSION = '2026-11-25 v30';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -12348,6 +12348,18 @@ openBookBtn.addEventListener('pointerup', e => {
   e.preventDefault();
   runLoginOpenAction('pointerup');
 });
+document.addEventListener('pointerup', e => {
+  if(!fileHandleProbeBlocksUi()) return;
+  if(currentViewName() !== 'login') return;
+  if(!openBookBtn || openBookBtn.disabled) return;
+  const r = openBookBtn.getBoundingClientRect();
+  const x = e.clientX;
+  const y = e.clientY;
+  if(x < r.left || x > r.right || y < r.top || y > r.bottom) return;
+  e.preventDefault();
+  e.stopPropagation();
+  runLoginOpenAction('document-pointerup');
+}, true);
 
 views.login.addEventListener('keydown', e => {
   if(e.key !== 'Enter') return;
