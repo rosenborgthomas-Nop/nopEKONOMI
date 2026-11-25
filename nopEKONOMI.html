@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v16';
+const APP_VERSION = '2026-11-25 v17';
 
 function agentLog(hypothesisId, location, message, data){
   // #region agent log
@@ -5721,6 +5721,9 @@ function bookStorageSupported(){
 }
 
 function openIdb(){
+  // Telefonen får inte öppna databasen. Där ligger sparade mapphandtag, och
+  // bara att läsa upp dem efter en omstart låser sidan.
+  if(fileHandleProbeBlocksUi()) return Promise.resolve(null);
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(IDB_NAME, 1);
     req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
@@ -5730,6 +5733,7 @@ function openIdb(){
 }
 
 function idbGet(key){
+  if(fileHandleProbeBlocksUi()) return Promise.resolve(null);
   return openIdb().then(db => new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, 'readonly');
     const req = tx.objectStore(IDB_STORE).get(key);
@@ -5739,6 +5743,7 @@ function idbGet(key){
 }
 
 function idbPut(key, value){
+  if(fileHandleProbeBlocksUi()) return Promise.resolve();
   return openIdb().then(db => new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, 'readwrite');
     tx.objectStore(IDB_STORE).put(value, key);
@@ -5748,6 +5753,7 @@ function idbPut(key, value){
 }
 
 function idbDelete(key){
+  if(fileHandleProbeBlocksUi()) return Promise.resolve();
   return openIdb().then(db => new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, 'readwrite');
     tx.objectStore(IDB_STORE).delete(key);
@@ -28204,9 +28210,11 @@ async function initApp(){
     agentLog('A', 'nopEKONOMI.html:initApp', 'initApp still running after 8s', {});
   }, 8000);
   applyAppVersionLabels();
-  await openIdb();
+  if(!fileHandleProbeBlocksUi()){
+    await openIdb();
+    requestPersistentStorage();
+  }
   agentLog('A', 'nopEKONOMI.html:initApp', 'idb open', {});
-  requestPersistentStorage();
   let reconciled = { scanned: false };
   if(!fileHandleProbeBlocksUi()){
     try{ await recoverWorkspaceDirFromBooks(); } catch(e){ /* ignore */ }
