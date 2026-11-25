@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v19';
+const APP_VERSION = '2026-11-25 v20';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -6642,10 +6642,20 @@ let bookDirConfirmed = false;
 function fileHandleProbeBlocksUi(){
   try{
     const ua = navigator.userAgent || '';
-    if(/Android|iPhone|iPad|iPod/i.test(ua)) return true;
+    if(/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
     if(navigator.userAgentData && navigator.userAgentData.mobile) return true;
-    if(window.matchMedia && window.matchMedia('(pointer:coarse)').matches) return true;
-  } catch(e){ /* ignore */ }
+    const touch = (navigator.maxTouchPoints || 0) > 0;
+    const narrow = Math.min(window.innerWidth || 0, (screen && screen.width) || 0) <= 900;
+    let coarse = false;
+    if(window.matchMedia){
+      coarse = window.matchMedia('(pointer:coarse)').matches
+        || window.matchMedia('(hover:none)').matches;
+    }
+    if(coarse) return true;
+    if(touch && narrow) return true;
+  } catch(e){
+    return true;
+  }
   return false;
 }
 
@@ -11623,8 +11633,16 @@ async function openBook(id){
     // Filbok: inga dialoger vid öppning. Går filen att nå tyst körs boken live,
     // annars öppnas den skrivskyddat från spegeln och behörigheten frågas först
     // när något ska ändras (ensureBookWriteAccess).
-    // Telefonen får inte röra sparade handtag här. Kollen låser sidan efter att start redan visats.
-    if(fileHandleProbeBlocksUi() && hasBookLocalMirror(id)){
+    // Telefonen får inte röra sparade handtag här. Kollen låser sidan, och då
+    // blir inloggningen kvar eftersom den redan är synlig.
+    if(fileHandleProbeBlocksUi()){
+      if(!hasBookLocalMirror(id)){
+        bookId = '';
+        show('login');
+        loginNotice('Ingen kopia av boken finns i telefonen.');
+        clearTimeout(openStall);
+        return;
+      }
       agentLog('B', 'nopEKONOMI.html:openBook', 'android mirror without file probe', {});
       enterBookReadOnlyFromMirror(id);
       rebuildBookLookup();
@@ -12099,6 +12117,19 @@ openBookBtn.addEventListener('click', async () => {
     if(!reg.order.includes(chosen)){
       await renderLogin();
       loginNotice('Den boken finns inte längre. Välj en annan.');
+      return;
+    }
+    if(fileHandleProbeBlocksUi() && hasBookLocalMirror(chosen)){
+      bookId = chosen;
+      reg.active = chosen;
+      writeRegistry(reg);
+      bookDriveContact = false;
+      bookDirConfirmed = false;
+      enterBookReadOnlyFromMirror(chosen);
+      rebuildBookLookup();
+      markBookClean();
+      updateBookFileSyncStatusUi();
+      show('start');
       return;
     }
     await openBook(chosen);
