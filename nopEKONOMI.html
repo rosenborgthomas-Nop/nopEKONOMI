@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v30';
+const APP_VERSION = '2026-11-25 v31';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -12198,6 +12198,19 @@ bookSelect.addEventListener('change', () => {
 });
 
 let openBookTapAt = 0;
+function eventPointInsideElement(e, element){
+  if(!element || !e) return false;
+  const r = element.getBoundingClientRect();
+  let x = e.clientX;
+  let y = e.clientY;
+  if((x == null || y == null) && e.changedTouches && e.changedTouches.length){
+    x = e.changedTouches[0].clientX;
+    y = e.changedTouches[0].clientY;
+  }
+  if(x == null || y == null) return false;
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
 async function runLoginOpenAction(source){
   const now = Date.now();
   if(now - openBookTapAt < 700) return;
@@ -12352,14 +12365,20 @@ document.addEventListener('pointerup', e => {
   if(!fileHandleProbeBlocksUi()) return;
   if(currentViewName() !== 'login') return;
   if(!openBookBtn || openBookBtn.disabled) return;
-  const r = openBookBtn.getBoundingClientRect();
-  const x = e.clientX;
-  const y = e.clientY;
-  if(x < r.left || x > r.right || y < r.top || y > r.bottom) return;
+  if(!eventPointInsideElement(e, openBookBtn)) return;
   e.preventDefault();
   e.stopPropagation();
   runLoginOpenAction('document-pointerup');
 }, true);
+document.addEventListener('touchend', e => {
+  if(!fileHandleProbeBlocksUi()) return;
+  if(currentViewName() !== 'login') return;
+  if(!openBookBtn || openBookBtn.disabled) return;
+  if(!eventPointInsideElement(e, openBookBtn)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  runLoginOpenAction('document-touchend');
+}, { capture: true, passive: false });
 
 views.login.addEventListener('keydown', e => {
   if(e.key !== 'Enter') return;
@@ -12655,6 +12674,14 @@ startBackBtnEl.addEventListener('pointerup', e => {
   e.preventDefault();
   runStartBackNav('pointerup');
 });
+document.addEventListener('touchend', e => {
+  if(!fileHandleProbeBlocksUi()) return;
+  if(currentViewName() !== 'start') return;
+  if(!eventPointInsideElement(e, startBackBtnEl)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  runStartBackNav('document-touchend');
+}, { capture: true, passive: false });
 
 
 /* --- 7a0. Rapport ---------------------------------------------------- */
