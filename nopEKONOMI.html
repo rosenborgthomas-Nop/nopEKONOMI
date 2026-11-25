@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v20';
+const APP_VERSION = '2026-11-25 v21';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -5469,8 +5469,37 @@ function agentLog(hypothesisId, location, message, data){
   fetch('http://127.0.0.1:7378/ingest/d3775674-b797-47ef-a42a-ab3621e89ce9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5ad466'},body:JSON.stringify({sessionId:'5ad466',runId:'post-fix',hypothesisId:hypothesisId,location:location,message:message,data:data||{},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
 }
+
+const AGENT_DEBUG_KEY = 'nop_agent_debug_ee72b9';
+function agentDebugLog(hypothesisId, location, message, data){
+  const payload = {
+    sessionId: 'ee72b9',
+    runId: 'mobile-drive-v21',
+    hypothesisId: hypothesisId,
+    location: location,
+    message: message,
+    data: data || {},
+    timestamp: Date.now()
+  };
+  try{
+    const list = JSON.parse(localStorage.getItem(AGENT_DEBUG_KEY) || '[]');
+    list.push(payload);
+    localStorage.setItem(AGENT_DEBUG_KEY, JSON.stringify(list.slice(-80)));
+  } catch(e){ /* ignore */ }
+  // #region agent log
+  fetch('http://127.0.0.1:7674/ingest/41c900a8-aaca-4462-a722-1ca4ba5a8088',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee72b9'},body:JSON.stringify(payload)}).catch(()=>{});
+  // #endregion
+}
+agentDebugLog('H3', 'nopEKONOMI.html:script', 'script started', {
+  version: APP_VERSION,
+  mobileProbeBlocked: typeof fileHandleProbeBlocksUi === 'function' ? fileHandleProbeBlocksUi() : null
+});
 agentLog('E', 'nopEKONOMI.html:script', 'script started', { version: APP_VERSION });
 window.addEventListener('error', ev => {
+  agentDebugLog('H3', 'nopEKONOMI.html:error', 'window error', {
+    message: String(ev && ev.message || '').slice(0, 180),
+    line: ev && ev.lineno
+  });
   agentLog('D', 'nopEKONOMI.html:error', 'window error', {
     message: String(ev && ev.message || '').slice(0, 180),
     line: ev && ev.lineno
@@ -5478,6 +5507,10 @@ window.addEventListener('error', ev => {
 });
 window.addEventListener('unhandledrejection', ev => {
   const reason = ev && ev.reason;
+  agentDebugLog('H3', 'nopEKONOMI.html:rejection', 'unhandled rejection', {
+    name: reason && reason.name,
+    message: String(reason && reason.message || reason || '').slice(0, 180)
+  });
   agentLog('A', 'nopEKONOMI.html:rejection', 'unhandled rejection', {
     name: reason && reason.name,
     message: String(reason && reason.message || reason || '').slice(0, 180)
@@ -5724,7 +5757,10 @@ function bookStorageSupported(){
 function openIdb(){
   // Telefonen får inte öppna databasen. Där ligger sparade mapphandtag, och
   // bara att läsa upp dem efter en omstart låser sidan.
-  if(fileHandleProbeBlocksUi()) return Promise.resolve(null);
+  if(fileHandleProbeBlocksUi()){
+    agentDebugLog('H1', 'nopEKONOMI.html:openIdb', 'idb skipped on mobile probe block', {});
+    return Promise.resolve(null);
+  }
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(IDB_NAME, 1);
     req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
@@ -5951,6 +5987,11 @@ function notifyBookReadOnlyBlocked(){
  * @returns {{ ok: true, parsed: object } | { ok: false, message?: string }}
  */
 async function tryEstablishBookDriveContact(interactive){
+  agentDebugLog('H2', 'nopEKONOMI.html:tryEstablishBookDriveContact', 'contact attempt', {
+    interactive: !!interactive,
+    blocked: fileHandleProbeBlocksUi(),
+    fileBook: !!(bookId && isFileBook(bookId))
+  });
   if(fileHandleProbeBlocksUi()){
     return { ok: false, message: 'Telefonen läser inte bokfilen.' };
   }
@@ -6047,6 +6088,12 @@ async function redrawViewAfterBookSwap(){
  * @returns {Promise<boolean>} true när ändringen kan fortsätta.
  */
 async function ensureBookWriteAccess(opts){
+  agentDebugLog('H4', 'nopEKONOMI.html:ensureBookWriteAccess', 'write access requested', {
+    blocked: fileHandleProbeBlocksUi(),
+    readOnly: isBookReadOnly(),
+    dirty: !!bookSessionDirty,
+    pending: !!(bookId && hasBookFileSyncPending(bookId))
+  });
   if(fileHandleProbeBlocksUi()) return true;
   if(!isBookReadOnly()) return true;
 
@@ -6054,6 +6101,12 @@ async function ensureBookWriteAccess(opts){
   resetBookFolderAccessGate();
   // Mappväljaren måste vara första await. En filläsning efter den låser telefonen.
   const picked = await pickBookFolderFromGesture();
+  agentDebugLog('H4', 'nopEKONOMI.html:ensureBookWriteAccess', 'pick result', {
+    ok: !!(picked && picked.ok),
+    hasDir: !!(picked && picked.dir),
+    hasFile: !!(picked && picked.file),
+    message: String(picked && picked.message || '').slice(0, 120)
+  });
   if(!picked.ok){
     denyBookWriteAccess(picked.message);
     return false;
@@ -6427,6 +6480,11 @@ async function writeBookPreferGranted(id, bookData, interactive){
     return true;
   }
   if(fileHandleProbeBlocksUi()){
+    agentDebugLog('H4', 'nopEKONOMI.html:writeBookPreferGranted', 'mobile local write path', {
+      interactive: !!interactive,
+      sameBook: id === bookId,
+      readOnly: isBookReadOnly()
+    });
     writeBook(id, bookData);
     markBookFileSyncPending(id);
     if(id === bookId){
@@ -11588,6 +11646,12 @@ async function show(name, opts){
 }
 
 async function openBook(id){
+  agentDebugLog('H5', 'nopEKONOMI.html:openBook', 'openBook entered', {
+    fileBook: isFileBook(id),
+    mirror: hasBookLocalMirror(id),
+    pending: hasBookFileSyncPending(id),
+    blocked: fileHandleProbeBlocksUi()
+  });
   agentLog('B', 'nopEKONOMI.html:openBook', 'openBook entered', {
     fileBook: isFileBook(id),
     mirror: hasBookLocalMirror(id),
@@ -11643,6 +11707,10 @@ async function openBook(id){
         clearTimeout(openStall);
         return;
       }
+      agentDebugLog('H1', 'nopEKONOMI.html:openBook', 'android mirror path', {
+        mirror: hasBookLocalMirror(id),
+        pending: hasBookFileSyncPending(id)
+      });
       agentLog('B', 'nopEKONOMI.html:openBook', 'android mirror without file probe', {});
       enterBookReadOnlyFromMirror(id);
       rebuildBookLookup();
@@ -28320,6 +28388,14 @@ async function initApp(){
   // om filen/spegeln saknas, så ingen extra felväg behövs här.
   reg = readRegistry();
   const resumeId = (reg.active && reg.order.includes(reg.active)) ? reg.active : '';
+  agentDebugLog('H5', 'nopEKONOMI.html:initApp', 'resume decision', {
+    hasResume: !!resumeId,
+    order: (reg.order || []).length,
+    fileBook: resumeId ? isFileBook(resumeId) : false,
+    mirror: resumeId ? hasBookLocalMirror(resumeId) : false,
+    pending: resumeId ? hasBookFileSyncPending(resumeId) : false,
+    blocked: fileHandleProbeBlocksUi()
+  });
   agentLog('B', 'nopEKONOMI.html:initApp', resumeId ? 'resume book' : 'no resume, show login', {
     hasResume: !!resumeId,
     order: (reg.order || []).length,
