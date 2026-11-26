@@ -5477,7 +5477,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v39';
+const APP_VERSION = '2026-11-25 v40';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -28495,7 +28495,11 @@ function openAppSelectSheet(selectEl){
     btn.setAttribute('aria-selected', opt.value === selectEl.value ? 'true' : 'false');
     btn.textContent = label || opt.value;
     btn.dataset.value = opt.value;
-    btn.addEventListener('click', () => {
+    let optionTapAt = 0;
+    const runOption = source => {
+      const now = Date.now();
+      if(now - optionTapAt < 700) return;
+      optionTapAt = now;
       const sel = appSelectTarget;
       const val = btn.dataset.value;
       const labelForLog = btn.textContent || val || '';
@@ -28514,13 +28518,23 @@ function openAppSelectSheet(selectEl){
         agentDebugLog('H8', 'nopEKONOMI.html:appSelectSheet', 'mobile menu option ran', {
           id: sel.id || '',
           value: val,
-          ms: ms
+          ms: ms,
+          source: source
         });
         if(fileHandleProbeBlocksUi()){
-          showAppToast('Debug: menyval "' + labelForLog.slice(0, 24) + '" ' + ms + ' ms', 'report');
+          showAppToast('Debug: menyval "' + labelForLog.slice(0, 24) + '" ' + ms + ' ms ' + source, 'report');
         }
       });
+    };
+    btn.addEventListener('click', () => {
+      runOption('click');
     });
+    btn.addEventListener('touchend', e => {
+      if(!fileHandleProbeBlocksUi()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      runOption('touchend');
+    }, { passive: false });
     list.appendChild(btn);
   }
 
