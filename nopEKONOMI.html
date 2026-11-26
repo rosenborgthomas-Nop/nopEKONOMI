@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v35';
+const APP_VERSION = '2026-11-25 v36';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -28454,15 +28454,28 @@ function openAppSelectSheet(selectEl){
     btn.addEventListener('click', () => {
       const sel = appSelectTarget;
       const val = btn.dataset.value;
+      const labelForLog = btn.textContent || val || '';
       closeAppSelectSheet();
       if(!sel) return;
-      if(sel.value !== val){
-        sel.value = val;
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      } else {
-        // Samma val — vissa menyer kör ändå (t.ex. startmenyn via change).
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      }
+      requestAnimationFrame(() => {
+        const t0 = Date.now();
+        if(sel.value !== val){
+          sel.value = val;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+          // Samma val — vissa menyer kör ändå (t.ex. startmenyn via change).
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const ms = Date.now() - t0;
+        agentDebugLog('H8', 'nopEKONOMI.html:appSelectSheet', 'mobile menu option ran', {
+          id: sel.id || '',
+          value: val,
+          ms: ms
+        });
+        if(fileHandleProbeBlocksUi()){
+          showAppToast('Debug: menyval "' + labelForLog.slice(0, 24) + '" ' + ms + ' ms', 'report');
+        }
+      });
     });
     list.appendChild(btn);
   }
