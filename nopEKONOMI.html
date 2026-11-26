@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v33';
+const APP_VERSION = '2026-11-25 v34';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -5486,6 +5486,7 @@ function agentDebugLog(hypothesisId, location, message, data){
     list.push(payload);
     localStorage.setItem(AGENT_DEBUG_KEY, JSON.stringify(list.slice(-80)));
   } catch(e){ /* ignore */ }
+  if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
   // #region agent log
   fetch('http://127.0.0.1:7674/ingest/41c900a8-aaca-4462-a722-1ca4ba5a8088',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee72b9'},body:JSON.stringify(payload)}).catch(()=>{});
   // #endregion
