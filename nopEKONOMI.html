@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v36';
+const APP_VERSION = '2026-11-25 v37';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -19667,7 +19667,27 @@ function runReport(){
   showReportPlaceholder('RAPPORT', 'Okänd rapporttyp.');
 }
 
-reportBackBtn.addEventListener('click', () => show('start'));
+let reportBackTapAt = 0;
+function runReportBack(source){
+  const now = Date.now();
+  if(now - reportBackTapAt < 700) return;
+  reportBackTapAt = now;
+  agentDebugLog('H8', 'nopEKONOMI.html:reportBackBtn', 'report back requested', {
+    source: source,
+    view: currentViewName()
+  });
+  if(fileHandleProbeBlocksUi()) showAppToast('Debug: Rapport-back ' + source, 'report');
+  show('start');
+}
+reportBackBtn.addEventListener('click', () => runReportBack('click'));
+document.addEventListener('touchend', e => {
+  if(!fileHandleProbeBlocksUi()) return;
+  if(currentViewName() !== 'report') return;
+  if(!eventPointInsideElement(e, reportBackBtn)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  runReportBack('document-touchend');
+}, { capture: true, passive: false });
 if(reportCopyBtn){
   reportCopyBtn.addEventListener('click', () => {
     const ctx = getReportExportContext();
