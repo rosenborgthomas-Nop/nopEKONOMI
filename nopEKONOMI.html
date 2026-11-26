@@ -5477,9 +5477,11 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v40';
+const APP_VERSION = '2026-11-25 v41';
+const AGENT_DEBUG_ENABLED = false;
 
 function agentLog(hypothesisId, location, message, data){
+  if(!AGENT_DEBUG_ENABLED) return;
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
   // #region agent log
   fetch('http://127.0.0.1:7378/ingest/d3775674-b797-47ef-a42a-ab3621e89ce9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5ad466'},body:JSON.stringify({sessionId:'5ad466',runId:'post-fix',hypothesisId:hypothesisId,location:location,message:message,data:data||{},timestamp:Date.now()})}).catch(()=>{});
@@ -5488,6 +5490,7 @@ function agentLog(hypothesisId, location, message, data){
 
 const AGENT_DEBUG_KEY = 'nop_agent_debug_ee72b9';
 function agentDebugLog(hypothesisId, location, message, data){
+  if(!AGENT_DEBUG_ENABLED) return;
   const payload = {
     sessionId: 'ee72b9',
     runId: 'mobile-drive-v21',
@@ -12172,6 +12175,7 @@ function loginNotice(msg, kind){
 }
 
 function loginDebugNotice(msg){
+  if(!AGENT_DEBUG_ENABLED) return;
   if(!fileHandleProbeBlocksUi() || !loginMessages || !msg) return;
   addBox(loginMessages, 'report', 'Debug: ' + msg);
 }
@@ -12661,7 +12665,7 @@ function leaveBook(){
   agentDebugLog('H7', 'nopEKONOMI.html:leaveBook', 'leaveBook entered', {
     view: currentViewName()
   });
-  showAppToast('Debug: leaveBook start', 'report');
+  if(AGENT_DEBUG_ENABLED) showAppToast('Debug: leaveBook start', 'report');
   resetImportState();
   bookId = '';
   book = { order: [], accounts: {} };
@@ -12669,7 +12673,7 @@ function leaveBook(){
   markBookClean();
   creating = false;
   show('login');
-  showAppToast('Debug: show(login) anropad', 'report');
+  if(AGENT_DEBUG_ENABLED) showAppToast('Debug: show(login) anropad', 'report');
 }
 
 let startBackTapAt = 0;
@@ -12681,7 +12685,7 @@ function runStartBackNav(source){
     view: currentViewName(),
     source: source
   });
-  showAppToast('Debug: Start-back ' + source, 'report');
+  if(AGENT_DEBUG_ENABLED) showAppToast('Debug: Start-back ' + source, 'report');
   leaveBook();
 }
 
@@ -19692,7 +19696,7 @@ function runReportBack(source){
     source: source,
     view: currentViewName()
   });
-  if(fileHandleProbeBlocksUi()) showAppToast('Debug: Rapport-back ' + source, 'report');
+  if(AGENT_DEBUG_ENABLED && fileHandleProbeBlocksUi()) showAppToast('Debug: Rapport-back ' + source, 'report');
   show('start');
 }
 reportBackBtn.addEventListener('click', () => runReportBack('click'));
@@ -28521,7 +28525,7 @@ function openAppSelectSheet(selectEl){
           ms: ms,
           source: source
         });
-        if(fileHandleProbeBlocksUi()){
+        if(AGENT_DEBUG_ENABLED && fileHandleProbeBlocksUi()){
           showAppToast('Debug: menyval "' + labelForLog.slice(0, 24) + '" ' + ms + ' ms ' + source, 'report');
         }
       });
