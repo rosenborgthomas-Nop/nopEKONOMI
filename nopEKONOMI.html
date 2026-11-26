@@ -2719,6 +2719,22 @@ body.app-select-open{
   color:var(--gold);
 }
 @media (pointer:coarse){
+  button,
+  .btn,
+  .btn-ok,
+  .btn-cancel,
+  .btn-danger,
+  .btn-quiet,
+  .nav-link,
+  .menu-select,
+  .app-select-sheet-opt,
+  .app-select-sheet-cancel{
+    touch-action:manipulation;
+    -webkit-tap-highlight-color:transparent;
+    -webkit-touch-callout:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
   .nav-link.nav-back{
     display:inline-flex;
     align-items:center;
@@ -5461,7 +5477,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v37';
+const APP_VERSION = '2026-11-25 v38';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -28407,6 +28423,14 @@ document.addEventListener('keydown', e => {
   if(e.key !== 'Escape') return;
   if(triggerEscapeBack()) e.preventDefault();
 });
+
+document.addEventListener('contextmenu', e => {
+  if(!fileHandleProbeBlocksUi()) return;
+  const t = e.target;
+  if(t && t.closest && t.closest('button, .nav-link, .menu-select, .app-select-sheet')){
+    e.preventDefault();
+  }
+}, { capture: true });
 
 /* --- Mobilmeny: egen sheet istället för systemets select-ruta -------- */
 
