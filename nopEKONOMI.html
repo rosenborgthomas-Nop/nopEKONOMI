@@ -5461,7 +5461,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v32';
+const APP_VERSION = '2026-11-25 v33';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -25770,6 +25770,13 @@ async function describeActiveBookFolder(){
     };
   }
   const fileName = bookMainFileName(bookName(bookId));
+  if(fileHandleProbeBlocksUi()){
+    return {
+      folderLine: 'Telefonläge: lokal kopia används.\nBokfil: ' + fileName,
+      contactLine: 'Kontakt: läsläge (ingen återanslutning på mobil just nu)',
+      canReconnect: false
+    };
+  }
   let folderName = '';
   let dir = null;
   try{ dir = await idbGet(bookId + BOOK_DIR_SUFFIX); } catch(e){ /* ignore */ }
@@ -25837,6 +25844,10 @@ async function renderSettingsFolderInfo(){
 
 async function reconnectBookFolderInteractive(){
   const statusEl = el('settingsFolderStatus');
+  if(fileHandleProbeBlocksUi()){
+    if(statusEl) statusEl.textContent = 'Telefonen är i stabilt läsläge. Återanslutning är avstängd just nu.';
+    return;
+  }
   if(!bookId || !isFileBook(bookId)){
     if(statusEl) statusEl.textContent = 'Ingen filbok att återansluta.';
     return;
