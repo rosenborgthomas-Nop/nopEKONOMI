@@ -37,9 +37,16 @@
 - Detta skyddar moderfilen och datorflödet, men betyder att mobilen för tillfället inte är en full redigeringsenhet.
 
 ### Kända kvarstående problem
-- `Ny transaktion` går inte på mobilen. Det är förväntat i v32:s stabila läsläge, men UI/meddelande kan behöva göras tydligare.
-- Man kan ta sig till `Rapporter`, men kommer inte tillbaka därifrån enligt senaste observation. Nästa felsökning bör instrumentera rapportens `← Start`/backflöde på samma sätt som Start/Inloggning.
-- Debugrader/toasts ligger fortfarande kvar i koden och ska tas bort först när mobilflödet är verifierat stabilt.
+- `Ny transaktion` går inte på mobilen. Det är förväntat i stabilt läsläge, men UI/meddelande kan behöva göras tydligare.
+- Filhantering/skrivning från mobil är pausad. Återinförs senare stegvis om användaren vill.
+
+### 2026-11-26 senare: mobilmeny-rotorsak hittad
+- Användarens avgörande observation: **blixttryck fungerar, långsamma “pensionärstryck” ger sirap**.
+- Mobilmenyn öppnade tidigare på `touchstart`. Vid långsammare tryck hann sheeten öppna medan fingret fortfarande var nere, vilket kunde påverka alternativet i samma tryckkedja.
+- v39 ändrade öppning av mobilmenyn till `touchend`.
+- v40 ändrade även meny-alternativ till `touchend`.
+- Runtime-bevis efter v40: Rapport-val körde på ca 16 ms via `touchend`, och användaren hittade inga fel längre.
+- v41 stängde av synlig debug-UI/loggning efter verifiering.
 
 ### Trolig orsak / varför det hände plötsligt
 - Sannolikt en kombination av:
@@ -49,8 +56,7 @@
 - Datorn fungerar eftersom desktop-Chrome hanterar File System Access och sparade handtag mer stabilt än Android.
 
 ### Rekommenderad fortsättning
-- Kort sikt: behåll mobilen som läsläge tills rapport-back och knappflöden är stabila.
-- Därefter: ta bort debugkod och publicera ren stabil version.
+- Kort sikt: behåll mobilen som läsläge medan v41 används i vardagen.
 - Senare separat plan: säker mobil skriv/synk till moderfilen. Det ska inte blandas in i akut stabilisering.
 
 ## 2026-09-22: Trendlinjer — godkänt läge (t.o.m. v39)
