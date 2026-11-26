@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nopEKONOMI-2026-11-25-v34';
+const CACHE_NAME = 'nopEKONOMI-2026-11-25-v35';
 const ASSETS = [
   './',
   './nopEKONOMI.html',
@@ -29,12 +29,13 @@ self.addEventListener('fetch', e => {
   const isHtml = req.mode === 'navigate' || accept.includes('text/html');
   if(isHtml){
     e.respondWith(
-      fetch(new Request(req, { cache: 'no-store' })).then(res => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(req, copy)).catch(() => {});
-        return res;
-      }).catch(() => {
-        return caches.match(req);
+      caches.match(req).then(cached => {
+        const fresh = fetch(new Request(req, { cache: 'no-store' })).then(res => {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(req, copy)).catch(() => {});
+          return res;
+        }).catch(() => cached);
+        return cached || fresh;
       })
     );
     return;
