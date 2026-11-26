@@ -5477,7 +5477,7 @@ tbody tr.row-future td{ font-style:italic; }
 (function(){
 'use strict';
 
-const APP_VERSION = '2026-11-25 v38';
+const APP_VERSION = '2026-11-25 v39';
 
 function agentLog(hypothesisId, location, message, data){
   if(typeof fileHandleProbeBlocksUi === 'function' && fileHandleProbeBlocksUi()) return;
@@ -28543,21 +28543,49 @@ function bindCustomMenuSelects(){
   if(backdrop) backdrop.addEventListener('click', () => closeAppSelectSheet());
   if(cancel) cancel.addEventListener('click', () => closeAppSelectSheet());
 
-  const activate = e => {
-    if(!preferCustomMenuSelect()) return;
+  const selectFromEvent = e => {
     const t = e.target;
-    if(!t || !t.closest) return;
+    if(!t || !t.closest) return null;
     const sel = t.closest('select.menu-select, select#bookSelect');
-    if(!sel || sel.disabled) return;
+    if(!sel || sel.disabled) return null;
     // Tillåt systemmenyn om custom sheet saknas.
-    if(!sheet) return;
+    if(!sheet) return null;
+    return sel;
+  };
+
+  let touchSelect = null;
+  let touchSelectAt = 0;
+
+  document.addEventListener('touchstart', e => {
+    if(!preferCustomMenuSelect()) return;
+    const sel = selectFromEvent(e);
+    if(!sel) return;
+    e.preventDefault();
+    e.stopPropagation();
+    touchSelect = sel;
+    touchSelectAt = Date.now();
+  }, { capture: true, passive: false });
+
+  document.addEventListener('touchend', e => {
+    if(!preferCustomMenuSelect()) return;
+    if(!touchSelect) return;
+    const sel = touchSelect;
+    touchSelect = null;
+    e.preventDefault();
+    e.stopPropagation();
+    if(Date.now() - touchSelectAt > 1500) return;
+    openAppSelectSheet(sel);
+  }, { capture: true, passive: false });
+
+  document.addEventListener('mousedown', e => {
+    if(!preferCustomMenuSelect()) return;
+    if(Date.now() - touchSelectAt < 700) return;
+    const sel = selectFromEvent(e);
+    if(!sel) return;
     e.preventDefault();
     e.stopPropagation();
     openAppSelectSheet(sel);
-  };
-
-  document.addEventListener('mousedown', activate, true);
-  document.addEventListener('touchstart', activate, { capture: true, passive: false });
+  }, true);
   document.addEventListener('keydown', e => {
     if(!preferCustomMenuSelect()) return;
     const t = e.target;
